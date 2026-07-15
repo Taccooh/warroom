@@ -1,14 +1,14 @@
-"""Zellmittelpunkte auf eine Straße ziehen.
+"""Snap cell centres onto a road.
 
-Der geometrische Mittelpunkt einer Zelle liegt gern im Wald, auf dem Acker oder
-im Fluss — Google Maps macht daraus unfahrbare Routen. Wir suchen deshalb per
-Overpass (OpenStreetMap) die nächstgelegene befahrbare Straße INNERHALB der Zelle.
+The geometric centre of a cell tends to sit in a forest, on farmland or in a
+river — Google Maps turns that into undrivable routes. So we use Overpass
+(OpenStreetMap) to find the nearest drivable road INSIDE the cell.
 
-Zwei Dinge sind wichtig:
-  * Der Punkt muss in der Zelle bleiben — sonst bricht die Auto-Weiterschaltung
-    der In-App-Führung (die erkennt das Ziel am Zell-Schlüssel).
-  * Das Ergebnis ist für eine Zelle für immer gleich → global gecacht. Jede Zelle
-    wird genau einmal nachgeschlagen, danach nie wieder.
+Two things matter:
+  * The point must stay inside the cell — otherwise the auto-advance of the
+    in-app guidance breaks (it recognises the target by its cell key).
+  * The result for a cell is the same forever → cached globally. Each cell
+    is looked up exactly once, then never again.
 """
 import json
 import logging
@@ -22,18 +22,18 @@ from . import config, db, grid
 
 log = logging.getLogger("warroom.roads")
 
-# Öffentliche Overpass-Instanzen. Die Hauptinstanz wirft unter Last gern 504 —
-# dann einfach die nächste fragen. Schlägt alles fehl, bleibt es beim Mittelpunkt
-# und wird NICHT gecacht (beim nächsten Anlauf neu versucht).
+# Public Overpass instances. The main instance likes to throw 504 under load —
+# then simply ask the next one. If everything fails, we stick with the centre point
+# and do NOT cache it (retried on the next attempt).
 OVERPASS_MIRRORS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
 )
-BATCH = 8           # Zellen pro Anfrage
+BATCH = 8           # cells per request
 TIMEOUT = 30
 
-# Nur befahrbares: keine Fuß-/Radwege, Treppen, Trampelpfade.
+# Drivable only: no foot/cycle paths, stairs, dirt trails.
 DRIVABLE = ("motorway|trunk|primary|secondary|tertiary|unclassified|residential"
             "|living_street|service|motorway_link|trunk_link|primary_link"
             "|secondary_link|tertiary_link|road")
@@ -45,7 +45,7 @@ def _grid(conn) -> tuple[float, float]:
 
 
 def _ensure_grid(conn, glat: float, glng: float) -> None:
-    """Ändert sich das Raster, sind alle gecachten Punkte wertlos."""
+    """If the grid changes, all cached points are worthless."""
     tag = f"{glat}_{glng}"
     if db.kv_get(conn, "roads_grid") != tag:
         conn.execute("DELETE FROM cell_roads")
@@ -56,8 +56,8 @@ def _query(bboxes: list[tuple[float, float, float, float]]) -> list[dict]:
     parts = "".join(
         f'way["highway"~"^({DRIVABLE})$"]({s:.6f},{w:.6f},{n:.6f},{e:.6f});'
         for (s, w, n, e) in bboxes)
-    # `skel` = ohne Tags: wir brauchen nur die Stützpunkte. In einer Stadt sind das
-    # schnell tausende Wege — mit Tags wäre die Antwort ein Vielfaches groß.
+    # `skel` = without tags: we only need the vertex points. In a city that quickly
+    # means thousands of ways — with tags the response would be many times larger.
     ql = f"[out:json][timeout:{TIMEOUT}];({parts});out skel geom;"
     data = urllib.parse.urlencode({"data": ql}).encode()
     last = None
@@ -68,14 +68,14 @@ def _query(bboxes: list[tuple[float, float, float, float]]) -> list[dict]:
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT + 10) as r:
                 return json.loads(r.read().decode("utf-8")).get("elements", [])
-        except Exception as ex:   # 504/429/Timeout/DNS — nächste Instanz probieren
+        except Exception as ex:   # 504/429/timeout/DNS — try the next instance
             last = ex
             log.info("Overpass %s: %s — nächste Instanz", urllib.parse.urlparse(url).netloc, ex)
     raise OSError(f"alle Overpass-Instanzen fehlgeschlagen: {last}")
 
 
 def _nearest_in_cell(ways: list[dict], s, w, n, e, clat, clng):
-    """Nächster Straßen-Stützpunkt zum Zellmittelpunkt — aber nur Punkte IN der Zelle."""
+    """Nearest road vertex to the cell centre — but only points INSIDE the cell."""
     best = None
     best_d = float("inf")
     coslat = math.cos(math.radians(clat))
@@ -96,10 +96,10 @@ def _nearest_in_cell(ways: list[dict], s, w, n, e, clat, clng):
 
 
 def snap_cells(conn, cells: list[tuple[int, int]]) -> dict[str, list | None]:
-    """cell_key → [lat, lng] auf der Straße, oder None wenn dort nachweislich keine ist.
+    """cell_key → [lat, lng] on the road, or None if there verifiably is none there.
 
-    Zellen, deren Abfrage fehlschlug, FEHLEN im Ergebnis — der Aufrufer muss sie
-    später erneut fragen. Ein Netzaussetzer ist kein Befund.
+    Cells whose query failed are MISSING from the result — the caller must ask
+    for them again later. A network outage is not a finding.
     """
     glat, glng = _grid(conn)
     _ensure_grid(conn, glat, glng)
@@ -129,10 +129,10 @@ def snap_cells(conn, cells: list[tuple[int, int]]) -> dict[str, list | None]:
             log.info("Overpass: %d Zellen, %d Wege, %.1f s",
                      len(chunk), len(ways), time.monotonic() - t0)
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as ex:
-            # WICHTIG: Fehlgeschlagene Abfrage ist KEIN Befund. Diese Zellen tauchen
-            # gar nicht erst in der Antwort auf (nicht als null!) — sonst würde ein
-            # kurzer Overpass-Aussetzer dauerhaft als "hier gibt es keine Straße"
-            # festgeschrieben. Nicht cachen, der Client fragt später erneut.
+            # IMPORTANT: a failed query is NOT a finding. These cells do not appear
+            # in the response at all (not even as null!) — otherwise a brief Overpass
+            # outage would be permanently written down as "there is no road here".
+            # Do not cache; the client will ask again later.
             log.warning("Overpass nicht erreichbar (%s) — %d Zellen bleiben offen",
                         ex, len(chunk))
             continue

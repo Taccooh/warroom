@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-# Daten (SQLite-DB, master.key, vapid.pem) kommen als Volume-Mount rein, nicht ins Image.
+# Data (SQLite DB, master.key, vapid.pem) comes in as a volume mount, not into the image.
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
      "--proxy-headers", "--forwarded-allow-ips", "*"]

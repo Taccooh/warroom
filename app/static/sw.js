@@ -1,6 +1,6 @@
-// Minimaler Service Worker — macht die App installierbar. Netz-zuerst, App-Shell
-// nur als Offline-Fallback. Bewusst schlank; Daten kommen live vom Server.
-// Bei Asset-Änderungen SHELL-Version bumpen → alter Cache wird beim activate gelöscht.
+// Minimal service worker — makes the app installable. Network-first, app shell
+// only as an offline fallback. Deliberately lean; data comes live from the server.
+// On asset changes bump the SHELL version → the old cache is deleted on activate.
 const SHELL = "warroom-v5";
 const ASSETS = ["/", "/static/style.css", "/static/fonts/germania-one.woff2",
   "/static/vendor/leaflet/leaflet.css", "/static/vendor/leaflet/leaflet.js"];
@@ -14,12 +14,12 @@ self.addEventListener("activate", (e) => {
 });
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.pathname.startsWith("/api/")) return; // Live-Daten nie cachen
-  // Netz zuerst; nur wenn offline → Cache (Query ?v= beim Match ignorieren).
+  if (e.request.method !== "GET" || url.pathname.startsWith("/api/")) return; // never cache live data
+  // Network first; only when offline → cache (ignore the ?v= query when matching).
   e.respondWith(fetch(e.request).catch(() => caches.match(e.request, {ignoreSearch: true})));
 });
 
-// Der Rabe bringt Kunde: gebündelte Wächter-Meldung vom Poller.
+// The raven brings tidings: bundled watcher report from the poller.
 self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data.json(); } catch (err) {}

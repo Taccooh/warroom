@@ -1,8 +1,8 @@
 /* ============================================================
-   WARROOM — Nordisches Kriegs-Lagezentrum / Raider's Battle-Map
-   Eisen & Nachtstahl, Clan-Gold, Blutrot, Frost. Kantige Platten
-   statt runder Cards, HUD-Klammern um die Karte.
-   Hooks (IDs/Klassen/data-*) unverändert — nur Optik.
+   WARROOM — Nordic war operations room / raider's battle map
+   Iron & night steel, clan gold, blood red, frost. Angular plates
+   instead of rounded cards, HUD brackets around the map.
+   Hooks (IDs/classes/data-*) unchanged — visuals only.
    ============================================================ */
 
 @font-face {
@@ -14,23 +14,23 @@
 }
 
 :root {
-  /* Eisen & Nacht */
+  /* Iron & night */
   --bg: #07090d;
   --panel: #0e131b;
   --panel2: #0a0e15;
   --iron: #10161f;
   --line: #1d2532;
   --edge: #2b3648;
-  /* Schrift */
+  /* Type */
   --text: #d9e0e8;
   --muted: #8291a1;
   --ink: #d9e0e8;
-  /* Clan-Gold */
+  /* Clan gold */
   --gold: #e8b64c;
   --gold-bright: #ffd15e;
   --gold-soft: #a8853c;
   --gold-dim: rgba(232, 182, 76, 0.32);
-  /* Feind / Frei */
+  /* Enemy / free */
   --mine: #e8b64c;
   --enemy: #d63b41;
   --enemy-hot: #ff8d92;
@@ -40,9 +40,9 @@
   --display: "Germania One", "Arial Black", "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  /* Eisen-Korn (ein Layer, nur auf Panels — nicht über der Karte) */
+  /* Iron grain (one layer, only on panels — not over the map) */
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
-  /* Genietete Kante: Eck-Schnitt für Platten */
+  /* Riveted edge: corner cut for plates */
   --notch: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
 }
 
@@ -56,14 +56,14 @@ body {
 ::selection { background: var(--gold-dim); color: var(--gold-bright); }
 :focus-visible { outline: 1px solid var(--gold); outline-offset: 1px; }
 
-/* Konsolen-Scrollbalken */
+/* Console scrollbars */
 * { scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { background: var(--edge); border: 2px solid var(--panel2); }
 *::-webkit-scrollbar-thumb:hover { background: var(--gold-soft); }
 *::-webkit-scrollbar-track { background: transparent; }
 
-/* ---- Kopf: Eisenbalken mit Gold-Haarlinie ---- */
+/* ---- Header: iron bar with a gold hairline ---- */
 .top {
   display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
   padding: 0.45rem 0.8rem;
@@ -100,7 +100,7 @@ body {
 .chip.gold { color: var(--gold); border-color: var(--gold-dim); }
 .chip.gold b { color: var(--gold); }
 
-/* ---- Revier-Leiste: Lage-Streifen ---- */
+/* ---- Turf bar: situation strip ---- */
 .revier-bar {
   display: flex; flex-direction: column; align-items: stretch; gap: 0.4rem;
   padding: 0.42rem 0.8rem; background: var(--panel2);
@@ -123,7 +123,7 @@ body {
 .rb.free b { color: var(--frost); }
 .rb-spacer { flex: 1 1 auto; }
 
-/* Platten-Knöpfe (Sprünge, Aktionen) */
+/* Plate buttons (jumps, actions) */
 .rb-jump {
   background: var(--iron); border: 1px solid var(--edge); color: var(--text);
   border-radius: 0; padding: 0.24rem 0.6rem; font-size: 0.7rem; cursor: pointer;
@@ -141,7 +141,7 @@ body {
 .rb-jump.go:hover { filter: brightness(1.07); color: #000; }
 a.rb-jump { text-decoration: none; display: inline-flex; align-items: center; }
 
-/* Lade-Status (Erst-Poll): Klaxon-Streifen */
+/* Loading status (first poll): klaxon stripes */
 .loading-bar {
   flex: 0 0 auto; color: var(--gold-bright); font-family: var(--mono);
   background:
@@ -150,13 +150,13 @@ a.rb-jump { text-decoration: none; display: inline-flex; align-items: center; }
   font-size: 0.8rem; text-align: center; letter-spacing: 0.04em;
 }
 
-/* ---- Karte: der Held, mit HUD-Rahmen ---- */
+/* ---- Map: the hero, with HUD frame ---- */
 .stage { position: relative; flex: 1 1 auto; min-height: 180px; display: flex; }
 .map { flex: 1 1 auto; min-height: 180px; background: #05070a; }
-/* Kacheln invertiert = dunkle Lagekarte; Zellen glühen darauf */
+/* Tiles inverted = dark situation map; cells glow on top of it */
 .map .leaflet-tile-pane { filter: invert(1) grayscale(1) brightness(0.78) contrast(1.15); }
 
-/* HUD-Overlay: Eck-Klammern + Rand-Abdunklung (ein statisches Element) */
+/* HUD overlay: corner brackets + edge darkening (one static element) */
 .hud-frame {
   position: absolute; inset: 0; z-index: 450; pointer-events: none;
   background:
@@ -171,19 +171,19 @@ a.rb-jump { text-decoration: none; display: inline-flex; align-items: center; }
     radial-gradient(115% 115% at 50% 50%, transparent 62%, rgba(0, 0, 0, 0.32) 100%);
   background-repeat: no-repeat;
 }
-/* Kompass-Ornament (vom Guidance-Modus automatisch ausgeblendet) */
+/* Compass ornament (hidden automatically by guidance mode) */
 .map-hero {
   position: absolute; top: 15px; right: 15px; z-index: 450; pointer-events: none;
   width: 38px; height: 38px; color: var(--gold);
   opacity: 0.6; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.8));
 }
 .map-hero svg { width: 100%; height: 100%; }
-/* Leaflet-Controls von den HUD-Klammern freistellen */
+/* Keep Leaflet controls clear of the HUD brackets */
 .stage .leaflet-top .leaflet-control { margin-top: 16px; }
 .stage .leaflet-left .leaflet-control { margin-left: 16px; }
 .stage .leaflet-bottom .leaflet-control { margin-bottom: 12px; }
 
-/* „du bist hier"-Meldung: Feldplatte statt Pille */
+/* "you are here" banner: field plate instead of a pill */
 .here-banner {
   position: absolute; left: 50%; bottom: 0.65rem; transform: translateX(-50%);
   z-index: 500; max-width: 92%; padding: 0.42rem 0.9rem; border-radius: 0;
@@ -200,14 +200,14 @@ a.rb-jump { text-decoration: none; display: inline-flex; align-items: center; }
 .here-banner.virgin b { color: var(--gold-bright); }
 .here-banner.out { color: var(--muted); }
 
-/* Gewählte Tour-Zelle: pulsierender Rahmen — sofortige Rückmeldung beim Antippen.
-   Nur die paar gewählten Zellen animieren (nicht die hunderte anderen). */
+/* Selected tour cell: pulsing outline — instant feedback on tap.
+   Only the few selected cells animate (not the hundreds of others). */
 @keyframes cellpulse {
   0%, 100% { stroke-width: 2; stroke-opacity: 1; }
   50%      { stroke-width: 6; stroke-opacity: 0.45; }
 }
-/* NICHT .leaflet-interactive verlangen: die Markierungs-Rahmen sind bewusst
-   nicht klickbar (interactive: false) und bekommen die Klasse deshalb nie. */
+/* Do NOT require .leaflet-interactive: the highlight outlines are deliberately
+   not clickable (interactive: false) and therefore never get that class. */
 path.cell-picked {
   stroke: var(--gold-bright) !important;
   animation: cellpulse 1.3s ease-in-out infinite;
@@ -216,7 +216,7 @@ path.cell-picked {
   path.cell-picked { animation: none; stroke-width: 4; }
 }
 
-/* Kurzmeldung über der Karte (z. B. Google-Grenze erreicht) */
+/* Short notice above the map (e.g. Google limit reached) */
 .toast {
   position: absolute; left: 50%; top: 0.6rem; transform: translateX(-50%) translateY(-8px);
   z-index: 530; width: min(94%, 340px); padding: 0.55rem 0.9rem; clip-path: var(--notch);
@@ -226,15 +226,15 @@ path.cell-picked {
   display: flex; align-items: center; gap: 0.65rem;
   opacity: 0; transition: opacity 0.25s ease, transform 0.25s ease;
 }
-/* PFLICHT: `display: flex` oben schlaegt die Browser-Regel [hidden]{display:none} */
+/* MANDATORY: the `display: flex` above beats the browser rule [hidden]{display:none} */
 .toast[hidden] { display: none; }
 .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
-.toast.pre { opacity: 0; transition: none; }   /* liegt da, nur zum Ausmessen */
+.toast.pre { opacity: 0; transition: none; }   /* in place, only for measuring */
 .toast b { color: var(--gold-bright); font-family: var(--display); font-weight: 400;
   font-size: 0.92rem; letter-spacing: 0.05em; }
 .toast-txt { min-width: 0; }
 
-/* Der Herold als Siegel in der Meldung (erscheint, wenn er hereingeflogen ist) */
+/* The herald as a seal in the notice (appears once it has flown in) */
 .toast-ape {
   flex: 0 0 auto; width: 46px; height: 46px; border-radius: 50%;
   background: url("/static/img/ape-herald.webp") center/cover;
@@ -252,14 +252,14 @@ path.cell-picked {
   100% { transform: scale(1) rotate(0deg); }
 }
 
-/* Der Auftritt: aus der Kartenmitte, mit Druckwelle */
+/* The entrance: from the map center, with a shockwave */
 .ape-burst {
   position: absolute; z-index: 540; pointer-events: none;
   filter: drop-shadow(0 10px 26px rgba(0, 0, 0, 0.75));
 }
 .ape-burst img { width: 100%; height: 100%; display: block; border-radius: 50%; }
 .ape-burst.pop { animation: apePop 0.62s cubic-bezier(.16, 1.4, .3, 1) both; }
-/* Einschlag am Tatort: kurz stehen, dann nach vorn wegblitzen */
+/* Impact at the scene: hold briefly, then flash away forward */
 .ape-burst.strike.vanish {
   transition: opacity 0.45s ease, transform 0.45s ease;
   opacity: 0; transform: scale(1.35);
@@ -270,7 +270,7 @@ path.cell-picked {
   75%  { transform: scale(0.97) rotate(-2deg); }
   100% { transform: scale(1) rotate(0deg); opacity: 1; }
 }
-/* Druckwelle — ein Ring, kein Dauerläufer */
+/* Shockwave — a single ring, no perpetual loop */
 .ape-ring {
   position: absolute; inset: -6%; border-radius: 50%;
   border: 2px solid var(--gold-bright);
@@ -284,7 +284,7 @@ path.cell-picked {
   .ape-burst.pop, .ape-ring, .toast-ape.on { animation: none; }
 }
 
-/* Tour-Warnung im Panel (dauerhaft, solange über der Grenze) */
+/* Tour warning in the panel (persistent while over the limit) */
 .tour-warn {
   margin: 0.45rem 0 0.2rem; padding: 0.4rem 0.55rem;
   background: rgba(232, 182, 76, 0.10); border-left: 3px solid var(--gold);
@@ -295,7 +295,7 @@ path.cell-picked {
 .tour-list li.over-cap { opacity: 0.5; }
 .tour-list li.over-cap b { color: var(--muted); }
 
-/* Tour-Führung: Marschbefehl */
+/* Tour guidance: marching orders */
 .nav-banner {
   position: absolute; left: 50%; top: 0.6rem; transform: translateX(-50%); z-index: 520;
   max-width: 94%; padding: 0.44rem 1rem; border-radius: 0; clip-path: var(--notch);
@@ -306,7 +306,7 @@ path.cell-picked {
 .nav-banner.done { background: linear-gradient(180deg, #ffe9ad, var(--gold)); color: #191204; }
 .nav-arrow { display: inline-block; font-weight: 900; }
 
-/* Eigener GPS-Punkt (blau bleibt Funktionsfarbe) */
+/* Own GPS dot (blue stays the functional color) */
 .me-dot span {
   display: block; width: 14px; height: 14px; border-radius: 50%;
   background: #3b82f6; border: 2px solid #e8eef5;
@@ -320,14 +320,14 @@ path.cell-picked {
 .locate-ctl a { font-size: 1.1rem; text-align: center; }
 .locate-ctl a.active { background: var(--gold) !important; color: #191204 !important; }
 
-/* Crew-Punkte */
+/* Crew dots */
 .friend-dot span {
   display: block; width: 14px; height: 14px; border-radius: 50%;
   background: #22d3ee; border: 2px solid #07090d;
   box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.35), 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
-/* Tour-Stopp-Nummern: Gold-Marken (Oktagon, Zahl bleibt aufrecht) */
+/* Tour stop numbers: gold badges (octagon, the number stays upright) */
 .tour-num span {
   display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
   clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 6px, 100% calc(100% - 6px),
@@ -336,7 +336,7 @@ path.cell-picked {
   font-weight: 800; font-size: 0.74rem; font-family: var(--mono); line-height: 1;
 }
 
-/* Leaflet-Anpassungen (leaflet.css lädt NACH style.css → !important nötig) */
+/* Leaflet tweaks (leaflet.css loads AFTER style.css → !important needed) */
 .leaflet-popup-content-wrapper {
   background: var(--panel) !important; color: var(--text) !important;
   border: 1px solid var(--gold-soft); border-radius: 0 !important; clip-path: var(--notch);
@@ -353,8 +353,8 @@ path.cell-picked {
 .leaflet-bar a:last-child { border-bottom: 0 !important; }
 .leaflet-bar a:hover { background: var(--iron) !important; color: var(--gold) !important; }
 .leaflet-bar a.leaflet-disabled { background: var(--panel2) !important; color: var(--edge) !important; }
-/* Follow-Button aktiv: MUSS nach den .leaflet-bar-Regeln stehen und höher spezifisch
-   sein — sonst schluckt `.leaflet-bar a { background: !important }` das Gold. */
+/* Follow button active: MUST come after the .leaflet-bar rules and be more
+   specific — otherwise `.leaflet-bar a { background: !important }` swallows the gold. */
 .leaflet-bar.locate-ctl a#loc-btn.active {
   background: linear-gradient(180deg, var(--gold-bright), #cf9c34) !important;
   color: #191204 !important; border-color: var(--gold) !important;
@@ -365,7 +365,7 @@ path.cell-picked {
 }
 .leaflet-control-attribution a { color: var(--muted) !important; }
 
-/* ---- Panel: Kommandokonsole ---- */
+/* ---- Panel: command console ---- */
 .panel {
   flex: 0 0 34%; display: flex; flex-direction: column;
   background: var(--panel);
@@ -400,7 +400,7 @@ path.cell-picked {
 .hint.big { text-align: center; padding: 1.5rem 1rem; }
 .lead-txt { color: var(--gold); }
 
-/* Zwischentitel: Haarlinien-Flanken */
+/* Subheadings: hairline flanks */
 .pl-sub {
   display: flex; align-items: center; gap: 0.55rem;
   font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
@@ -411,7 +411,7 @@ path.cell-picked {
 .pl-sub::after { background: linear-gradient(90deg, var(--edge), transparent); }
 .empty { color: var(--muted); padding: 1rem 0; }
 
-/* ---- Planer: Werkzeugleiste (Filter-Chips + Sortierung) ---- */
+/* ---- Planner: toolbar (filter chips + sorting) ---- */
 .pl-tools {
   background: var(--panel); padding: 0.35rem 0 0.45rem;
   margin: 0 0 0.2rem; border-bottom: 1px solid var(--line);
@@ -445,28 +445,28 @@ path.cell-picked {
 }
 .pl-sort select:focus { outline: none; border-color: var(--gold); }
 .pl-none { text-align: center; padding: 1.2rem 0; }
-/* Fenster-Hinweis: NIE stillschweigend abschneiden — sagen, wie viele es sind */
+/* Window notice: NEVER truncate silently — say how many there are */
 .pl-more {
   display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
   padding: 0.7rem 0.2rem 0.3rem;
 }
 .pl-more-txt { font-size: 0.76rem; color: var(--muted); font-family: var(--mono); }
 
-/* Karten-Layer-Chip (Neuland) */
+/* Map layer chip (virgin land) */
 .rb-jump.layer-chip.on {
   border-color: var(--frost); color: var(--frost);
   background: linear-gradient(180deg, rgba(143, 167, 189, 0.20), rgba(143, 167, 189, 0.06));
 }
 
-/* ---- Planer: Zielliste (Zeile = Gang + Rückstand + Fortschritts-Balken) ---- */
+/* ---- Planner: target list (row = gang + gap + progress bar) ---- */
 .planer-list { list-style: none; margin: 0; padding: 0; }
 .pl-item {
   display: flex; align-items: center; gap: 0.6rem; cursor: pointer;
   padding: 0.5rem 0.4rem 0.5rem 0.55rem; border-bottom: 1px solid var(--line);
   border-left: 2px solid transparent;
 }
-/* PFLICHT: `display: flex` oben schlaegt die Browser-Regel [hidden]{display:none} —
-   ohne diese Zeile setzt der Filter zwar das Attribut, blendet aber NICHTS aus. */
+/* MANDATORY: the `display: flex` above beats the browser rule [hidden]{display:none} —
+   without this line the filter sets the attribute but hides NOTHING. */
 .pl-item[hidden] { display: none; }
 .pl-item:hover { background: var(--iron); border-left-color: var(--gold-soft); }
 .pl-item.pl-lead { border-left-color: var(--gold); }
@@ -483,7 +483,7 @@ path.cell-picked {
   background: rgba(143, 167, 189, 0.12); color: var(--frost);
   border-color: rgba(143, 167, 189, 0.4);
 }
-/* Entfernung: beim Fahren die wichtigste Zahl in der Zeile */
+/* Distance: the most important number in the row while driving */
 .pl-dist {
   flex: 0 0 auto; margin-left: auto; font-family: var(--mono); font-size: 0.72rem;
   color: var(--muted); white-space: nowrap;
@@ -507,7 +507,7 @@ path.cell-picked {
   border-color: rgba(232, 182, 76, 0.5);
 }
 .pl-gap.free { background: rgba(95, 119, 137, 0.14); color: var(--frost); border-color: var(--line); }
-/* Balken: dein Gold gegen den roten Rest des Besitzers */
+/* Bar: your gold against the owner's red remainder */
 .pl-bar {
   height: 4px; margin: 0.34rem 0 0.26rem;
   background: rgba(214, 59, 65, 0.22);
@@ -522,7 +522,7 @@ path.cell-picked {
 .pl-info b { font-family: var(--mono); }
 .pl-info small { color: var(--muted); }
 
-/* ---- Wächter: Schlacht-Meldungen ---- */
+/* ---- Watcher: battle reports ---- */
 .watch-setting {
   display: flex; align-items: center; gap: 0.5rem; margin: 0.2rem 0 0.7rem;
   font-size: 0.85rem; color: var(--muted);
@@ -531,7 +531,7 @@ path.cell-picked {
   background: var(--panel2); border: 1px solid var(--edge); color: var(--text);
   border-radius: 0; padding: 0.3rem 0.5rem; font-size: 0.85rem;
 }
-/* Rabenpost (Web-Push für dieses Gerät) */
+/* Raven post (web push for this device) */
 .push-box {
   border: 1px solid var(--edge); border-left-width: 3px; padding: 0.55rem 0.7rem;
   margin: 0.2rem 0 0.7rem; background: var(--panel2);
@@ -545,7 +545,7 @@ path.cell-picked {
 .push-box.on .push-status { color: var(--gold); }
 .push-box .hint { margin: 0.4rem 0 0; }
 
-/* Frontverlauf: wo der Feind drückt */
+/* Front line: where the enemy is pushing */
 .front-list { list-style: none; margin: 0 0 0.7rem; padding: 0; }
 .front-item {
   padding: 0.42rem 0.6rem; margin-bottom: 0.3rem;
@@ -561,7 +561,7 @@ path.cell-picked {
   padding: 0.55rem 0.5rem 0.6rem 0.65rem;
   border-bottom: 1px solid var(--line); border-left: 3px solid var(--line);
 }
-/* Bericht mit Ort = anklickbar, springt zum Tatort */
+/* Report with a location = clickable, jumps to the scene */
 .ev[data-lat] { cursor: pointer; position: relative; }
 .ev[data-lat]:hover { background: rgba(232, 182, 76, 0.06); }
 .ev[data-lat]::after {
@@ -579,7 +579,7 @@ path.cell-picked {
   border-radius: 0; border: 1px solid var(--edge); color: var(--muted);
   text-transform: uppercase; letter-spacing: 0.08em; background: transparent;
 }
-/* Nähe = Eskalationsstufe: Angriff / Warnung / Randnotiz */
+/* Proximity = escalation level: attack / warning / side note */
 .ev.prox-mine {
   border-left-color: var(--enemy);
   background: linear-gradient(90deg, rgba(214, 59, 65, 0.13), rgba(214, 59, 65, 0.02) 55%, transparent);
@@ -598,7 +598,7 @@ path.cell-picked {
 .ev-flipped .ev-kind, .ev-new_owner .ev-kind { color: var(--gold); border-color: var(--gold-dim); }
 .ev-freed .ev-kind { color: var(--frost); }
 
-/* ---- Info-Gitter: Eisenplatten ---- */
+/* ---- Info grid: iron plates ---- */
 .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem 0.6rem; }
 .info-grid > div {
   background: var(--panel2); border: 1px solid var(--line); border-radius: 0;
@@ -617,7 +617,7 @@ path.cell-picked {
   .brand { font-size: 1.25rem; }
 }
 
-/* Desktop: Karte links, Kommandokonsole als rechte Flanke (nur App-Seite) */
+/* Desktop: map on the left, command console as the right flank (app page only) */
 @media (min-width: 1000px) {
   body.app { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 410px);
              grid-template-rows: auto auto auto minmax(0, 1fr); }
@@ -633,7 +633,7 @@ path.cell-picked {
   .info-grid { grid-template-columns: 1fr 1fr; }
 }
 
-/* ---- Logout / Sprache ---- */
+/* ---- Logout / language ---- */
 .logout-form { margin: 0; display: inline; }
 .chip.logout { cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0.16rem 0.5rem; }
 .chip.logout:hover { color: var(--enemy-hot); border-color: var(--enemy); }
@@ -644,7 +644,7 @@ path.cell-picked {
 }
 .lang-switch a.on { color: var(--gold); border-color: var(--gold-dim); font-weight: 700; }
 
-/* ---- Login / Register: Siegel-Karte ---- */
+/* ---- Login / register: seal card ---- */
 .auth-wrap {
   min-height: 100dvh; display: flex; align-items: center; justify-content: center;
   padding: 1.2rem;
@@ -744,9 +744,9 @@ path.cell-picked {
 .auth-about a { color: var(--gold); text-decoration: none; border-bottom: 1px solid var(--gold-dim); }
 .auth-about a:hover { border-bottom-color: var(--gold); }
 
-/* ---- /about: Transparenz-Seite (öffentlich, vor dem Login) ----
-   body ist global auf overflow:hidden gestellt (Map-App scrollt nie) — Dokument-
-   Seiten brauchen body.doc, sonst ist langer Inhalt unerreichbar. */
+/* ---- /about: transparency page (public, before login) ----
+   body is globally set to overflow:hidden (the map app never scrolls) — document
+   pages need body.doc, otherwise long content is unreachable. */
 body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
 .about-wrap { align-items: flex-start; padding: 2rem 1.2rem 3rem; }
 .about-card { max-width: 660px; }
@@ -763,7 +763,7 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
 .about-body code { color: var(--gold); font-family: var(--mono); font-size: 0.85em; }
 .about-body b { color: var(--gold-bright); font-weight: 600; }
 
-/* ---- Crew / Freunde ---- */
+/* ---- Crew / friends ---- */
 .share-box {
   border: 1px solid var(--edge); border-radius: 0; padding: 0.6rem 0.7rem;
   margin: 0.5rem 0 0.8rem; background: var(--panel2);
@@ -800,7 +800,7 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
 .chart-lbl b { color: var(--text); font-family: var(--mono); letter-spacing: 0; }
 .spark { width: 100%; height: 30px; display: block; }
 
-/* ---- Passwort ---- */
+/* ---- Password ---- */
 .pw-form { display: flex; flex-direction: column; gap: 0.4rem; max-width: 320px; }
 .pw-form input {
   background: var(--panel2); border: 1px solid var(--edge); border-radius: 0;
@@ -814,7 +814,7 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
 .pl-sub.danger::before { background: linear-gradient(90deg, transparent, rgba(214, 59, 65, 0.5)); }
 .pl-sub.danger::after { background: linear-gradient(90deg, rgba(214, 59, 65, 0.5), transparent); }
 
-/* ---- Beute-Tour ---- */
+/* ---- Loot tour ---- */
 .tour-add {
   margin-left: auto; flex: 0 0 auto; width: 26px; height: 26px; border-radius: 0;
   clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);

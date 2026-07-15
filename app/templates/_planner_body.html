@@ -1,6 +1,6 @@
-{# Nur das Geruest. Die Zeilen baut der Client aus dem vollen Datensatz und rendert
-   davon NUR ein Fenster: ein grosses Revier hat schnell tausende Zellen — gefiltert
-   und sortiert wird ueber alle, im DOM landen nur die obersten. #}
+{# Just the skeleton. The client builds the rows from the full dataset and renders
+   ONLY a window of it: a large turf quickly has thousands of cells — filtering
+   and sorting run over all of them, only the topmost ones land in the DOM. #}
 <div class="pl-tools">
   <div class="pl-chips" id="pl-filters">
     <button type="button" class="pl-chip on" data-filter="all">{{ t('flt_all') }} <b data-count="all">{{ n_all }}</b></button>
@@ -13,8 +13,8 @@
     </button>
     {% endfor %}
   </div>
-  {# Naechste zuerst als Standard: die App wird beim FAHREN benutzt — ein Ziel
-     3000 km weit weg ist der leichteste Flip der Welt und trotzdem nutzlos. #}
+  {# Nearest first as the default: the app is used while DRIVING — a target
+     3000 km away is the easiest flip in the world and still useless. #}
   <label class="pl-sort">{{ t('sort_by') }}
     <select id="pl-sort">
       <option value="dist" selected>{{ t('sort_dist') }}</option>

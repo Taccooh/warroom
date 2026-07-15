@@ -1,5 +1,5 @@
-"""Konfiguration. Es gibt KEINEN globalen API-Key mehr — jeder User bringt seinen
-eigenen mit, verschlüsselt in der DB (siehe crypto.py). Hier nur Pfade + Kadenz."""
+"""Configuration. There is NO global API key anymore — every user brings their
+own, stored encrypted in the DB (see crypto.py). Only paths + cadence here."""
 import os
 from pathlib import Path
 
@@ -11,19 +11,19 @@ DATA_DIR = Path(os.environ.get("WARROOM_DATA", ROOT / "data"))
 DB_PATH = DATA_DIR / "warroom.sqlite"
 MASTER_KEY_PATH = DATA_DIR / "master.key"
 
-# Deckel für Neuanmeldungen (jeder User = 1 fremder API-Key in unserer Obhut +
-# Poll-Last) — bewusst klein starten, per Env anhebbar ohne Rebuild.
+# Cap on new sign-ups (each user = 1 third-party API key in our custody +
+# poll load) — deliberately start small, raisable via env without a rebuild.
 MAX_USERS = int(os.environ.get("WARROOM_MAX_USERS", "30"))
 CONTACT_MAIL = "st4bleground@proton.me"
 
-# Anzeige-Zeitzone: SQLite speichert UTC, die UI zeigt Wandzeit dieser Zone.
+# Display timezone: SQLite stores UTC, the UI shows wall-clock time of this zone.
 TZ = os.environ.get("WARROOM_TZ", "Europe/Berlin")
 
-# member-territories wird serverseitig nur alle 5 min per Cron neu berechnet.
+# member-territories is only recomputed server-side every 5 min via cron.
 POLL_SECONDS = 300
-# Footprint (eigene APs) je User seltener voll neu einlesen.
+# Re-read the full footprint (own APs) per user less frequently.
 FOOTPRINT_REFRESH_SECONDS = 3600
 REINFORCE_BUFFER = 3
-# Turf = eigene AP-Zellen + Ring von TURF_RING Zellen drumherum (Chebyshev).
-# 4 Zellen ≈ 6–9 km bei ~50°N (0.02° ≈ 2,2 km lat / ~1,4 km lng).
+# Turf = own AP cells + ring of TURF_RING cells around them (Chebyshev).
+# 4 cells ≈ 6–9 km at ~50°N (0.02° ≈ 2.2 km lat / ~1.4 km lng).
 TURF_RING = 4

@@ -1,6 +1,6 @@
-"""Warroom — Multi-User wdgwars-Companion. FastAPI + Hintergrund-Poller (alle User).
-Auth: App-eigene Accounts, der wdgwars-Key ist die Eintrittskarte (Validierung per
-/api/me), verschlüsselt gespeichert. Kein globaler Key mehr."""
+"""Warroom — multi-user wdgwars companion. FastAPI + background poller (all users).
+Auth: app-local accounts, the wdgwars key is the admission ticket (validated via
+/api/me), stored encrypted. No global key anymore."""
 import asyncio
 import logging
 import sqlite3
@@ -38,7 +38,7 @@ async def poll_loop():
 async def lifespan(app: FastAPI):
     c = db.connect(); db.init_db(c); c.close()
     try:
-        push.public_key_b64()  # VAPID-Keypair eager erzeugen → liegt sicher im Backup
+        push.public_key_b64()  # create VAPID keypair eagerly → it is safely in the backup
     except Exception:
         log.exception("VAPID-Init fehlgeschlagen")
     task = asyncio.create_task(poll_loop())
@@ -53,8 +53,8 @@ app = FastAPI(lifespan=lifespan, title="Warroom")
 
 @app.middleware("http")
 async def no_store_html(request: Request, call_next):
-    """HTML nie cachen (Browser + Cloudflare) — Markup + Inline-JS kommen immer frisch.
-    Statische Assets (CSS/JS/Bilder) laufen über den ?v=-Cache-Buster."""
+    """Never cache HTML (browser + Cloudflare) — markup + inline JS always come fresh.
+    Static assets (CSS/JS/images) go through the ?v= cache buster."""
     resp = await call_next(request)
     if resp.headers.get("content-type", "").startswith("text/html"):
         resp.headers["Cache-Control"] = "no-store"
@@ -82,7 +82,7 @@ def get_db():
 
 
 def _poll_one_bg(user_id: int):
-    """Erst-Poll eines frisch registrierten Users im eigenen Thread + eigener Conn."""
+    """First poll of a freshly registered user in its own thread + its own conn."""
     conn = db.connect()
     try:
         poller.poll_all(conn)
@@ -96,15 +96,15 @@ def current_user(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     return auth.session_user(conn, request.cookies.get(auth.COOKIE))
 
 
-# Bruteforce-Bremse für Login/Register: Sliding Window pro IP, in-memory (ein
-# Prozess). Die Client-IP stimmt, weil uvicorn mit --proxy-headers läuft.
+# Brute-force brake for login/register: sliding window per IP, in-memory (single
+# process). The client IP is correct because uvicorn runs with --proxy-headers.
 _rl: dict[tuple[str, str], list[float]] = {}
 
 
 def _rate_limited(request: Request, bucket: str, limit: int, window: float = 900.0) -> bool:
     ip = request.client.host if request.client else "?"
     now = time.monotonic()
-    if len(_rl) > 10000:  # Notbremse gegen Speicherfraß durch IP-Rotation
+    if len(_rl) > 10000:  # emergency brake against memory bloat from IP rotation
         _rl.clear()
     k = (bucket, ip)
     hits = [t for t in _rl.get(k, []) if now - t < window]
@@ -127,9 +127,9 @@ def favicon():
 
 @app.get("/sw.js")
 def service_worker():
-    """Der SW MUSS von der Wurzel kommen: unter /static/sw.js ist sein Scope /static/,
-    er kontrolliert die App unter / dann gar nicht — navigator.serviceWorker.ready
-    löst nie auf und Push/Offline sind tot (genau das war der Fall)."""
+    """The SW MUST be served from the root: under /static/sw.js its scope is /static/,
+    so it does not control the app under / at all — navigator.serviceWorker.ready
+    never resolves and push/offline are dead (which is exactly what happened)."""
     return FileResponse(
         web.STATIC_DIR / "sw.js",
         media_type="application/javascript",
@@ -139,8 +139,8 @@ def service_worker():
 
 @app.get("/about")
 def about_page(request: Request):
-    """Öffentliche Transparenz-Seite (VOR dem Login erreichbar): was warroom ist,
-    was es mit dem Key macht, was es speichert — Community-Anfrage vom wdgwars-Dev."""
+    """Public transparency page (reachable BEFORE login): what warroom is, what it
+    does with the key, what it stores — community request from the wdgwars dev."""
     return render(request, "about.html", {})
 
 
@@ -193,7 +193,7 @@ def register(request: Request, password: str = Form(...), api_key: str = Form(..
     if len(password) < 6:
         return render(request, "login.html",
             {"mode": "register", "error": i18n.t(lang, "err_pw_short")})
-    # Key als Ticket: per /api/me validieren
+    # The key as ticket: validate via /api/me
     try:
         me = Wdg(key).me()
     except WdgError:
@@ -209,8 +209,8 @@ def register(request: Request, password: str = Form(...), api_key: str = Form(..
     uid = auth.create_user(conn, username=username, wdg_user_id=me.get("user_id"),
                            gang_id=me.get("gang_id"), gang=me.get("gang"),
                            password=password, key_plain=key)
-    # Erst-Poll im Hintergrund (Download aus PL dauert ~30s) — Registrierung
-    # antwortet sofort, die Seite zeigt solange „Revier wird geladen".
+    # First poll in the background (the download from PL takes ~30s) — registration
+    # responds immediately, the page shows "loading your turf" in the meantime.
     threading.Thread(target=_poll_one_bg, args=(uid,), daemon=True).start()
     token = auth.create_session(conn, uid)
     resp = RedirectResponse("/", status_code=303)
@@ -227,7 +227,7 @@ def logout(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     return resp
 
 
-# ---- Freunde ----
+# ---- Friends ----
 @app.post("/friends/add")
 def friends_add(crewmate: str = Form(...), conn: sqlite3.Connection = Depends(get_db),
                 user=Depends(current_user)):
@@ -255,7 +255,7 @@ def friends_remove(other_id: int = Form(...), conn: sqlite3.Connection = Depends
     return RedirectResponse("/?tab=friends", status_code=303)
 
 
-# ---- Wächter-Einstellung ----
+# ---- Watcher setting ----
 @app.post("/watch")
 def set_watch(level: str = Form(...), conn: sqlite3.Connection = Depends(get_db),
               user=Depends(current_user)):
@@ -266,7 +266,7 @@ def set_watch(level: str = Form(...), conn: sqlite3.Connection = Depends(get_db)
     return RedirectResponse("/?tab=waechter", status_code=303)
 
 
-# ---- Web-Push ----
+# ---- Web push ----
 @app.get("/push/pubkey")
 def push_pubkey(user=Depends(current_user)):
     if not user:
@@ -285,7 +285,7 @@ async def push_subscribe(request: Request, conn: sqlite3.Connection = Depends(ge
         return JSONResponse({"ok": False}, status_code=400)
     ok = push.subscribe(conn, user["id"], sub, web.lang_of(request))
     if ok:
-        # Sofort-Beweis aufs Gerät: kommt die an, steht die ganze Kette.
+        # Instant proof to the device: if this one arrives, the whole chain works.
         delivered = push.send_welcome(conn, user["id"], sub.get("endpoint", ""))
         log.info("push: abo für %s gespeichert, welcome=%s", user["wdg_username"], delivered)
         return JSONResponse({"ok": True, "welcome": delivered})
@@ -305,7 +305,7 @@ async def push_unsubscribe(request: Request, conn: sqlite3.Connection = Depends(
     return JSONResponse({"ok": True})
 
 
-# ---- Live-Position ----
+# ---- Live position ----
 @app.post("/share")
 def share(minutes: int = Form(...), conn: sqlite3.Connection = Depends(get_db),
           user=Depends(current_user)):
@@ -327,8 +327,8 @@ def position(lat: float = Form(...), lng: float = Form(...),
 def friends_positions(conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
-    # last_poll huckepack: der 12s-Crew-Poll ist der Frische-Kanal der offenen App —
-    # ändert sich der Wert, lädt die Seite sich selbst neu (kein extra Endpoint).
+    # last_poll piggybacked: the 12s crew poll is the freshness channel of the open app —
+    # when the value changes, the page reloads itself (no extra endpoint).
     return JSONResponse({"friends": social.friends_positions(conn, user["id"]),
                          "last_poll": db.kv_get(conn, "last_poll", "0")})
 
@@ -343,7 +343,7 @@ def change_password(request: Request, old: str = Form(...), new: str = Form(...)
         return RedirectResponse("/?tab=info&pw=err", status_code=303)
     conn.execute("UPDATE users SET password_hash = ? WHERE id = ?",
                  (auth.hash_password(new), user["id"]))
-    # Alle anderen Geräte fliegen raus — nur die Session bleibt, die das PW geändert hat.
+    # All other devices get kicked out — only the session that changed the PW remains.
     conn.execute("DELETE FROM sessions WHERE user_id = ? AND token != ?",
                  (user["id"], request.cookies.get(auth.COOKIE, "")))
     return RedirectResponse("/?tab=info&pw=ok", status_code=303)
@@ -403,8 +403,8 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
 @app.post("/api/snap")
 async def snap(request: Request, conn: sqlite3.Connection = Depends(get_db),
                user=Depends(current_user)):
-    """Zell-Indizes → Punkt auf einer Straße in dieser Zelle (oder null).
-    Ergebnis ist pro Zelle für immer gleich und wird global gecacht."""
+    """Cell indices → point on a road within that cell (or null).
+    The result is forever the same per cell and is cached globally."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     try:
@@ -421,9 +421,9 @@ async def snap(request: Request, conn: sqlite3.Connection = Depends(get_db),
 @app.get("/api/live")
 def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
          user=Depends(current_user)):
-    """Alles, was sich zwischen zwei Polls ändern kann — als Daten (Karte, Zähler)
-    plus fertig gerenderte Fragmente (Wächter, Planer), damit die i18n-/Motto-Logik
-    serverseitig EINE Quelle bleibt. Die offene App patcht sich damit in-place."""
+    """Everything that can change between two polls — as data (map, counters)
+    plus pre-rendered fragments (Watcher, Planner), so the i18n/motto logic
+    stays ONE server-side source. The open app patches itself in-place with this."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     uid = user["id"]

@@ -1,7 +1,7 @@
-"""Web-Push (VAPID). Keys liegen wie der master.key in data/ — MIT sichern!
-Eine Subscription = ein Gerät; lang wird beim Abonnieren mitgespeichert, damit
-der Poller in der Sprache des Geräts melden kann. Gesendet wird EINE gebündelte
-Meldung pro User und Poll-Zyklus (kein Firehose)."""
+"""Web push (VAPID). Keys live in data/ like the master.key — back them up TOO!
+One subscription = one device; lang is stored along at subscribe time so the
+poller can report in the device's language. What gets sent is ONE bundled
+notification per user and poll cycle (no firehose)."""
 import ipaddress
 import json
 import logging
@@ -19,13 +19,13 @@ from . import config, i18n
 log = logging.getLogger("warroom.push")
 
 VAPID_PATH = config.DATA_DIR / "vapid.pem"
-# Self-Hoster setzen ihre eigene Adresse — Push-Dienste kontaktieren die bei Missbrauch.
+# Self-hosters set their own address — push services contact it in case of abuse.
 VAPID_SUB = os.environ.get("WARROOM_VAPID_SUB", f"mailto:{config.CONTACT_MAIL}")
 
 
 def _endpoint_ok(ep: str) -> bool:
-    """Der Endpoint kommt vom Client und der Server POSTet dorthin — ohne Check wäre
-    das eine SSRF-Tür ins interne Netz. Nur https auf öffentlich geroutete Hosts."""
+    """The endpoint comes from the client and the server POSTs to it — without a check
+    that would be an SSRF door into the internal network. Only https to publicly routed hosts."""
     try:
         u = urlparse(ep)
         if u.scheme != "https" or not u.hostname:
@@ -49,14 +49,14 @@ def _get_vapid() -> Vapid02:
             v = Vapid02()
             v.generate_keys()
             v.save_key(str(VAPID_PATH))
-            VAPID_PATH.chmod(0o600)  # privater Key — wie master.key
+            VAPID_PATH.chmod(0o600)  # private key — like master.key
             _vapid = v
             log.info("VAPID-Keypair erzeugt: %s", VAPID_PATH)
     return _vapid
 
 
 def public_key_b64() -> str:
-    """applicationServerKey für pushManager.subscribe (b64url, uncompressed point)."""
+    """applicationServerKey for pushManager.subscribe (b64url, uncompressed point)."""
     raw = _get_vapid().public_key.public_bytes(
         serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
     return b64urlencode(raw)
@@ -81,7 +81,7 @@ def unsubscribe(conn, user_id: int, endpoint: str) -> None:
 
 
 def send_raw(sub_row, title: str, body: str, tag: str = "warroom") -> bool:
-    """Eine Nachricht an EIN Gerät. Wirft nicht — meldet nur Erfolg/Misserfolg."""
+    """One message to ONE device. Does not raise — only reports success/failure."""
     try:
         webpush(
             subscription_info={"endpoint": sub_row["endpoint"],
@@ -99,7 +99,7 @@ def send_raw(sub_row, title: str, body: str, tag: str = "warroom") -> bool:
 
 
 def send_welcome(conn, user_id: int, endpoint: str) -> bool:
-    """Direkt nach dem Abo: beweist die Kette Ende-zu-Ende auf dem Gerät."""
+    """Right after subscribing: proves the chain end-to-end on the device."""
     row = conn.execute("SELECT * FROM push_subs WHERE endpoint = ? AND user_id = ?",
                        (endpoint, user_id)).fetchone()
     if not row:
@@ -110,7 +110,7 @@ def send_welcome(conn, user_id: int, endpoint: str) -> bool:
 
 
 def _motto(lang: str, ev) -> str:
-    """Gleiche Motto-Logik wie im Wächter-Tab, inkl. Varianten-Pool."""
+    """Same motto logic as in the watchman tab, incl. the variant pool."""
     kind, prox = ev["kind"], ev["proximity"] or "near"
     if prox in ("mine", "gang"):
         base = {"lost": "watch_step", "captured": "watch_reclaim",
@@ -139,8 +139,8 @@ _SEVERITY = {"mine": 0, "gang": 1, "near": 2}
 
 
 def notify_user(conn, user_id: int, events: list) -> int:
-    """Bündelt die Events EINES Poll-Zyklus zu einer Nachricht pro Gerät.
-    Tote Endpoints (404/410) werden dabei ausgetragen."""
+    """Bundles the events of ONE poll cycle into one message per device.
+    Dead endpoints (404/410) are removed along the way."""
     if not events:
         return 0
     subs = conn.execute("SELECT * FROM push_subs WHERE user_id = ?", (user_id,)).fetchall()

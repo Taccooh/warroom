@@ -1,13 +1,13 @@
-"""Freunde + Live-Position (opt-in, zeitlich begrenzt, jederzeit widerrufbar).
+"""Friends + live position (opt-in, time-limited, revocable at any time).
 
-Freundschaft ist symmetrisch: bei 'accepted' liegen beide Richtungen in `friends`.
-Position wird NUR gespeichert/gezeigt, wenn sharing_until (UTC) in der Zukunft liegt —
-und nur für bestätigte Freunde, deren letzte Position frisch ist (< STALE)."""
+Friendship is symmetric: with 'accepted', both directions are stored in `friends`.
+Position is ONLY stored/shown while sharing_until (UTC) lies in the future —
+and only for confirmed friends whose latest position is fresh (< STALE)."""
 from datetime import datetime, timedelta, timezone
 
 from . import auth
 
-STALE_SECONDS = 600  # Positionen älter als 10 min gelten als veraltet → nicht zeigen
+STALE_SECONDS = 600  # positions older than 10 min count as stale → do not show
 
 
 def _now() -> datetime:
@@ -38,7 +38,7 @@ def add_friend(conn, me: int, username: str) -> dict:
     reverse = conn.execute(
         "SELECT 1 FROM friends WHERE user_id = ? AND friend_id = ? AND status = 'pending'",
         (tid, me)).fetchone()
-    if reverse:  # die/der hat mich schon angefragt → beide bestätigen
+    if reverse:  # they already requested me → confirm both directions
         _set_accepted(conn, me, tid)
         return {"ok": True, "msg": "accepted", "name": target["wdg_username"]}
     conn.execute(

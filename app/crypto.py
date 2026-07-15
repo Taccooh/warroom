@@ -1,7 +1,7 @@
-"""Verschlüsselung der wdgwars-Keys at-rest (Fernet = AES-128-CBC + HMAC).
-Master-Key aus Env WARROOM_MASTER_KEY, sonst aus data/master.key (wird beim ersten
-Start erzeugt, 0600). Ohne Master-Key lässt sich kein gespeicherter Key entschlüsseln
-— Backup von master.key gehört also zum DB-Backup dazu."""
+"""At-rest encryption of the wdgwars keys (Fernet = AES-128-CBC + HMAC).
+Master key from env WARROOM_MASTER_KEY, otherwise from data/master.key (created on
+first start, 0600). Without the master key no stored key can be decrypted
+— so backing up master.key is part of the DB backup."""
 import os
 
 from cryptography.fernet import Fernet

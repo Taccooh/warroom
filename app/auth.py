@@ -1,5 +1,5 @@
-"""Auth-Primitive (ohne FastAPI): bcrypt-Passwörter, Sessions, User-CRUD.
-Der wdgwars-Key wird beim Anlegen verschlüsselt und nur beim Poll entschlüsselt."""
+"""Auth primitives (no FastAPI): bcrypt passwords, sessions, user CRUD.
+The wdgwars key is encrypted at creation time and only decrypted for the poll."""
 import secrets
 import sqlite3
 
@@ -51,9 +51,9 @@ def create_session(conn, user_id: int) -> str:
 def session_user(conn, token: str | None) -> sqlite3.Row | None:
     if not token:
         return None
-    # Bewusst ohne key_enc: der Request-User braucht den verschlüsselten Key nie —
-    # so kann er auch nicht versehentlich in Responses/Logs durchsickern.
-    # Sessions älter als das Cookie-max_age (60 d) sind serverseitig ebenfalls tot.
+    # Deliberately without key_enc: the request user never needs the encrypted key —
+    # this way it also cannot accidentally leak into responses/logs.
+    # Sessions older than the cookie max_age (60 d) are dead server-side as well.
     return conn.execute(
         """SELECT u.id, u.wdg_username, u.wdg_user_id, u.gang_id, u.gang,
                   u.password_hash, u.created_at, u.last_poll, u.footprint_at,

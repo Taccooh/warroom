@@ -1,6 +1,6 @@
-"""Schlanke i18n — Englisch ist Default, Deutsch als Zweitsprache. Kein Framework:
-ein Dict pro String mit en/de. Serverseitig t(lang,key,**kw); für den Client liefert
-js_bundle(lang) die JS-Strings (roh mit {platzhaltern})."""
+"""Lean i18n — English is the default, German as second language. No framework:
+one dict per string with en/de. Server-side t(lang,key,**kw); for the client
+js_bundle(lang) delivers the JS strings (raw with {placeholders})."""
 
 LANGS = ("en", "de")
 DEFAULT = "en"
@@ -10,7 +10,7 @@ def norm(lang: str | None) -> str:
     return lang if lang in LANGS else DEFAULT
 
 
-# key -> {en, de}. HTML in einigen Werten → im Template mit | safe rendern.
+# key -> {en, de}. HTML in some values → render with | safe in the template.
 STRINGS = {
     "brand_sub": {"en": "wdgwars companion · Watcher · Planner · Follow mode",
                   "de": "wdgwars-Companion · Wächter · Planer · Follow-Mode"},
@@ -50,7 +50,7 @@ STRINGS = {
     "free_line": {"en": "<b>{my}</b> of your APs — almost yours already",
                   "de": "<b>{my}</b> eigene APs — schon fast deins"},
 
-    # Planer: Filter + Sortierung
+    # Planner: filter + sorting
     "sort_by": {"en": "Sort", "de": "Sortierung"},
     "sort_easy": {"en": "Easiest first", "de": "Leichteste zuerst"},
     "sort_dist": {"en": "Nearest first", "de": "Nächste zuerst"},
@@ -60,7 +60,7 @@ STRINGS = {
     "flt_none": {"en": "Nothing matches this filter.", "de": "Nichts passt zu diesem Filter."},
     "show_more": {"en": "Show more", "de": "Mehr zeigen"},
 
-    # Jungfräulicher Boden (nie gescannte Zellen im Ring)
+    # Virgin ground (never-scanned cells in the ring)
     "flt_virgin": {"en": "Virgin land", "de": "Neuland"},
     "virgin_tag": {"en": "untouched", "de": "unberührt"},
     "virgin_line": {"en": "Never scanned by anyone — drive there and it's yours.",
@@ -80,13 +80,13 @@ STRINGS = {
     "ev_aps": {"en": "{n} of your APs", "de": "{n} eigene APs"},
     "watcher_empty": {"en": "No events yet. The Watcher reports from the next poll on, whenever something moves in your turf.",
                       "de": "Noch keine Ereignisse. Der Wächter meldet ab dem nächsten Poll, sobald sich in deinem Revier etwas regt."},
-    # Wächter-Einstellung (Scope)
+    # Watcher setting (scope)
     "watch_setting": {"en": "Alerts", "de": "Alarme"},
     "watch_opt_own": {"en": "My cells only", "de": "Nur meine Zellen"},
     "watch_opt_turf": {"en": "My turf", "de": "Mein Revier"},
     "watch_opt_near": {"en": "Everything in range", "de": "Alles im Umkreis"},
-    # Wikinger-Meldungen — je Lage ein Pool aus 3 Varianten (Wahl: event.id % 3,
-    # deterministisch, damit ein Reload nicht neu würfelt). Suffixe: "", "2", "3".
+    # Viking messages — one pool of 3 variants per situation (choice: event.id % 3,
+    # deterministic so a reload does not re-roll). Suffixes: "", "2", "3".
     "watch_step": {"en": "Warrior — someone is stepping on your turf!",
                    "de": "Krieger — jemand betritt dein Revier!"},
     "watch_step2": {"en": "Raiders on your ground — axes up!",
@@ -116,7 +116,7 @@ STRINGS = {
     "watch_skirmish3": {"en": "War drums echo through your lands.",
                         "de": "Kriegstrommeln hallen durch dein Land."},
 
-    # Web-Push (Wächter aufs Handy)
+    # Web push (Watcher to the phone)
     "push_head": {"en": "Raven post", "de": "Rabenpost"},
     "push_hint": {"en": "The Watcher pings this device even when Warroom is closed. On iPhone: install Warroom to the home screen first (iOS 16.4+).",
                   "de": "Der Wächter meldet sich auf diesem Gerät, auch wenn Warroom zu ist. Auf dem iPhone: Warroom erst zum Homescreen hinzufügen (iOS 16.4+)."},
@@ -133,7 +133,7 @@ STRINGS = {
     "push_welcome_body": {"en": "From now on the Watcher reaches you here — even with Warroom closed.",
                           "de": "Ab jetzt erreicht dich der Wächter hier — auch bei geschlossenem Warroom."},
 
-    # Front-Erkennung (aus dem Event-Log der letzten 7 Tage)
+    # Front detection (from the event log of the last 7 days)
     "front_head": {"en": "Front lines", "de": "Frontverlauf"},
     "front_line": {"en": "<b>{g}</b> pushes from the <b>{dir}</b> — {n} cells in 7 days",
                    "de": "<b>{g}</b> drückt von <b>{dir}</b> — {n} Felder in 7 Tagen"},
@@ -159,7 +159,7 @@ STRINGS = {
     "info_note": {"en": "Numbers grow into a time series with every poll — charts coming in the dashboard build.",
                   "de": "Zahlen wachsen mit jedem Poll zur Zeitreihe — Charts kommen im Dashboard-Ausbau."},
 
-    # Freunde + Live-Position
+    # Friends + live position
     "tab_friends": {"en": "Crew", "de": "Crew"},
     "share_head": {"en": "Live location", "de": "Live-Standort"},
     "share_hint": {"en": "Share your position with your crew — off by default, expires on its own, stop anytime.",
@@ -179,7 +179,7 @@ STRINGS = {
     "remove": {"en": "Remove", "de": "Entfernen"},
     "sharing_dot": {"en": "sharing", "de": "teilt"},
 
-    # Beute-Tour
+    # Loot tour
     "tour_head": {"en": "Loot tour", "de": "Beute-Tour"},
     "tour_empty": {"en": "Tap + on targets below or on map cells to plan a drive.",
                    "de": "Tipp + an Zielen unten oder auf Karten-Zellen, um eine Fahrt zu planen."},
@@ -194,14 +194,14 @@ STRINGS = {
     "maps_cap_note": {"en": "Your tour has <b>{n}</b> — the first {max} of the optimized route get handed over. The in-app guidance knows all {n}.",
                       "de": "Deine Tour hat <b>{n}</b> — übergeben werden die ersten {max} der optimierten Route. Die App-Führung kennt alle {n}."},
 
-    # Dashboard-Charts
+    # Dashboard charts
     "chart_head": {"en": "Trend", "de": "Verlauf"},
     "chart_total": {"en": "APs total", "de": "APs gesamt"},
     "chart_rank": {"en": "Gang rank", "de": "Gang-Rang"},
     "chart_cl": {"en": "Team captured / lost", "de": "Team erobert / verloren"},
     "chart_none": {"en": "Charts appear after a few polls.", "de": "Charts erscheinen nach ein paar Polls."},
 
-    # Passwort ändern
+    # Change password
     "pw_head": {"en": "Change password", "de": "Passwort ändern"},
     "pw_old": {"en": "Current password", "de": "Aktuelles Passwort"},
     "pw_new": {"en": "New password (min. 6)", "de": "Neues Passwort (min. 6)"},
@@ -209,7 +209,7 @@ STRINGS = {
     "pw_ok": {"en": "Password changed.", "de": "Passwort geändert."},
     "pw_err": {"en": "Current password wrong or new one too short.", "de": "Aktuelles Passwort falsch oder neues zu kurz."},
 
-    # Account löschen
+    # Delete account
     "del_head": {"en": "Delete account", "de": "Account löschen"},
     "del_hint": {"en": "Removes your account, turf data, events and push devices from warroom for good. Your wdgwars account and key stay untouched.",
                  "de": "Entfernt Account, Revier-Daten, Ereignisse und Push-Geräte endgültig aus warroom. Dein wdgwars-Account samt Key bleibt unberührt."},
@@ -250,7 +250,7 @@ STRINGS = {
     "auth_register_link": {"en": "Create an account with your wdgwars key",
                            "de": "Account mit deinem wdgwars-Key anlegen"},
 
-    # Fehlermeldungen
+    # Error messages
     "err_login": {"en": "Wrong username or password.", "de": "Falscher Name oder Passwort."},
     "err_pw_short": {"en": "Password must be at least 6 characters.", "de": "Passwort mindestens 6 Zeichen."},
     "err_key_invalid": {"en": "Key invalid or wdgwars unreachable.", "de": "Key ungültig oder wdgwars nicht erreichbar."},
@@ -260,7 +260,7 @@ STRINGS = {
                       "de": "Zu viele Versuche — warte ein paar Minuten und probier's nochmal."},
 }
 
-# JS-Strings (roh mit {platzhaltern}, im Client per tf() gefüllt)
+# JS strings (raw with {placeholders}, filled client-side via tf())
 JS = {
     "gang_your": {"en": "Your gang", "de": "Eure Gang"},
     "gang_holds": {"en": "{g} holds {n}", "de": "{g} hält {n}"},

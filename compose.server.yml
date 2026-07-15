@@ -1,6 +1,6 @@
-# Server-Variante hinter einem Reverse-Proxy im selben Docker-Netz: kein Host-Port.
-# Alles Persistente (SQLite-DB, master.key, vapid.pem) liegt im ./data-Volume, NICHT
-# im Image. Standalone: expose durch `ports: ["8000:8000"]` ersetzen, networks weg.
+# Server variant behind a reverse proxy on the same Docker network: no host port.
+# Everything persistent (SQLite DB, master.key, vapid.pem) lives in the ./data volume,
+# NOT in the image. Standalone: replace expose with `ports: ["8000:8000"]`, drop networks.
 services:
   warroom:
     build: .

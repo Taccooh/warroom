@@ -1,6 +1,6 @@
-"""Dünner wdgwars-API-Client (stdlib urllib, keine Fremd-Deps). Alle Reads brauchen
-nur den X-API-Key. Höflich zum Rate-Limit (30/min): kleiner Mindestabstand zwischen
-Requests + ein Retry bei 429/5xx. Der Key wird hier reingereicht, nie geloggt."""
+"""Thin wdgwars API client (stdlib urllib, no third-party deps). All reads need
+only the X-API-Key. Polite towards the rate limit (30/min): small minimum gap between
+requests + one retry on 429/5xx. The key is passed in here, never logged."""
 import json
 import time
 import urllib.error
@@ -20,7 +20,7 @@ class Wdg:
             raise WdgError("Wdg braucht einen API-Key")
         self._key = key
         self._last = 0.0
-        self._min_gap = 0.4  # ~150 req/min Deckel unsererseits, weit unter 30/min-Fenstern
+        self._min_gap = 0.4  # ~150 req/min cap on our side, well below 30/min windows
 
     def _throttle(self):
         dt = time.monotonic() - self._last
@@ -64,11 +64,11 @@ class Wdg:
         return self._get("/api/team/me")
 
     def territories(self) -> list:
-        """Gang-Hüllen inkl. rank + points → daraus der echte Territorial-Rang."""
+        """Gang hulls incl. rank + points → the real territorial rank comes from this."""
         return self._get("/api/territories")
 
     def member_territories(self) -> dict:
-        """Zell-Raster mit dominantem Owner je Zelle (5-min-Cron-Snapshot)."""
+        """Cell grid with the dominant owner per cell (5-min cron snapshot)."""
         return self._get("/api/member-territories")
 
     def leaderboard(self) -> dict:
@@ -83,7 +83,7 @@ class Wdg:
             q += f"&since={urllib.parse.quote(since)}"
         return self._get(q)
 
-    # ---- Write (für den Live-Uploader, Phase 4) ----
+    # ---- Write (for the live uploader, phase 4) ----
     def upload_csv(self, filename: str, csv_bytes: bytes) -> dict:
         boundary = "----warroom" + str(int(time.time() * 1000))
         body = b"".join([

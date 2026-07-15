@@ -1,8 +1,8 @@
-"""Multi-User-Poller. Ein Zyklus:
-  1. member-territories EINMAL holen (global, für alle gleich) → Owner-Lookup + Raster
-  2. je User: /me (Gang), Footprint (eigene APs, stündlich neu), Owner-Diff → Events,
-     Stats-Snapshot — alles mit dem Key DIESES Users (Rate-Limit ist pro Key).
-Der Key wird nur hier kurz entschlüsselt und nie persistiert."""
+"""Multi-user poller. One cycle:
+  1. fetch member-territories ONCE (global, identical for everyone) → owner lookup + grid
+  2. per user: /me (gang), footprint (own APs, refreshed hourly), owner diff → events,
+     stats snapshot — all with THIS user's key (the rate limit is per key).
+The key is only briefly decrypted here and never persisted."""
 import logging
 import time
 
@@ -59,18 +59,18 @@ def _classify(prev_gid, cur_gid, my_gid):
 
 def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
                    initialized: bool, ring: int, watch_level: str = "turf") -> int:
-    """Turf = eigene AP-Zellen + Ring drumherum. In der territory-Tabelle landen alle
-    besetzten Zellen im Ring (jede Gang) PLUS die eigenen unbesetzten Footprint-Zellen.
-    Events (Wächter) NUR für Footprint-Zellen (eigener Einsatz) → kein Nachbar-Spam."""
+    """Turf = own AP cells + the ring around them. The territory table receives every
+    occupied cell within the ring (any gang) PLUS the own unoccupied footprint cells.
+    Events (watchman) ONLY for footprint cells (own stake) → no neighbour spam."""
     foot = {}  # cell_key -> my_aps
     fset = set()
     for r in conn.execute(
             "SELECT cell_key, i, j, my_aps FROM footprint_cells WHERE user_id = ?", (user_id,)):
         foot[r["cell_key"]] = r["my_aps"]
         fset.add((r["i"], r["j"]))
-    # Anker = Footprint-Zellen mit mind. einem Nachbarn im Ring. Verwirft isolierte
-    # Streu-APs (Durchfahrt/GPS-Ausreißer), deren Ring sonst Fremdfelder zieht
-    # (z. B. je 1 AP in Eindhoven/Rotterdam). Fallback für sehr dünne User: alle Zellen.
+    # Anchors = footprint cells with at least one neighbour within the ring. Discards isolated
+    # stray APs (drive-through/GPS outliers) whose ring would otherwise pull in foreign cells
+    # (e.g. 1 AP each in Eindhoven/Rotterdam). Fallback for very sparse users: all cells.
     def _clustered(i, j):
         for di in range(-ring, ring + 1):
             for dj in range(-ring, ring + 1):
@@ -84,8 +84,8 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
             for dj in range(-ring, ring + 1):
                 turf.add((i + di, j + dj))
 
-    # Über die Turf-Zellen iterieren statt über ALLE globalen Zellen — bei N Usern
-    # sonst N × 150k+ Iterationen pro Zyklus. lookup ist bereits nach cell_key indiziert.
+    # Iterate over the turf cells instead of ALL global cells — with N users that would
+    # otherwise be N × 150k+ iterations per cycle. lookup is already indexed by cell_key.
     new: dict[str, dict] = {}
     for (i, j) in turf:
         k = grid.key_from_index(i, j)
@@ -97,8 +97,8 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
                   "gid": _num(c.get("gang_id")), "gang": c.get("gang"),
                   "uid": _num(c.get("user_id")), "count": _num(c.get("count")),
                   "color": c.get("color")}
-    # eigene unbesetzte Footprint-Zellen ergänzen — aber NUR wenn sie im Turf liegen
-    # (nahe eines Ankers); isolierte Streu-Zellen bleiben so komplett draußen
+    # add own unoccupied footprint cells — but ONLY if they lie within the turf
+    # (near an anchor); isolated stray cells thus stay out entirely
     for r in conn.execute(
             "SELECT cell_key, i, j FROM footprint_cells WHERE user_id = ?", (user_id,)):
         if (r["i"], r["j"]) in turf and r["cell_key"] not in new:
@@ -126,7 +126,7 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
             prev_gid, cur_gid = _num(p["gang_id"]), n["gid"]
             kind = _classify(prev_gid, cur_gid, my_gid)
             if kind:
-                # Nähe: eigene AP-Zelle > eigene Gang beteiligt > nur im Umkreis
+                # Proximity: own AP cell > own gang involved > merely in the vicinity
                 if foot.get(k, 0) > 0:
                     prox = "mine"
                 elif prev_gid == my_gid or cur_gid == my_gid:
@@ -145,8 +145,8 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
                          prev_gid, p["gang"], cur_gid, n["gang"], foot.get(k, 0), prox),
                     )
                     events += 1
-    # Jungfräulicher Boden: im Ring, aber in KEINEM Feed — dort war noch nie jemand.
-    # (new enthält alle besetzten Zellen des Rings + meine eigenen Footprint-Zellen.)
+    # Virgin ground: within the ring but in NO feed — nobody has ever been there.
+    # (new contains all occupied cells of the ring + my own footprint cells.)
     virgin = [(i, j) for (i, j) in turf if grid.key_from_index(i, j) not in new]
     conn.execute("DELETE FROM virgin_cells WHERE user_id = ?", (user_id,))
     if virgin:
@@ -158,12 +158,12 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
             "INSERT INTO virgin_cells (user_id, cell_key, i, j, lat, lng) VALUES (?,?,?,?,?,?)",
             rows)
 
-    # Zellen, die nicht mehr im Turf sind, aus territory entfernen
+    # remove cells that are no longer within the turf from territory
     stale = [k for k in old if k not in new]
     if stale:
         conn.executemany("DELETE FROM territory WHERE user_id = ? AND cell_key = ?",
                          [(user_id, k) for k in stale])
-    # Event-Log je User auf die letzten 200 begrenzen (lautere Scopes → mehr Events)
+    # cap the event log per user at the latest 200 (noisier scopes → more events)
     conn.execute(
         """DELETE FROM events WHERE user_id = ? AND id NOT IN
            (SELECT id FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 200)""",
@@ -173,9 +173,9 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
 
 def snapshot_stats(conn, client: Wdg, user_id: int, me: dict,
                    gctx: dict, team_cache: dict) -> None:
-    """Leaderboard/Territories kommen EINMAL pro Zyklus (gctx), team/me EINMAL pro
-    Gang (team_cache) — nur /me bleibt zwingend pro User. Hält Upstream-Last und
-    Zyklusdauer flach, wenn viele User registriert sind."""
+    """Leaderboard/territories arrive ONCE per cycle (gctx), team/me ONCE per
+    gang (team_cache) — only /me necessarily stays per user. Keeps upstream load and
+    cycle duration flat when many users are registered."""
     my_gang = me.get("gang")
     my_gid = _num(me.get("gang_id"))
     if my_gid in team_cache:
@@ -238,7 +238,7 @@ def run_user(conn, user_row, lookup, glat, glng, gctx, team_cache) -> dict:
     if not initialized:
         conn.execute("UPDATE users SET terr_init = 1 WHERE id = ?", (uid,))
     if n_events:
-        # Der Rabe bringt Kunde: die frisch eingefügten Events gebündelt pushen
+        # The raven brings tidings: push the freshly inserted events as one bundle
         fresh = conn.execute(
             "SELECT * FROM events WHERE user_id = ? ORDER BY id DESC LIMIT ?",
             (uid, n_events)).fetchall()
@@ -251,8 +251,8 @@ def run_user(conn, user_row, lookup, glat, glng, gctx, team_cache) -> dict:
 
 
 def _fetch_global(conn, users) -> tuple[list, float, float, dict]:
-    """Global identische Daten EINMAL pro Zyklus holen (member-territories,
-    leaderboard, territories) — mit dem erstbesten funktionierenden Key."""
+    """Fetch globally identical data ONCE per cycle (member-territories,
+    leaderboard, territories) — with the first working key we find."""
     for u in users:
         try:
             client = Wdg(auth.user_key(u))
@@ -293,7 +293,7 @@ def poll_all(conn) -> dict:
     team_cache: dict = {}
     for k, u in enumerate(users):
         if k:
-            time.sleep(0.15)  # sanftes Rinnsal statt Request-Burst Richtung wdgwars
+            time.sleep(0.15)  # gentle trickle instead of a request burst towards wdgwars
         try:
             res = run_user(conn, u, lookup, glat, glng, gctx, team_cache)
             total_events += res["events"]

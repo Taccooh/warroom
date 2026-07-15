@@ -1,4 +1,4 @@
-"""Read-Helfer fürs Frontend — alles pro user_id. Raster ist global (kv)."""
+"""Read helpers for the frontend — everything per user_id. Grid is global (kv)."""
 import sqlite3
 
 from . import db, grid
@@ -66,9 +66,9 @@ def planer(conn, uid: int, limit: int = 2000) -> list[dict]:
 
 
 def targets(conn, uid: int) -> list[dict]:
-    """Alle Flip-Ziele als kompakte Daten (nicht als Markup): Gegner-Zellen + eigene
-    unbesetzte. Der Client filtert/sortiert darüber und rendert nur ein Fenster —
-    ein Revier kann tausende Zellen haben, die gehören nicht alle ins DOM."""
+    """All flip targets as compact data (not as markup): enemy cells + own
+    unoccupied ones. The client filters/sorts over this and renders only a window —
+    a turf can have thousands of cells, and they don't all belong in the DOM."""
     out = []
     for p in planer(conn, uid):
         out.append({"t": "enemy", "g": p["gang"], "c": p["color"], "gap": p["gap"],
@@ -80,7 +80,7 @@ def targets(conn, uid: int) -> list[dict]:
 
 
 def planer_gangs(planer_rows: list[dict]) -> list[dict]:
-    """Gegner-Gangs in der Zielliste (für die Filter-Chips), stärkste zuerst."""
+    """Enemy gangs in the target list (for the filter chips), strongest first."""
     agg: dict[str, dict] = {}
     for p in planer_rows:
         g = agg.setdefault(p["gang"], {"name": p["gang"], "n": 0, "color": p.get("color")})
@@ -103,8 +103,8 @@ def free_cells(conn, uid: int, limit: int = 2000) -> list[dict]:
 
 
 def _theatre_centers(conn, uid: int) -> list[tuple[float, float]]:
-    """Schwerpunkt je Schauplatz. EIN globaler Schwerpunkt läge bei einem Revier
-    in EU + Nordamerika mitten im Atlantik — also je Gruppe rechnen."""
+    """Centroid per theatre. ONE global centroid would, for a turf spanning
+    EU + North America, sit in the middle of the Atlantic — so compute per group."""
     glat, glng = _grid(conn)
     pts = [grid.center(r["i"], r["j"], glat, glng) for r in conn.execute(
         "SELECT i, j FROM footprint_cells WHERE user_id = ?", (uid,)).fetchall()]
@@ -120,10 +120,10 @@ def _theatre_centers(conn, uid: int) -> list[tuple[float, float]]:
 
 
 def virgin_cells(conn, uid: int, limit: int | None = None) -> list[int]:
-    """Nie gescannter Boden im Ring — als FLACHE Zell-Indizes [i,j,i,j,…].
-    Das können tausende sein; lat/lng sind aus dem Raster berechenbar, die müssen
-    nicht mit über die Leitung (spart bei einem grossen Revier ~80 % Payload).
-    Sortiert nach Nähe zum nächsten eigenen Schauplatz."""
+    """Never-scanned ground within the ring — as FLAT cell indices [i,j,i,j,…].
+    There can be thousands of these; lat/lng are computable from the grid, so they
+    don't need to go over the wire (saves ~80 % payload for a large turf).
+    Sorted by proximity to the nearest own theatre."""
     rows = conn.execute(
         "SELECT i, j, lat, lng FROM virgin_cells WHERE user_id = ?", (uid,)).fetchall()
     cells = [(r["i"], r["j"], r["lat"], r["lng"]) for r in rows]
@@ -155,7 +155,7 @@ def recent_events(conn, uid: int, limit: int = 50) -> list[sqlite3.Row]:
 
 
 def stats_history(conn, uid: int, limit: int = 90) -> list[dict]:
-    """Zeitreihe (aufsteigend) für die Dashboard-Sparklines."""
+    """Time series (ascending) for the dashboard sparklines."""
     rows = conn.execute(
         """SELECT ts, total, gang_rank, team_captured, team_lost
            FROM stats WHERE user_id = ? ORDER BY ts DESC LIMIT ?""", (uid, limit)).fetchall()
@@ -163,17 +163,17 @@ def stats_history(conn, uid: int, limit: int = 90) -> list[dict]:
 
 
 def fronts(conn, uid: int, days: int = 7, top: int = 3) -> list[dict]:
-    """Angriffsrichtung je Gegner-Gang: verlorene/gekippte/besetzte Zellen der
-    letzten Tage, Schwerpunkt relativ zum eigenen Revier-Zentrum → 8er-Kompass.
-    Nur Gangs mit >= 2 Ereignissen — eine Zelle ist Scharmützel, keine Front."""
+    """Attack direction per enemy gang: lost/flipped/captured cells of the
+    last days, centroid relative to the own turf centre → 8-point compass.
+    Only gangs with >= 2 events — a single cell is a skirmish, not a front."""
     gid = _gang(conn, uid)
     glat, glng = _grid(conn)
     pts = [grid.center(r["i"], r["j"], glat, glng) for r in conn.execute(
         "SELECT i, j FROM footprint_cells WHERE user_id = ?", (uid,)).fetchall()]
     if not pts:
         return []
-    # Schwerpunkt je Theater (gleiche Gruppierung wie theatres()) — ein globaler
-    # Schwerpunkt läge bei EU+NA-Revieren mitten im Atlantik.
+    # Centroid per theatre (same grouping as theatres()) — a global centroid
+    # would sit in the middle of the Atlantic for EU+NA turfs.
     groups: list[list] = []
     for la, lo in sorted(pts, key=lambda p: p[1]):
         if groups and lo - groups[-1][-1][1] < 20:
@@ -196,7 +196,7 @@ def fronts(conn, uid: int, days: int = 7, top: int = 3) -> list[dict]:
         center = min(centers, key=lambda c: (r["la"] - c[0]) ** 2 + (r["lo"] - c[1]) ** 2)
         dy = r["la"] - center[0]
         dx = (r["lo"] - center[1]) * math.cos(math.radians(center[0]))
-        if math.hypot(dx, dy) < 0.01:  # ~1 km — Schwerpunkt liegt im Revierkern
+        if math.hypot(dx, dy) < 0.01:  # ~1 km — centroid lies within the turf core
             d = "center"
         else:
             brg = (math.degrees(math.atan2(dx, dy)) + 360) % 360

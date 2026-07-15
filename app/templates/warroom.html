@@ -3,8 +3,8 @@
 {% block head %}
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
 <script src="/static/vendor/leaflet/leaflet.js" defer></script>
-{# Auto-Refresh NUR solange der Erst-Poll wirklich noch läuft — ein Account
-   ohne APs (terr_init gesetzt, footprint leer) bekommt sonst eine Endlosschleife #}
+{# Auto-refresh ONLY while the first poll is actually still running — an account
+   without APs (terr_init set, footprint empty) would otherwise get an endless loop #}
 {% if not meta.terr_init %}<meta http-equiv="refresh" content="6">{% endif %}
 {% endblock %}
 {% block content %}
@@ -128,9 +128,9 @@
       </div>
     </div>
 
-    {# Feld NICHT "username" nennen: Safari sieht ein username-Feld + die
-       Passwort-Felder im Info-Tab und haelt das Ganze fuer ein Login-Formular
-       ("Bei mechanics-toolbox anmelden?"). #}
+    {# Do NOT name this field "username": Safari sees a username field plus the
+       password fields in the info tab and takes the whole thing for a login form
+       ("Sign in to mechanics-toolbox?"). #}
     <form method="post" action="/friends/add" class="friend-add">
       <input type="text" name="crewmate" id="crewmate" placeholder="{{ t('auth_username') }}"
              required autocomplete="off" autocapitalize="none" autocorrect="off"
@@ -220,8 +220,8 @@ document.addEventListener('DOMContentLoaded', function () {
   var targets = {{ targets | tojson }};
   var theatres = {{ theatres | tojson }};
   var grid = {{ grid | tojson }};
-  // Neuland kommt als flache Indexliste [i,j,i,j,…] — lat/lng rechnen wir hier aus
-  // (bei tausenden Zellen spart das ~80 % Payload). Braucht grid → erst hier.
+  // Virgin land arrives as a flat index list [i,j,i,j,…] — we compute lat/lng here
+  // (with thousands of cells that saves ~80% payload). Needs grid → only here.
   function expandVirgin(flat) {
     var out = [];
     for (var k = 0; k + 1 < flat.length; k += 2) {
@@ -262,7 +262,7 @@ document.addEventListener('DOMContentLoaded', function () {
     cells.forEach(function (c) { cellByKey[c.i + '_' + c.j] = c; });
     cells.forEach(function (c) {
       var lead = c.status === 'enemy' && c.gap === 0;
-      // Gegner in ihrer echten Gang-Farbe (CHAOS vs BWM unterscheidbar), eigene gold, frei kalt
+      // Enemies in their real gang color (CHAOS vs BWM distinguishable), own gold, free cold
       var fill = c.status === 'enemy' ? (c.color || COLOR.enemy) : COLOR[c.status];
       var r = L.rectangle(c.b, {
         color: lead ? '#ffd15e' : fill, weight: lead ? 2 : 1,
@@ -284,8 +284,8 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   renderCells();
 
-  // ---- Neuland: nie gescannte Zellen. Eigener Layer, per Chip zuschaltbar —
-  // es sind schnell tausende, die sollen die Karte nicht dauerhaft zupflastern.
+  // ---- Virgin land: never-scanned cells. Separate layer, toggled via chip —
+  // there are quickly thousands of them, they must not plaster the map permanently.
   var virginLayer = L.layerGroup();
   var virginOn = false;
   var virginByKey = {};
@@ -333,34 +333,34 @@ document.addEventListener('DOMContentLoaded', function () {
   var ja = document.getElementById('jump-all');
   if (ja) ja.addEventListener('click', fitAll);
 
-  // Delegation statt Einzel-Handler: die Planer-Liste wird beim Live-Update ersetzt
+  // Delegation instead of individual handlers: the planner list is replaced by the live update
   document.addEventListener('click', function (e) {
     if (!e.target.closest) return;
-    if (e.target.closest('.tour-add')) return;  // + nicht mit fliegen
+    if (e.target.closest('.tour-add')) return;  // the + button must not fly along
     if (e.target.closest('.pl-chip') || e.target.closest('.pl-sort')) return;
     var el = e.target.closest('.pl-item[data-lat]');
     if (el) map.flyTo([parseFloat(el.dataset.lat), parseFloat(el.dataset.lng)], 12, {duration: 0.7});
   });
 
-  // ---- Planer: Filter + Sortierung + Entfernung ----
-  // Getrennte Schritte, weil sie unterschiedlich teuer sind: Filtern schaltet nur
-  // `hidden` (billig), Sortieren baut die Liste um (teuer → nur wenn nötig, und in
-  // EINEM Rutsch per Fragment statt 180 Einzel-Moves).
+  // ---- Planner: filter + sorting + distance ----
+  // Separate steps because they differ in cost: filtering only toggles
+  // `hidden` (cheap), sorting rebuilds the list (expensive → only when needed, and in
+  // ONE go via a fragment instead of 180 individual moves).
   var plFilter = {mode: 'all', gang: null};
   var plSort = 'dist';
   var plLastSortAt = 0;
 
-  // Fenstergröße: so viele Zeilen stehen im DOM. Der Rest bleibt im Speicher —
-  // ein grosses Revier kann tausende Zellen haben, die wuerden das Handy erwuergen.
+  // Window size: this many rows live in the DOM. The rest stays in memory —
+  // a large turf can have thousands of cells, which would strangle the phone.
   var PL_PAGE = 60;
   var plShown = PL_PAGE;
-  var plRef = null;      // Bezugspunkt der zuletzt berechneten Entfernungen
+  var plRef = null;      // reference point of the most recently computed distances
 
   function plRef_() {
     return myPos() || (map ? {lat: map.getCenter().lat, lng: map.getCenter().lng} : null);
   }
 
-  // Alle Kandidaten als Daten: Gegner + frei (vom Server) und Neuland (alle Zellen).
+  // All candidates as data: enemy + free (from the server) and virgin land (all cells).
   function plCandidates() {
     var out = targets.slice();
     virginCells.forEach(function (v) {
@@ -420,8 +420,8 @@ document.addEventListener('DOMContentLoaded', function () {
     return li;
   }
 
-  // Filtern + sortieren laufen ueber ALLE Kandidaten (sonst waere "naechste zuerst"
-  // wieder nur die Sortierung einer Vorauswahl) — gerendert wird nur das Fenster.
+  // Filtering + sorting run over ALL candidates (otherwise "nearest first" would
+  // again just be sorting a pre-selection) — only the window is rendered.
   function plRender() {
     var list = document.getElementById('pl-list');
     if (!list) return;
@@ -455,14 +455,14 @@ document.addEventListener('DOMContentLoaded', function () {
     var chip = document.querySelector('.pl-chip.on b');
     if (chip && plFilter.mode !== 'gang') chip.textContent = cand.length;
     plLastSortAt = Date.now();
-    renderTour();   // "+"-Zustaende der frischen Zeilen setzen
+    renderTour();   // set the "+" states of the fresh rows
   }
 
   function plRefresh() { plShown = PL_PAGE; plRender(); }
 
-  // Beim Fahren feuert das GPS im Sekundentakt. Neu bauen nur, wenn sich der
-  // Bezugspunkt spuerbar verschoben hat (>300 m) oder 10 s um sind — sonst springt
-  // die Liste einem unter dem Daumen weg. Der erste Fix greift sofort.
+  // While driving, GPS fires every second. Rebuild only when the reference
+  // point has moved noticeably (>300 m) or 10 s have passed — otherwise the list
+  // jumps away from under your thumb. The first fix takes effect immediately.
   var plHadGps = false;
   function plOnPosition() {
     var ref = plRef_();
@@ -501,14 +501,14 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   if (initTab && initTab !== 'planer') showTab(initTab);
 
-  // ---- Follow-Mode: eigene Live-Position + „du bist hier"-Kontext ----
+  // ---- Follow mode: own live position + "you are here" context ----
   var meMarker = null, meCircle = null, follow = false, watchId = null;
   var here = document.getElementById('here');
   function updateHere(lat, lng) {
     var c = cellAt(lat, lng);
     here.hidden = false;
     if (!c) {
-      // Kein Feed-Eintrag: entweder Neuland (nie gescannt → holen!) oder außerhalb
+      // No feed entry: either virgin land (never scanned → grab it!) or outside
       var k = Math.floor(lat / grid.lat + 1e-9) + '_' + Math.floor(lng / grid.lng + 1e-9);
       if (virginByKey[k]) {
         here.className = 'here-banner virgin';
@@ -539,7 +539,7 @@ document.addEventListener('DOMContentLoaded', function () {
     updateHere(lat, lng);
     maybePush(lat, lng);
     navUpdate(lat, lng);
-    plOnPosition();  // Entfernungen mitziehen; Umsortieren nur gedrosselt
+    plOnPosition();  // keep distances updated; re-sorting only throttled
   }
   function onPosErr() { here.hidden = false; here.className = 'here-banner out'; here.innerHTML = T.no_gps; }
   var LocateCtl = L.Control.extend({options: {position: 'topleft'}, onAdd: function () {
@@ -561,10 +561,10 @@ document.addEventListener('DOMContentLoaded', function () {
       follow = !follow; btn.classList.toggle('active', follow);
       if (follow && meMarker) map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 13));
     }
-    void btn.offsetWidth;  // iOS zeichnet Klassenwechsel an Leaflet-Controls sonst erst beim nächsten Reflow
+    void btn.offsetWidth;  // otherwise iOS paints class changes on Leaflet controls only on the next reflow
   });
 
-  // ---- Crew: Live-Positionen der Freunde (12s-Poll) + eigener Push beim Teilen ----
+  // ---- Crew: friends' live positions (12s poll) + own push while sharing ----
   var friendLayer = L.layerGroup().addTo(map);
   function loadFriends() {
     fetch('/friends/positions.json', {headers: {'X-Requested-With': 'fetch'}})
@@ -583,10 +583,10 @@ document.addEventListener('DOMContentLoaded', function () {
   loadFriends();
   setInterval(loadFriends, 12000);
 
-  // ---- Live-Update ohne Neuladen ----
-  // Hat der Poller frischere Daten, patchen wir Karte, Zähler, Wächter und Planer
-  // in-place. Kein Reload (kein Blitzen, kein Zustandsverlust) — läuft deshalb auch
-  // während der Tour-Führung: gerade beim Angriff muss der Wächter durchkommen.
+  // ---- Live update without reloading ----
+  // If the poller has fresher data, we patch map, counters, watcher and planner
+  // in-place. No reload (no flashing, no state loss) — which is why it also runs
+  // during tour guidance: right during an attack the watcher has to get through.
   var applying = false;
   function applyLive() {
     if (applying) return;
@@ -607,8 +607,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
         var pb = document.getElementById('planner-body');
         if (pb && d.planner_html != null) {
-          pb.innerHTML = d.planner_html;   // nur Chips + Sortierfeld
-          // Filter/Sortierung des Nutzers nach dem Austausch wiederherstellen
+          pb.innerHTML = d.planner_html;   // only chips + sort field
+          // Restore the user's filter/sorting after the swap
           var sel = document.getElementById('pl-sort');
           if (sel) sel.value = plSort;
           var known = false;
@@ -618,13 +618,13 @@ document.addEventListener('DOMContentLoaded', function () {
             c.classList.toggle('on', same);
             if (same) known = true;
           });
-          // Gefilterte Gang kann verschwunden sein (Zelle geflippt) → zurück auf Alle
+          // The filtered gang may have vanished (cell flipped) → back to All
           if (!known) {
             plFilter = {mode: 'all', gang: null};
             var all = document.querySelector('.pl-chip[data-filter="all"]');
             if (all) all.classList.add('on');
           }
-          plRender();   // plShown bleibt: wer "mehr" geklickt hat, behält seine Liste
+          plRender();   // plShown stays: whoever clicked "more" keeps their list
         }
 
         if (d.counts) {
@@ -633,8 +633,8 @@ document.addEventListener('DOMContentLoaded', function () {
             if (el) el.textContent = d.counts[k];
           });
         }
-        // Zellen nur neu zeichnen, wenn kein Popup offen ist (das würde es schließen).
-        // Kartenblick/Zoom bleiben unangetastet — wir zeichnen nur den Layer neu.
+        // Only redraw cells when no popup is open (redrawing would close it).
+        // Map view/zoom stay untouched — we only redraw the layer.
         if (d.cells && !document.querySelector('.leaflet-popup')) {
           cells = d.cells;
           renderCells();
@@ -659,7 +659,7 @@ document.addEventListener('DOMContentLoaded', function () {
       body: 'lat=' + encodeURIComponent(lat) + '&lng=' + encodeURIComponent(lng)}).catch(function () {});
   }
 
-  // ---- Dashboard-Sparklines aus der Stats-Zeitreihe ----
+  // ---- Dashboard sparklines from the stats time series ----
   (function () {
     if (!HISTORY || HISTORY.length < 2) return;
     var box = document.getElementById('charts');
@@ -689,7 +689,7 @@ document.addEventListener('DOMContentLoaded', function () {
     box.innerHTML = html;
   })();
 
-  // ---- Beute-Tour: Ziele wählen → Reihenfolge optimieren → führen ----
+  // ---- Loot tour: pick targets → optimize the order → guide ----
   var tour = [];
   try { tour = JSON.parse(localStorage.getItem('wr_tour') || '[]') || []; } catch (e) { tour = []; }
   var tourOrdered = null;
@@ -702,20 +702,20 @@ document.addEventListener('DOMContentLoaded', function () {
   var navBanner = document.getElementById('nav');
   var guidanceOn = false, navIdx = 0;
 
-  // ---- Wegpunkte auf die Straße ziehen ----
-  // Der Zellmittelpunkt liegt oft im Wald/Acker/Fluss → Google baut daraus Routen
-  // ins Nirgendwo. Wir holen uns pro Zelle den nächsten Straßenpunkt (serverseitig
-  // aus OpenStreetMap, dauerhaft gecacht). Die Zell-Identität (lat/lng = Mittelpunkt)
-  // bleibt unangetastet — daran hängen "+"-Abgleich und die Auto-Weiterschaltung.
+  // ---- Snap waypoints onto the road ----
+  // The cell center often sits in a forest/field/river → Google builds routes to
+  // nowhere from that. We fetch the nearest road point per cell (server-side
+  // from OpenStreetMap, cached permanently). The cell identity (lat/lng = center)
+  // stays untouched — the "+" matching and the auto-advance depend on it.
   function cellOf(s) {
     return [Math.floor(s.lat / grid.lat + 1e-9), Math.floor(s.lng / grid.lng + 1e-9)];
   }
   function stopPos(s) {
     return (s.rlat != null) ? {lat: s.rlat, lng: s.rlng} : {lat: s.lat, lng: s.lng};
   }
-  // Gebündelt: wer schnell mehrere Zellen antippt, löst EINE Anfrage aus statt fünf.
-  // Zellen, die der Server nicht beantworten konnte (Overpass gerade weg), bleiben
-  // offen und werden erneut versucht — sie dürfen NICHT als "keine Straße" gelten.
+  // Batched: tapping several cells in quick succession fires ONE request instead of five.
+  // Cells the server could not answer (Overpass momentarily down) stay
+  // open and are retried — they must NOT count as "no road".
   var snapT = null, snapTries = 0;
   function snapTour() {
     if (snapT) clearTimeout(snapT);
@@ -732,7 +732,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (d && d.points) {
           tour.forEach(function (s) {
             var c = cellOf(s), k = c[0] + '_' + c[1];
-            if (!(k in d.points)) return;        // unbeantwortet → offen lassen
+            if (!(k in d.points)) return;        // unanswered → leave open
             var p = d.points[k];
             if (p) { s.rlat = p[0]; s.rlng = p[1]; s.noRoad = false; }
             else { s.rlat = null; s.rlng = null; s.noRoad = true; }
@@ -741,7 +741,7 @@ document.addEventListener('DOMContentLoaded', function () {
           renderTour();
           if (tourOrdered) drawRoute();
         }
-        // Noch offene Zellen? Später nochmal — Overpass ist manchmal kurz weg.
+        // Cells still open? Try again later — Overpass is sometimes briefly gone.
         var open = tour.some(function (s) { return s.rlat === undefined; });
         if (open && snapTries < 3) {
           snapTries++;
@@ -774,8 +774,8 @@ document.addEventListener('DOMContentLoaded', function () {
     return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
   }
   function myPos() {
-    // Ohne GPS-Marker gibt es keine eigene Position. (Hier stand eine nie definierte
-    // Variable `own` → ReferenceError, der ohne GPS u.a. die Tour-Optimierung riss.)
+    // Without a GPS marker there is no own position. (A never-defined variable
+    // `own` used to sit here → ReferenceError that, without GPS, broke tour optimization among other things.)
     if (meMarker) { var ll = meMarker.getLatLng(); return {lat: ll.lat, lng: ll.lng}; }
     return null;
   }
@@ -787,7 +787,7 @@ document.addEventListener('DOMContentLoaded', function () {
     tour.forEach(function (s, idx) { if (tKey(s.lat, s.lng) === k) i = idx; });
     var before = tour.length;
     if (i >= 0) tour.splice(i, 1); else tour.push({lat: lat, lng: lng, label: label || ''});
-    // Genau beim Überschreiten der Google-Grenze einmal Bescheid geben
+    // Notify exactly once when crossing the Google limit
     if (tour.length > MAPS_MAX && before <= MAPS_MAX) {
       toast('<b>' + esc(tf(T.maps_cap, {max: MAPS_MAX})) + '</b><br>' +
             esc(tf(T.maps_cap_toast, {max: MAPS_MAX, n: tour.length})), 6500, true);
@@ -849,13 +849,13 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  // Google Maps nimmt maximal 9 Wegpunkte + 1 Ziel = 10 Stopps. Alles darüber
-  // wurde bisher STILL abgeschnitten — jetzt sagen wir es.
+  // Google Maps takes at most 9 waypoints + 1 destination = 10 stops. Everything
+  // beyond that used to be cut off SILENTLY — now we say so.
   var MAPS_MAX = 10;
   function mapsUrl() {
     var stops = (tourOrdered || tour).slice(0, MAPS_MAX);
     if (!stops.length) return '#';
-    // Straßenpunkte statt Zellmittelpunkte — sonst schickt Google einen in den Acker
+    // Road points instead of cell centers — otherwise Google sends you into a field
     var ll = stops.map(stopPos);
     var dest = ll[ll.length - 1], wps = ll.slice(0, -1);
     var u = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' +
@@ -864,18 +864,18 @@ document.addEventListener('DOMContentLoaded', function () {
     return u;
   }
 
-  // ---- Kurzmeldung über der Karte, angekündigt vom Herold ----
-  // Der Warlord springt aus der Kartenmitte, hält kurz drohend inne und fliegt
-  // schrumpfend in die Meldung, wo er als Siegel sitzen bleibt.
+  // ---- Short notice above the map, announced by the herald ----
+  // The warlord leaps out of the map center, pauses menacingly for a moment and
+  // flies, shrinking, into the notice, where he stays seated as a seal.
   var toastEl = document.getElementById('toast');
   var toastTxt = document.getElementById('toast-txt');
   var toastApe = document.getElementById('toast-ape');
   var toastT = null, heraldT = [];
   var REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // ---- Zum Ort des Geschehens springen (Klick auf einen Wächter-Bericht) ----
-  // Karte fliegt zur Zelle, der Warlord schlägt dort ein und verpufft — wie ein
-  // „HIER!"-Zeigefinger auf den Tatort.
+  // ---- Jump to the scene of the action (click on a watcher report) ----
+  // The map flies to the cell, the warlord strikes there and puffs away — like a
+  // "HERE!" finger pointing at the crime scene.
   function apeStrike() {
     var stage = document.querySelector('.stage');
     if (!stage || REDUCED) return;
@@ -901,7 +901,7 @@ document.addEventListener('DOMContentLoaded', function () {
     strikePending = true;
     function fire() { if (!strikePending) return; strikePending = false; apeStrike(); }
     map.once('moveend', fire);
-    setTimeout(fire, 1100);   // Fallback, falls die Karte kaum bewegt (moveend bleibt aus)
+    setTimeout(fire, 1100);   // fallback in case the map barely moves (moveend never fires)
     map.flyTo([lat, lng], Math.max(map.getZoom(), 13), {duration: 0.8});
   }
 
@@ -931,8 +931,8 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
 
-    // 1) Herold knallt aus der Mitte — Meldung liegt schon da, nur unsichtbar,
-    //    damit wir den Zielplatz des Siegels ausmessen können.
+    // 1) Herald bursts out of the center — the notice is already there, just invisible,
+    //    so we can measure the seal's target spot.
     toastApe.classList.remove('on');
     toastEl.hidden = false;
     toastEl.classList.remove('on');
@@ -952,7 +952,7 @@ document.addEventListener('DOMContentLoaded', function () {
     burst.style.top = Math.round(sr.height * 0.44 - SIZE / 2) + 'px';
     burst.classList.add('pop');
 
-    // 2) …hält inne, dann fliegt er ins Siegel-Feld der Meldung.
+    // 2) …pauses, then flies into the notice's seal slot.
     heraldT.push(setTimeout(function () {
       var br = burst.getBoundingClientRect();
       var tr = toastApe.getBoundingClientRect();
@@ -977,9 +977,9 @@ document.addEventListener('DOMContentLoaded', function () {
     toastT = setTimeout(hideToast, life + 1300);
   }
 
-  // Gewählte Zellen pulsieren auf der Karte — sofort beim Antippen, nicht erst nach
-  // dem Optimieren. Eigene Ebene mit einem Rahmen je Stopp: funktioniert damit auch
-  // für Neuland (dessen Zell-Rechtecke sind nicht gezeichnet, solange der Layer aus ist).
+  // Selected cells pulse on the map — immediately on tap, not only after
+  // optimizing. Separate pane with one outline per stop: that way it also works
+  // for virgin land (whose cell rectangles are not drawn while the layer is off).
   map.createPane('picks');
   map.getPane('picks').style.zIndex = 450;
   var pickLayer = L.layerGroup().addTo(map);
@@ -1007,7 +1007,7 @@ document.addEventListener('DOMContentLoaded', function () {
     markTourCells();
     var warn = document.getElementById('tour-warn');
     if (warn) {
-      // Dauerhinweis, solange die Tour über der Google-Grenze liegt
+      // Persistent notice while the tour is over the Google limit
       warn.hidden = n <= MAPS_MAX;
       if (n > MAPS_MAX) {
         warn.innerHTML = '⚠ <b>' + esc(tf(T.maps_cap, {max: MAPS_MAX})) + '</b> — ' +
@@ -1054,8 +1054,8 @@ document.addEventListener('DOMContentLoaded', function () {
       navBanner.innerHTML = tf(T.nav_done, {n: tourOrdered.length});
       stopGuidance(); return;
     }
-    // Pfeil und Entfernung zeigen auf den Straßenpunkt; die Auto-Weiterschaltung
-    // oben vergleicht weiter Zell-Schlüssel (Mittelpunkt) — das bleibt korrekt.
+    // Arrow and distance point at the road point; the auto-advance above keeps
+    // comparing cell keys (center) — that stays correct.
     var tgt = stopPos(tourOrdered[navIdx]), here = {lat: lat, lng: lng};
     navBanner.hidden = false; navBanner.className = 'nav-banner';
     navBanner.innerHTML = '<span class="nav-arrow" style="transform:rotate(' + bearing(here, tgt).toFixed(0) + 'deg)">↑</span> ' +
@@ -1078,10 +1078,10 @@ document.addEventListener('DOMContentLoaded', function () {
     if (guidanceOn) stopGuidance(); else startGuidance();
   });
   renderTour();
-  snapTour();   // gespeicherte Tour aus einer alten Sitzung nachträglich snappen
+  snapTour();   // retroactively snap a tour saved in an old session
   plRefresh();
 
-  // ---- Rabenpost: Web-Push An/Aus für dieses Gerät ----
+  // ---- Raven post: web push on/off for this device ----
   (function () {
     var box = document.getElementById('push-box');
     if (!box || !('serviceWorker' in navigator) || !('PushManager' in window) ||
@@ -1116,7 +1116,7 @@ document.addEventListener('DOMContentLoaded', function () {
       }
       btn.disabled = true;
       stat.textContent = T.push_working;
-      // Nie wieder still haengen: jede Stufe bekommt eine Frist, sonst sagt das UI warum.
+      // Never hang silently again: every stage gets a deadline, otherwise the UI says why.
       function withTimeout(p, ms, what) {
         return Promise.race([p, new Promise(function (_, rej) {
           setTimeout(function () { rej(new Error(what)); }, ms);
@@ -1127,7 +1127,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return Promise.all([withTimeout(navigator.serviceWorker.ready, 8000, 'service worker'),
                             fetch('/push/pubkey').then(function (r) { return r.json(); })])
           .then(function (rs) {
-            // Ein evtl. verwaistes Abo (Server kennt es nicht mehr) erst aufräumen
+            // First pick up a possibly orphaned subscription (server no longer knows it)
             return withTimeout(rs[0].pushManager.getSubscription().then(function (old) {
               if (old) return old;
               return rs[0].pushManager.subscribe({userVisibleOnly: true,
@@ -1152,11 +1152,11 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   })();
 
-  // Mobile: Leaflet initialisiert oft bevor das Flex-Layout die echte Kartengröße
-  // hat → Karte bleibt leer/falsch, bis man manuell nachlädt. invalidateSize +
-  // neu einpassen, sobald das Layout steht (mehrfach, bis window.load).
-  // Beim ersten Aufbau steht die Karte noch auf der Startansicht (Atlantik) — die
-  // Entfernungen müssen deshalb nachgezogen werden, sobald sie aufs Revier passt.
+  // Mobile: Leaflet often initializes before the flex layout has the real map
+  // size → the map stays empty/wrong until you reload manually. invalidateSize +
+  // refit once the layout has settled (several times, up to window.load).
+  // On first build the map is still on the start view (Atlantic) — the distances
+  // therefore have to be pulled along once it is fitted to the turf.
   function relayout() { map.invalidateSize(); fitInitial(); plRefresh(); }
   setTimeout(relayout, 250);
   setTimeout(relayout, 900);

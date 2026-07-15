@@ -1,4 +1,4 @@
-"""Jinja-Setup + i18n-Kontext + Anzeige-Helfer."""
+"""Jinja setup + i18n context + display helpers."""
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -15,8 +15,8 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 LANG_COOKIE = "wr_lang"
 
-# Cache-Buster: höchste mtime der eigenen Assets. Ändert sich bei jedem Edit →
-# neue ?v=-URL → Cloudflare/Browser holen frisch (CF cached /static/* sonst 4 h).
+# Cache buster: highest mtime of our own assets. Changes on every edit →
+# new ?v= URL → Cloudflare/browsers fetch fresh (CF otherwise caches /static/* for 4 h).
 ASSET_V = 0
 for _p in (STATIC_DIR / "style.css", STATIC_DIR / "sw.js"):
     try:
@@ -36,7 +36,7 @@ def fmt_n(v):
 
 
 def fmt_local(v):
-    """DB-Zeitstempel (UTC, 'YYYY-MM-DD HH:MM:SS') → Wandzeit in config.TZ."""
+    """DB timestamp (UTC, 'YYYY-MM-DD HH:MM:SS') → wall-clock time in config.TZ."""
     try:
         dt = datetime.fromisoformat(str(v)).replace(tzinfo=timezone.utc)
         return dt.astimezone(ZoneInfo(config.TZ)).strftime("%Y-%m-%d %H:%M")

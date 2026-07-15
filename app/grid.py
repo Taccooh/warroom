@@ -1,7 +1,7 @@
-"""Zell-Mathe. Das Raster kommt LIVE aus dem member-territories-Feed (grid_lat/lng),
-wird also nicht hardcodet. Aktuell 0.02×0.02° — die Zelle ist an Vielfachen des
-Rasters verankert (SW-Ecke). Ein winziges Epsilon killt Float-Rundungsfehler an den
-Zellgrenzen (42.54/0.02 landet in Float knapp unter 2127)."""
+"""Cell math. The grid comes LIVE from the member-territories feed (grid_lat/lng),
+so it is not hardcoded. Currently 0.02×0.02° — a cell is anchored at multiples of
+the grid (SW corner). A tiny epsilon kills float rounding errors at the cell
+borders (42.54/0.02 lands in float just below 2127)."""
 import math
 
 _EPS = 1e-9
@@ -21,12 +21,12 @@ def key_from_index(i: int, j: int) -> str:
 
 
 def anchor(i: int, j: int, glat: float, glng: float) -> tuple[float, float]:
-    """SW-Ecke der Zelle (lat, lng)."""
+    """SW corner of the cell (lat, lng)."""
     return (round(i * glat, 6), round(j * glng, 6))
 
 
 def bounds(i: int, j: int, glat: float, glng: float) -> list[list[float]]:
-    """Leaflet-Rechteck [[südwest],[nordost]] für diese Zelle."""
+    """Leaflet rectangle [[southwest],[northeast]] for this cell."""
     la, lo = anchor(i, j, glat, glng)
     return [[la, lo], [round(la + glat, 6), round(lo + glng, 6)]]
 

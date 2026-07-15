@@ -1,5 +1,5 @@
-"""SQLite (stdlib). Multi-User: jede Datenzeile hängt an einem user_id. Der wdgwars-Key
-liegt nur Fernet-verschlüsselt in users.key_enc. kv bleibt global (nur das Raster)."""
+"""SQLite (stdlib). Multi-user: every data row is tied to a user_id. The wdgwars key
+is stored only Fernet-encrypted in users.key_enc. kv stays global (only the grid)."""
 import sqlite3
 
 from . import config
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
     gang_id       INTEGER,
     gang          TEXT,
     password_hash TEXT NOT NULL,
-    key_enc       TEXT NOT NULL,          -- Fernet-verschlüsselter wdgwars-Key
+    key_enc       TEXT NOT NULL,          -- Fernet-encrypted wdgwars key
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     last_poll     TEXT,
     footprint_at  REAL NOT NULL DEFAULT 0,
@@ -61,8 +61,8 @@ CREATE TABLE IF NOT EXISTS stats (
     team_total INTEGER, team_captured INTEGER, team_lost INTEGER, team_reinforced INTEGER,
     PRIMARY KEY (user_id, ts)
 );
--- Freundschaften: bei 'accepted' existieren beide Richtungen (A,B) und (B,A).
--- Ausstehend: nur (Anfragender, Ziel, 'pending').
+-- Friendships: with 'accepted' both directions (A,B) and (B,A) exist.
+-- Pending: only (requester, target, 'pending').
 CREATE TABLE IF NOT EXISTS friends (
     user_id    INTEGER NOT NULL,
     friend_id  INTEGER NOT NULL,
@@ -70,30 +70,30 @@ CREATE TABLE IF NOT EXISTS friends (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, friend_id)
 );
--- Live-Position: strikt opt-in. sharing_until (UTC-ISO) in der Zukunft = wird geteilt.
+-- Live position: strictly opt-in. sharing_until (UTC ISO) in the future = is shared.
 CREATE TABLE IF NOT EXISTS positions (
     user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     lat REAL, lng REAL,
     updated_at    TEXT,
     sharing_until TEXT
 );
--- Jungfräulicher Boden: Zellen im Turf-Ring, in denen NIEMAND APs hat (weder eine
--- Gang noch ich) — sie tauchen im Feed gar nicht auf. Herrenlos = risikofrei holbar.
+-- Virgin ground: cells in the turf ring where NOBODY has APs (neither a
+-- gang nor me) — they never show up in the feed at all. Ownerless = risk-free to grab.
 CREATE TABLE IF NOT EXISTS virgin_cells (
     user_id  INTEGER NOT NULL,
     cell_key TEXT NOT NULL,
     i INTEGER NOT NULL, j INTEGER NOT NULL, lat REAL, lng REAL,
     PRIMARY KEY (user_id, cell_key)
 );
--- Straßenpunkt je Zelle (global, nicht pro User): der Zellmittelpunkt liegt oft im
--- Wald/Acker/Fluss → Routen ins Nirgendwo. found=0 heißt "in dieser Zelle ist keine".
+-- Road point per cell (global, not per user): the cell centre often lies in
+-- woods/fields/rivers → routes to nowhere. found=0 means "there is none in this cell".
 CREATE TABLE IF NOT EXISTS cell_roads (
     cell_key TEXT PRIMARY KEY,
     lat REAL, lng REAL,
     found INTEGER NOT NULL DEFAULT 0,
     ts   TEXT NOT NULL DEFAULT (datetime('now'))
 );
--- Web-Push: eine Zeile pro Gerät (Endpoint). lang = Sprache des Geräts beim Abo.
+-- Web push: one row per device (endpoint). lang = language of the device at subscribe time.
 CREATE TABLE IF NOT EXISTS push_subs (
     endpoint   TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -110,7 +110,7 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(config.DB_PATH, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")  # Poll + Request konkurrieren → warten statt „locked"
+    conn.execute("PRAGMA busy_timeout=5000")  # poll + request contend → wait instead of "locked"
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
@@ -123,7 +123,7 @@ def _add_col(conn, table: str, col: str, decl: str) -> None:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
-    # Migrationen für bestehende DBs (CREATE IF NOT EXISTS ändert keine Spalten)
+    # Migrations for existing DBs (CREATE IF NOT EXISTS does not alter columns)
     _add_col(conn, "users", "watch_level", "TEXT NOT NULL DEFAULT 'near'")
     _add_col(conn, "events", "proximity", "TEXT")
 
