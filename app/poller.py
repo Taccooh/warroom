@@ -29,8 +29,11 @@ def _num(x):
 def refresh_footprint(conn, client: Wdg, user_id: int, glat: float, glng: float) -> int:
     data = client.my_aps()
     aps = data.get("aps", [])
+    truncated = bool(data.get("truncated"))
     counts: dict[str, list] = {}
     for a in aps:
+        if a.get("type") != "WIFI":  # only WiFi counts for turf; BLE just fills the 500k window
+            continue
         la, lo = a.get("lat"), a.get("lng")
         if la is None or lo is None:
             continue
@@ -41,12 +44,27 @@ def refresh_footprint(conn, client: Wdg, user_id: int, glat: float, glng: float)
             c[2] += 1
         else:
             counts[k] = [i, j, 1]
-    conn.execute("DELETE FROM footprint_cells WHERE user_id = ?", (user_id,))
-    conn.executemany(
-        "INSERT INTO footprint_cells (user_id, cell_key, i, j, my_aps) VALUES (?,?,?,?,?)",
-        [(user_id, k, v[0], v[1], v[2]) for k, v in counts.items()],
-    )
-    conn.execute("UPDATE users SET footprint_at = ? WHERE id = ?", (time.time(), user_id))
+    if truncated:
+        # Server capped the AP list (>500k scans, newest-first). The active turf is
+        # in the window; older cells sit below the cut and can't be fetched (no upper
+        # bound param). Merge max(old, new) per cell so the map converges instead of
+        # shrinking each cycle. Still only cell counts are stored — no raw APs.
+        log.warning("footprint of %s truncated at %s rows — merging instead of replacing",
+                    user_id, len(aps))
+        for k, v in counts.items():
+            conn.execute(
+                """INSERT INTO footprint_cells (user_id, cell_key, i, j, my_aps) VALUES (?,?,?,?,?)
+                   ON CONFLICT(user_id, cell_key)
+                   DO UPDATE SET my_aps = MAX(my_aps, excluded.my_aps)""",
+                (user_id, k, v[0], v[1], v[2]))
+    else:
+        conn.execute("DELETE FROM footprint_cells WHERE user_id = ?", (user_id,))
+        conn.executemany(
+            "INSERT INTO footprint_cells (user_id, cell_key, i, j, my_aps) VALUES (?,?,?,?,?)",
+            [(user_id, k, v[0], v[1], v[2]) for k, v in counts.items()],
+        )
+    conn.execute("UPDATE users SET footprint_at = ?, footprint_truncated = ? WHERE id = ?",
+                 (time.time(), int(truncated), user_id))
     return len(counts)
 
 

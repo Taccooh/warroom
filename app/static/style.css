@@ -507,6 +507,8 @@ path.cell-picked {
   border-color: rgba(232, 182, 76, 0.5);
 }
 .pl-gap.free { background: rgba(95, 119, 137, 0.14); color: var(--frost); border-color: var(--line); }
+.pl-gap.fog { background: rgba(120, 130, 140, 0.16); color: var(--muted); border-color: var(--edge); }
+.trunc-hint { border-left: 3px solid var(--gold-dim); padding-left: 0.6rem; margin-top: 0.7rem; }
 /* Bar: your gold against the owner's red remainder */
 .pl-bar {
   height: 4px; margin: 0.34rem 0 0.26rem;

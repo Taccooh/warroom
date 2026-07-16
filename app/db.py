@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
     last_poll     TEXT,
     footprint_at  REAL NOT NULL DEFAULT 0,
     terr_init     INTEGER NOT NULL DEFAULT 0,
-    watch_level   TEXT NOT NULL DEFAULT 'near'   -- own | turf | near
+    watch_level   TEXT NOT NULL DEFAULT 'near',  -- own | turf | near
+    footprint_truncated INTEGER NOT NULL DEFAULT 0  -- AP list hit the 500k server cap
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token      TEXT PRIMARY KEY,
@@ -129,6 +130,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     # Migrations for existing DBs (CREATE IF NOT EXISTS does not alter columns)
     _add_col(conn, "users", "watch_level", "TEXT NOT NULL DEFAULT 'near'")
     _add_col(conn, "events", "proximity", "TEXT")
+    _add_col(conn, "users", "footprint_truncated", "INTEGER NOT NULL DEFAULT 0")
 
 
 def kv_get(conn, key: str, default=None):

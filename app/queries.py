@@ -18,10 +18,12 @@ def meta(conn, user: sqlite3.Row) -> dict:
     fp = conn.execute(
         "SELECT COUNT(*) n, COALESCE(SUM(my_aps),0) a FROM footprint_cells WHERE user_id = ?",
         (user["id"],)).fetchone()
+    keys = user.keys()
     return {
         "username": user["wdg_username"], "gang": user["gang"], "gang_id": user["gang_id"],
         "last_poll": user["last_poll"], "footprint_cells": fp["n"], "my_aps_total": fp["a"],
         "terr_init": bool(user["terr_init"]),
+        "truncated": bool(user["footprint_truncated"]) if "footprint_truncated" in keys else False,
     }
 
 
@@ -36,7 +38,12 @@ def revier_cells(conn, uid: int) -> list[dict]:
     out = []
     for r in rows:
         status = "free" if r["gang_id"] is None else ("mine" if r["gang_id"] == gid else "enemy")
-        gap = max(0, (r["count"] or 0) - r["my_aps"] + 1) if status == "enemy" else None
+        # count is None when the feed hides enemy strength (Hunt Season fog) → gap
+        # stays None ("unknown"), never a fake 0. Missing value ≠ zero.
+        if status == "enemy" and r["count"] is not None:
+            gap = max(0, r["count"] - r["my_aps"] + 1)
+        else:
+            gap = None
         out.append({"i": r["i"], "j": r["j"], "b": grid.bounds(r["i"], r["j"], glat, glng),
                     "status": status, "gang": r["gang"], "count": r["count"],
                     "my_aps": r["my_aps"], "gap": gap, "color": r["color"]})
@@ -51,18 +58,25 @@ def _gang(conn, uid: int) -> int | None:
 def planer(conn, uid: int, limit: int = 2000) -> list[dict]:
     glat, glng = _grid(conn)
     gid = _gang(conn, uid)
+    # Sort: fogged cells (count NULL) last, otherwise smallest AP deficit first, then
+    # by how many of my APs are already there. gap itself is computed in Python so a
+    # hidden count stays None instead of collapsing to 0 via COALESCE.
     rows = conn.execute(
-        """SELECT t.i, t.j, t.gang, t.count, t.color, COALESCE(f.my_aps, 0) AS my_aps,
-                  MAX(0, COALESCE(t.count,0) - COALESCE(f.my_aps,0) + 1) AS gap
+        """SELECT t.i, t.j, t.gang, t.count, t.color, COALESCE(f.my_aps, 0) AS my_aps
            FROM territory t
            LEFT JOIN footprint_cells f ON f.user_id = t.user_id AND f.cell_key = t.cell_key
            WHERE t.user_id = ? AND t.gang_id IS NOT NULL AND t.gang_id != ?
-           ORDER BY gap ASC, my_aps DESC LIMIT ?""", (uid, gid, limit)).fetchall()
-    return [{"lat": grid.center(r["i"], r["j"], glat, glng)[0],
-             "lng": grid.center(r["i"], r["j"], glat, glng)[1],
-             "gang": r["gang"], "count": r["count"], "my_aps": r["my_aps"], "gap": r["gap"],
-             "color": r["color"]}
-            for r in rows]
+           ORDER BY (t.count IS NULL),
+                    (COALESCE(t.count,0) - COALESCE(f.my_aps,0)) ASC, my_aps DESC
+           LIMIT ?""", (uid, gid, limit)).fetchall()
+    out = []
+    for r in rows:
+        gap = None if r["count"] is None else max(0, r["count"] - r["my_aps"] + 1)
+        out.append({"lat": grid.center(r["i"], r["j"], glat, glng)[0],
+                    "lng": grid.center(r["i"], r["j"], glat, glng)[1],
+                    "gang": r["gang"], "count": r["count"], "my_aps": r["my_aps"], "gap": gap,
+                    "color": r["color"]})
+    return out
 
 
 def targets(conn, uid: int) -> list[dict]:
@@ -71,8 +85,10 @@ def targets(conn, uid: int) -> list[dict]:
     a turf can have thousands of cells, and they don't all belong in the DOM."""
     out = []
     for p in planer(conn, uid):
+        # cnt/gap stay None when the feed fogs enemy strength — the client renders
+        # "strength hidden" instead of a bogus 0.
         out.append({"t": "enemy", "g": p["gang"], "c": p["color"], "gap": p["gap"],
-                    "my": p["my_aps"], "cnt": p["count"] or 0,
+                    "my": p["my_aps"], "cnt": p["count"],
                     "lat": p["lat"], "lng": p["lng"]})
     for f in free_cells(conn, uid):
         out.append({"t": "free", "my": f["my_aps"], "lat": f["lat"], "lng": f["lng"]})

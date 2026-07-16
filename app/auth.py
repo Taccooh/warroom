@@ -57,7 +57,7 @@ def session_user(conn, token: str | None) -> sqlite3.Row | None:
     return conn.execute(
         """SELECT u.id, u.wdg_username, u.wdg_user_id, u.gang_id, u.gang,
                   u.password_hash, u.created_at, u.last_poll, u.footprint_at,
-                  u.terr_init, u.watch_level
+                  u.terr_init, u.watch_level, u.footprint_truncated
            FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token = ? AND s.created_at > datetime('now', '-60 days')""", (token,)
     ).fetchone()

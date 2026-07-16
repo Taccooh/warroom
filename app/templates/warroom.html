@@ -190,6 +190,7 @@
       <div><span>{{ t('info_last_poll') }}</span><b>{{ meta.last_poll | localtime }}</b></div>
       <div><span>{{ t('info_users') }}</span><b>{{ user_count }} / {{ max_users }}</b></div>
     </div>
+    {% if meta.truncated %}<p class="hint trunc-hint">{{ t('info_truncated') }}</p>{% endif %}
     <h3 class="pl-sub">{{ t('chart_head') }}</h3>
     <div id="charts" class="charts"><p class="hint">{{ t('chart_none') }}</p></div>
 
@@ -270,10 +271,13 @@ document.addEventListener('DOMContentLoaded', function () {
         fillOpacity: c.status === 'free' ? 0.12 : 0.4, dashArray: c.status === 'free' ? '3' : null
       }).addTo(cellLayer);
       var label = c.status === 'mine' ? T.gang_your
-        : c.status === 'enemy' ? tf(T.gang_holds, {g: esc(c.gang), n: (c.count || 0)})
+        : c.status === 'enemy' ? (c.count == null ? tf(T.gang_here, {g: esc(c.gang)})
+                                                   : tf(T.gang_holds, {g: esc(c.gang), n: c.count}))
         : T.unclaimed;
       var extra = c.status === 'enemy'
-        ? '<br>' + (c.gap === 0 ? '<b>' + T.lead_excl + '</b>' : tf(T.to_flip, {n: c.gap}))
+        ? '<br>' + (c.gap == null ? T.fog_strength
+                    : c.gap === 0 ? '<b>' + T.lead_excl + '</b>'
+                    : tf(T.to_flip, {n: c.gap}))
         : '';
       var cc = [(c.i + 0.5) * grid.lat, (c.j + 0.5) * grid.lng];
       r.bindPopup('<b>' + label + '</b><br>' + tf(T.your_aps, {n: (c.my_aps || 0)}) + extra +
@@ -379,7 +383,11 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function plEffort(c) {
-    return c.t === 'free' ? 0 : c.t === 'virgin' ? 1 : (c.gap + 1);
+    // Fogged enemy cells (gap unknown) sort last under "easiest first" — we can't
+    // rank an unknown deficit, so don't pretend it's 0.
+    if (c.t === 'free') return 0;
+    if (c.t === 'virgin') return 1;
+    return c.gap == null ? 9e9 : c.gap + 1;
   }
 
   function plRow(c, gps) {
@@ -393,11 +401,16 @@ document.addEventListener('DOMContentLoaded', function () {
     if (c.t === 'enemy') {
       label = esc(c.g);
       dot = '<span class="pl-dot"' + (c.c ? ' style="background:' + esc(c.c) + '"' : '') + '></span>';
-      tag = '<span class="pl-gap' + (c.gap === 0 ? ' lead' : '') + '">' +
-            (c.gap === 0 ? esc(T.lead) : esc(tf(T.gap_aps, {n: c.gap}))) + '</span>';
-      var pct = c.gap === 0 ? 100 : Math.round(100 * c.my / (c.cnt + 1));
-      line = '<div class="pl-bar"><i style="width:' + pct + '%"></i></div>' +
-             '<div class="pl-row2">' + tf(T.pl_vs, {my: c.my, cnt: c.cnt}) + '</div>';
+      if (c.gap == null) {   // feed fogs enemy strength this season — no bogus gap/bar
+        tag = '<span class="pl-gap fog">' + esc(T.fog_tag) + '</span>';
+        line = '<div class="pl-row2">' + esc(T.fog_line) + '</div>';
+      } else {
+        tag = '<span class="pl-gap' + (c.gap === 0 ? ' lead' : '') + '">' +
+              (c.gap === 0 ? esc(T.lead) : esc(tf(T.gap_aps, {n: c.gap}))) + '</span>';
+        var pct = c.gap === 0 ? 100 : Math.round(100 * c.my / (c.cnt + 1));
+        line = '<div class="pl-bar"><i style="width:' + pct + '%"></i></div>' +
+               '<div class="pl-row2">' + tf(T.pl_vs, {my: c.my, cnt: c.cnt}) + '</div>';
+      }
     } else if (c.t === 'free') {
       label = '<span class="free-name">' + esc(T.free_tag) + '</span>';
       dot = '<span class="pl-dot free"></span>';
@@ -524,7 +537,8 @@ document.addEventListener('DOMContentLoaded', function () {
       here.className = 'here-banner free'; here.innerHTML = tf(T.here_free, {n: (c.my_aps || 0)});
     } else {
       here.className = 'here-banner enemy';
-      here.innerHTML = c.gap === 0 ? tf(T.here_enemy_lead, {g: esc(c.gang)})
+      here.innerHTML = c.gap == null ? tf(T.here_enemy_fog, {g: esc(c.gang)})
+                     : c.gap === 0 ? tf(T.here_enemy_lead, {g: esc(c.gang)})
                                    : tf(T.here_enemy_gap, {g: esc(c.gang), n: c.gap});
     }
   }
