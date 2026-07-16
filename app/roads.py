@@ -37,6 +37,11 @@ TIMEOUT = 30
 DRIVABLE = ("motorway|trunk|primary|secondary|tertiary|unclassified|residential"
             "|living_street|service|motorway_link|trunk_link|primary_link"
             "|secondary_link|tertiary_link|road")
+# Fallback pass before declaring a cell roadless: highway=track (gravel/forestry
+# roads). In rural Nova Scotia these are perfectly wardrivable — a diagnostic run
+# showed real land cells being cut as "water" because track was excluded. The
+# snap point still PREFERS proper roads; track only decides land vs. water.
+FALLBACK = "track"
 
 
 def _grid(conn) -> tuple[float, float]:
@@ -52,9 +57,10 @@ def _ensure_grid(conn, glat: float, glng: float) -> None:
         db.kv_set(conn, "roads_grid", tag)
 
 
-def _query(bboxes: list[tuple[float, float, float, float]]) -> list[dict]:
+def _query(bboxes: list[tuple[float, float, float, float]],
+           types: str = DRIVABLE) -> list[dict]:
     parts = "".join(
-        f'way["highway"~"^({DRIVABLE})$"]({s:.6f},{w:.6f},{n:.6f},{e:.6f});'
+        f'way["highway"~"^({types})$"]({s:.6f},{w:.6f},{n:.6f},{e:.6f});'
         for (s, w, n, e) in bboxes)
     # `skel` = without tags: we only need the vertex points. In a city that quickly
     # means thousands of ways — with tags the response would be many times larger.
@@ -137,6 +143,7 @@ def snap_cells(conn, cells: list[tuple[int, int]]) -> dict[str, list | None]:
                         ex, len(chunk))
             continue
 
+        missed: list[int] = []
         for idx, (i, j) in enumerate(chunk):
             s, w, n, e = boxes[idx]
             clat, clng = grid.center(i, j, glat, glng)
@@ -148,9 +155,35 @@ def snap_cells(conn, cells: list[tuple[int, int]]) -> dict[str, list | None]:
                     "VALUES (?,?,?,1)", (k, hit[0], hit[1]))
                 out[k] = [hit[0], hit[1]]
             else:
-                conn.execute(
-                    "INSERT OR REPLACE INTO cell_roads (cell_key, lat, lng, found) "
-                    "VALUES (?,NULL,NULL,0)", (k,))
-                out[k] = None
-                log.info("keine Straße in Zelle %s", k)
+                missed.append(idx)
+
+        # Second pass for the misses only: a track (gravel/forestry road) still
+        # counts as land. Only cells that miss BOTH passes are cached as roadless.
+        # The majority of cells hit in pass one, so this stays cheap.
+        if missed:
+            try:
+                tways = _query([boxes[idx] for idx in missed], FALLBACK)
+            except (urllib.error.URLError, TimeoutError, ValueError, OSError) as ex:
+                # Same rule as above: a failed query is NOT a finding — leave the
+                # missed cells unclassified instead of branding them roadless.
+                log.warning("Overpass (track-Pass) nicht erreichbar (%s) — "
+                            "%d Zellen bleiben offen", ex, len(missed))
+                continue
+            for idx in missed:
+                i, j = chunk[idx]
+                s, w, n, e = boxes[idx]
+                clat, clng = grid.center(i, j, glat, glng)
+                hit = _nearest_in_cell(tways, s, w, n, e, clat, clng)
+                k = grid.key_from_index(i, j)
+                if hit:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO cell_roads (cell_key, lat, lng, found) "
+                        "VALUES (?,?,?,1)", (k, hit[0], hit[1]))
+                    out[k] = [hit[0], hit[1]]
+                else:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO cell_roads (cell_key, lat, lng, found) "
+                        "VALUES (?,NULL,NULL,0)", (k,))
+                    out[k] = None
+                    log.info("keine Straße in Zelle %s", k)
     return out
