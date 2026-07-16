@@ -321,9 +321,11 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
   // Virgin cells sit purely on geometry, so some land in lakes/rivers (Lake Erie).
-  // When the layer is shown, snap the nearest ones to a road via /api/snap; cells with
-  // no drivable road (water/forest) come back null → drop them. Bounded to the nearest
-  // ~120 to keep Overpass light; results cache server-side so they stay hidden next load.
+  // Snap the nearest ones to a road via /api/snap; cells with no drivable road
+  // (water/forest) come back null → drop them from virginCells. This runs once on load
+  // (not only when the layer is toggled) so the tour/target list — which reads
+  // virginCells live — never offers a water cell as the nearest target. Bounded to the
+  // nearest ~120 to keep Overpass light; results cache server-side so they stay hidden.
   var virginSnapped = false;
   function snapVirginWater() {
     if (virginSnapped || !virginCells.length) return;
@@ -358,6 +360,8 @@ document.addEventListener('DOMContentLoaded', function () {
     else fitAll();
   }
   fitInitial();
+  // Filter water cells out of the target/tour list even without a layer toggle.
+  snapVirginWater();
 
   document.querySelectorAll('.rb-jump[data-b]').forEach(function (b) {
     b.addEventListener('click', function () { map.fitBounds(JSON.parse(b.dataset.b), {padding: [30, 30]}); });
