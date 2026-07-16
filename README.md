@@ -73,6 +73,7 @@ require HTTPS.
 | `WARROOM_MASTER_KEY`  | *(file)*| Fernet master key; if unset, generated on first start at `data/master.key` |
 | `WARROOM_MAX_USERS`   | `30`    | Sign-up cap; registration closes above this count   |
 | `WARROOM_TZ`          | `Europe/Berlin` | IANA timezone for displayed timestamps (DB stores UTC) |
+| `WARROOM_POLL_WORKERS`| `4`     | Concurrent per-user poll workers (caps simultaneous wdgwars API requests) |
 | `WARROOM_VAPID_SUB`   | *(contact)* | `mailto:` contact sent to push services (set your own when self-hosting) |
 
 ### Backups — read this once

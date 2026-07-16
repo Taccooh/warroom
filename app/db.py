@@ -109,7 +109,9 @@ def connect() -> sqlite3.Connection:
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(config.DB_PATH, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    # journal_mode=WAL is set ONCE in init_db (it persists in the DB file) — setting
+    # it per-connection needs an exclusive lock and fails/blocks under concurrent
+    # poll workers.
     conn.execute("PRAGMA busy_timeout=5000")  # poll + request contend → wait instead of "locked"
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
@@ -122,6 +124,7 @@ def _add_col(conn, table: str, col: str, decl: str) -> None:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA journal_mode=WAL")  # persistent — once at startup is enough
     conn.executescript(SCHEMA)
     # Migrations for existing DBs (CREATE IF NOT EXISTS does not alter columns)
     _add_col(conn, "users", "watch_level", "TEXT NOT NULL DEFAULT 'near'")

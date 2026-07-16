@@ -4,12 +4,19 @@
      stats snapshot — all with THIS user's key (the rate limit is per key).
 The key is only briefly decrypted here and never persisted."""
 import logging
+import threading
 import time
+
+from concurrent.futures import ThreadPoolExecutor
 
 from . import auth, config, db, grid, push
 from .wdg import Wdg, WdgError
 
 log = logging.getLogger("warroom.poller")
+
+# Serializes team/me fetches across poll workers: without it, two users of the
+# same gang polled concurrently would each fetch team/me (wasted upstream calls).
+_team_lock = threading.Lock()
 
 
 def _num(x):
@@ -178,14 +185,17 @@ def snapshot_stats(conn, client: Wdg, user_id: int, me: dict,
     cycle duration flat when many users are registered."""
     my_gang = me.get("gang")
     my_gid = _num(me.get("gang_id"))
-    if my_gid in team_cache:
-        team = team_cache[my_gid]
-    else:
-        try:
-            team = client.team_me()
-        except Exception:
-            team = {}
-        team_cache[my_gid] = team
+    # Held across the fetch on purpose: a cache miss briefly blocks the other
+    # workers' stats phase, but each gang is fetched exactly once per cycle.
+    with _team_lock:
+        if my_gid in team_cache:
+            team = team_cache[my_gid]
+        else:
+            try:
+                team = client.team_me()
+            except Exception:
+                team = {}
+            team_cache[my_gid] = team
     rank = points = None
     try:
         for idx, g in enumerate(gctx.get("leaderboard", {}).get("gangs", []), 1):
@@ -291,14 +301,26 @@ def poll_all(conn) -> dict:
             lookup[grid.cell_key(la, lo, glat, glng)] = c
     total_events = 0
     team_cache: dict = {}
-    for k, u in enumerate(users):
-        if k:
-            time.sleep(0.15)  # gentle trickle instead of a request burst towards wdgwars
+
+    def _one(user_row):
+        """Poll one user on its own DB connection (sqlite conns aren't shareable
+        across threads mid-flight; WAL + busy_timeout serialize the writes)."""
+        wconn = db.connect()
         try:
-            res = run_user(conn, u, lookup, glat, glng, gctx, team_cache)
-            total_events += res["events"]
-        except Exception:
-            log.exception("poll für %s fehlgeschlagen", u["wdg_username"])
+            return run_user(wconn, user_row, lookup, glat, glng, gctx, team_cache)
+        finally:
+            wconn.close()
+
+    # Parallel user phase. POLL_WORKERS caps concurrent requests towards wdgwars —
+    # the pool replaces the old 0.15 s trickle as the politeness mechanism.
+    workers = max(1, min(config.POLL_WORKERS, len(users)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_one, u): u for u in users}
+        for fut, u in futures.items():
+            try:
+                total_events += fut.result()["events"]
+            except Exception:
+                log.exception("poll für %s fehlgeschlagen", u["wdg_username"])
     db.kv_set(conn, "last_poll", time.time())
     return {"users": len(users), "global_cells": len(cells), "events": total_events,
-            "secs": round(time.monotonic() - t0, 1)}
+            "workers": workers, "secs": round(time.monotonic() - t0, 1)}

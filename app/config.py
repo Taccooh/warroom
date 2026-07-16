@@ -21,6 +21,9 @@ TZ = os.environ.get("WARROOM_TZ", "Europe/Berlin")
 
 # member-territories is only recomputed server-side every 5 min via cron.
 POLL_SECONDS = 300
+# Concurrent per-user poll workers. Deliberately small: this caps how many
+# simultaneous requests we send to the wdgwars API (be a good citizen).
+POLL_WORKERS = int(os.environ.get("WARROOM_POLL_WORKERS", "4"))
 # Re-read the full footprint (own APs) per user less frequently.
 FOOTPRINT_REFRESH_SECONDS = 3600
 REINFORCE_BUFFER = 3
