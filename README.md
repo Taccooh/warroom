@@ -41,29 +41,58 @@ Details: [/about](https://warroom.mechanics-toolbox.org/about)
 
 ## Self-hosting
 
-Requirements: Docker with the compose plugin. No build pipeline, no Node — the
-frontend is server-rendered Jinja2 with vendored Leaflet.
+Requirements: Docker with the compose plugin. Locally there's no build
+pipeline, no Node — the frontend is server-rendered Jinja2 with vendored
+Leaflet (CI does run a JS/CSS minify pass before publishing release images,
+see [Docker image](#docker-image) below, but nothing you need for local dev).
+
+An example [compose.yml](compose.yml) is included, pulling the published image:
 
 ```yaml
-# compose.yml
 services:
   warroom:
-    build: .
+    image: ghcr.io/taccooh/warroom:latest
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+    environment:
+      - WARROOM_VAPID_SUB=mailto:you@example.com
 ```
 
 ```sh
-docker compose up -d --build
+docker compose up -d
 # open http://localhost:8000
 ```
+
+To build from source instead, replace `image: ...` with `build: .` and run
+`docker compose up -d --build`.
 
 Put a TLS-terminating reverse proxy (Caddy, nginx, …) in front for production —
 the app itself speaks plain HTTP on port 8000. Push notifications and geolocation
 require HTTPS.
+
+### Docker image
+
+[.github/workflows/docker-publish.yml](.github/workflows/docker-publish.yml) publishes
+multi-arch images (`linux/amd64`, `linux/arm64`, `linux/arm/v7`) to GHCR:
+
+- every push to `master` that touches `app/`, `Dockerfile` or `requirements.txt`
+  → `ghcr.io/taccooh/warroom:edge` (latest master, unreleased)
+- every GitHub Release → `:latest`, `:X`, `:X.Y` and the release tag itself
+
+```sh
+docker pull ghcr.io/taccooh/warroom:latest
+# or pin a version: ghcr.io/taccooh/warroom:1.2, :1
+# or track master: ghcr.io/taccooh/warroom:edge
+```
+
+The Dockerfile is a two-stage build: a builder stage with a C toolchain
+(needed because `cffi`/`httptools`/`uvloop` have no prebuilt wheels for
+`linux/arm/v7`, so pip compiles them from source on that platform) and a slim
+runtime stage that only gets the installed packages and `app/`, not the
+toolchain.
 
 ### Configuration (environment variables)
 
@@ -100,7 +129,7 @@ by the repository license.
 
 ## Development
 
-No build pipeline. Python 3.12, dependencies from `requirements.txt`:
+No build pipeline locally. Python 3.12, dependencies from `requirements.txt`:
 
 ```sh
 python -m venv .venv && .venv/Scripts/pip install -r requirements.txt  # or bin/ on Linux

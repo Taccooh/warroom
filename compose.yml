@@ -1,0 +1,15 @@
+# Standalone example: pulls the published image and exposes it on the host.
+# Put a TLS-terminating reverse proxy in front for real use (see README) —
+# push notifications and geolocation require HTTPS.
+#
+# To build from source instead of pulling, replace `image: ...` with `build: .`.
+services:
+  warroom:
+    image: ghcr.io/taccooh/warroom:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - WARROOM_VAPID_SUB=mailto:you@example.com
