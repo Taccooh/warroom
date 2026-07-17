@@ -109,7 +109,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest,enable=${{ github.event_name == 'release' }}
-            type=edge,branch=master
+            type=edge,branch=master,enable=${{ github.event_name == 'push' }}
 
       - uses: docker/login-action@v4
         with:
