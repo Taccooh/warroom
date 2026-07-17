@@ -2,7 +2,7 @@ name: Build and Push Warroom Docker Image to GHCR
 
 on:
   release:
-    types: [created]
+    types: [published]
   push:
     branches: [master]
     paths:
