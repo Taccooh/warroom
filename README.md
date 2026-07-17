@@ -43,7 +43,7 @@ Details: [/about](https://warroom.mechanics-toolbox.org/about)
 
 Requirements: Docker with the compose plugin. Locally there's no build
 pipeline, no Node — the frontend is server-rendered Jinja2 with vendored
-Leaflet (CI does run a JS/CSS minify pass before publishing release images,
+Leaflet (CI does run a JS/CSS minify pass before publishing images to GHCR,
 see [Docker image](#docker-image) below, but nothing you need for local dev).
 
 An example [compose.yml](compose.yml) is included, pulling the published image:
