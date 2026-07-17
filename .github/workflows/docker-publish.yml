@@ -39,7 +39,7 @@ jobs:
 
       - name: Minify JS and CSS
         run: |
-          npm install -g terser clean-css-cli
+          npm install -g terser@5.49.0 clean-css-cli@5.6.3
           terser app/static/sw.js -o app/static/sw.js --compress --mangle
           cleancss -o app/static/style.css app/static/style.css
 
