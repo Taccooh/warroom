@@ -78,7 +78,7 @@ require HTTPS.
 [.github/workflows/docker-publish.yml](.github/workflows/docker-publish.yml) publishes
 multi-arch images (`linux/amd64`, `linux/arm64`, `linux/arm/v7`) to GHCR:
 
-- every push to `master` that touches `app/`, `Dockerfile` or `requirements.txt`
+- every push to `master` that touches `app/`, `Dockerfile`, `requirements.txt` or `.github/workflows/docker-publish.yml`
   → `ghcr.io/taccooh/warroom:edge` (latest master, unreleased)
 - every GitHub Release → `:latest`, `:X`, `:X.Y` and the release tag itself
 
