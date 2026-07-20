@@ -136,6 +136,12 @@ python -m venv .venv && .venv/Scripts/pip install -r requirements.txt  # or bin/
 .venv/Scripts/python -m uvicorn app.main:app --reload
 ```
 
+Using the [devcontainer](.devcontainer/devcontainer.json) instead? Dependencies are
+installed automatically on container creation (`postCreateCommand`), so you can skip
+the venv/pip install step above and go straight to `uvicorn app.main:app --reload`.
+This only applies inside the devcontainer — local development still needs the setup
+above.
+
 The SQLite schema migrates itself on startup (`CREATE TABLE IF NOT EXISTS` plus
 additive column migrations). Issues and pull requests are welcome — for bigger
 changes, open an issue first.
