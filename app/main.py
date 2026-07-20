@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import auth, config, db, i18n, poller, push, queries, roads, social, web
+from .security import SecurityHeadersMiddleware
 from .web import render
 from .wdg import Wdg, WdgError
 
@@ -53,6 +54,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, title="Warroom")
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.middleware("http")
