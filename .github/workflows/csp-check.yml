@@ -1,0 +1,20 @@
+name: CSP check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check for CSP violations
+        run: |
+          git ls-files -- 'app/templates/*.html' 'app/static/*.js' 'app/*.py' \
+            | xargs python scripts/check_csp_violations.py
