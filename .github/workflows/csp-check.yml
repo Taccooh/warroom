@@ -17,4 +17,4 @@ jobs:
       - name: Check for CSP violations
         run: |
           git ls-files -- 'app/templates/*.html' 'app/static/*.js' 'app/*.py' \
-            | xargs python scripts/check_csp_violations.py
+            | xargs -r python scripts/check_csp_violations.py

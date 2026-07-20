@@ -62,7 +62,7 @@ SRC_ATTR_RE = re.compile(r'\bsrc\s*=\s*["\']')
 TYPE_ATTR_RE = re.compile(r'\btype\s*=\s*["\']([^"\']+)["\']')
 
 HTML_EXTERNAL_SRC_RE = re.compile(
-    r'<(script|link)\b[^>]*?\b(?:src|href)\s*=\s*"(https?://[^"]+)"',
+    r'<(script|link)\b[^>]*?\b(?:src|href)\s*=\s*["\'](https?://[^"\']+)["\']',
     re.IGNORECASE,
 )
 JS_DYNAMIC_SRC_RE = re.compile(
