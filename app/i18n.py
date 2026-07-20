@@ -323,6 +323,12 @@ JS = {
                        "de": "Es bekommt die ersten {max} der Route — die App-Führung fährt alle {n}."},
     "maps_cap_note": {"en": "your tour has <b>{n}</b>. The first {max} of the optimized route get handed over — the in-app guidance knows all of them.",
                       "de": "deine Tour hat <b>{n}</b>. Übergeben werden die ersten {max} der optimierten Route — die App-Führung kennt alle."},
+    "tour_go": {"en": "Guide me", "de": "Losfahren"},
+    "tour_stop_nav": {"en": "Stop", "de": "Stopp"},
+    "tour_add_pin": {"en": "+ Tour", "de": "+ Tour"},
+    "chart_total": {"en": "APs total", "de": "APs gesamt"},
+    "chart_rank": {"en": "Gang rank", "de": "Gang-Rang"},
+    "chart_cl": {"en": "Team captured / lost", "de": "Team erobert / verloren"},
 }
 
 

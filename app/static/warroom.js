@@ -1,0 +1,1053 @@
+document.addEventListener('DOMContentLoaded', function () {
+  // Confirm-before-submit forms carry a data-confirm message instead of an
+  // inline onsubmit="" — CSP script-src has no 'unsafe-inline'.
+  document.querySelectorAll('form[data-confirm]').forEach(function (f) {
+    f.addEventListener('submit', function (e) {
+      if (!confirm(f.dataset.confirm)) e.preventDefault();
+    });
+  });
+  var watchSelect = document.getElementById('watch-level-select');
+  if (watchSelect) watchSelect.addEventListener('change', function () { this.form.submit(); });
+
+  // Per-request data, handed over as a JSON island (not executable — exempt
+  // from script-src) so this file can stay static instead of Jinja-templated.
+  var DATA = JSON.parse(document.getElementById('warroom-data').textContent);
+  var cells = DATA.cells;
+  var targets = DATA.targets;
+  var theatres = DATA.theatres;
+  var grid = DATA.grid;
+  // Virgin land arrives as a flat index list [i,j,i,j,…] — we compute lat/lng here
+  // (with thousands of cells that saves ~80% payload). Needs grid → only here.
+  function expandVirgin(flat) {
+    var out = [];
+    for (var k = 0; k + 1 < flat.length; k += 2) {
+      var i = flat[k], j = flat[k + 1];
+      out.push({i: i, j: j, lat: (i + 0.5) * grid.lat, lng: (j + 0.5) * grid.lng});
+    }
+    return out;
+  }
+  var virginCells = expandVirgin(DATA.virginAll);
+  var T = DATA.js;
+  var SHARING = DATA.sharing;
+  var HISTORY = DATA.history;
+  var initTab = DATA.initTab;
+  var POLL_EPOCH = DATA.pollEpoch;
+  var COLOR = {mine: '#e8b64c', enemy: '#c9313d', free: '#5f7789'};
+
+  function tf(s, o) { return s.replace(/\{(\w+)\}/g, function (_, k) { return o[k]; }); }
+  function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+  var cellByKey = {};
+  cells.forEach(function (c) { cellByKey[c.i + '_' + c.j] = c; });
+  function cellAt(lat, lng) {
+    var i = Math.floor(lat / grid.lat + 1e-9), j = Math.floor(lng / grid.lng + 1e-9);
+    return cellByKey[i + '_' + j] || null;
+  }
+
+  var map = L.map('map', {zoomControl: true, zoomSnap: 0.5}).setView([50, -20], 3);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  var rects = [];
+  var cellLayer = L.layerGroup().addTo(map);
+  function renderCells() {
+    cellLayer.clearLayers();
+    rects = [];
+    cellByKey = {};
+    cells.forEach(function (c) { cellByKey[c.i + '_' + c.j] = c; });
+    cells.forEach(function (c) {
+      var lead = c.status === 'enemy' && c.gap === 0;
+      // Enemies in their real gang color (CHAOS vs BWM distinguishable), own gold, free cold
+      var fill = c.status === 'enemy' ? (c.color || COLOR.enemy) : COLOR[c.status];
+      var r = L.rectangle(c.b, {
+        color: lead ? '#ffd15e' : fill, weight: lead ? 2 : 1,
+        opacity: c.status === 'free' ? 0.6 : 0.9, fillColor: fill,
+        fillOpacity: c.status === 'free' ? 0.12 : 0.4, dashArray: c.status === 'free' ? '3' : null
+      }).addTo(cellLayer);
+      var label = c.status === 'mine' ? T.gang_your
+        : c.status === 'enemy' ? (c.count == null ? tf(T.gang_here, {g: esc(c.gang)})
+                                                   : tf(T.gang_holds, {g: esc(c.gang), n: c.count}))
+        : T.unclaimed;
+      var extra = c.status === 'enemy'
+        ? '<br>' + (c.gap == null ? T.fog_strength
+                    : c.gap === 0 ? '<b>' + T.lead_excl + '</b>'
+                    : tf(T.to_flip, {n: c.gap}))
+        : '';
+      var cc = [(c.i + 0.5) * grid.lat, (c.j + 0.5) * grid.lng];
+      r.bindPopup('<b>' + label + '</b><br>' + tf(T.your_aps, {n: (c.my_aps || 0)}) + extra +
+        '<br><button type="button" class="cell-tour" data-lat="' + cc[0].toFixed(5) + '" data-lng="' + cc[1].toFixed(5) +
+        '" data-label="' + label.replace(/<[^>]*>/g, '').replace(/"/g, '&quot;') + '">' + T.tour_add_pin + '</button>');
+      rects.push(r);
+    });
+  }
+  renderCells();
+
+  // ---- Virgin land: never-scanned cells. Separate layer, toggled via chip —
+  // there are quickly thousands of them, they must not plaster the map permanently.
+  var virginLayer = L.layerGroup();
+  var virginOn = false;
+  var virginByKey = {};
+  function indexVirgin() {
+    virginByKey = {};
+    virginCells.forEach(function (v) { virginByKey[v.i + '_' + v.j] = v; });
+  }
+  indexVirgin();
+  function renderVirgin() {
+    virginLayer.clearLayers();
+    if (!virginOn) return;
+    virginCells.forEach(function (v) {
+      var b = [[v.i * grid.lat, v.j * grid.lng],
+               [(v.i + 1) * grid.lat, (v.j + 1) * grid.lng]];
+      L.rectangle(b, {color: '#8fa7bd', weight: 1, opacity: 0.5, fillColor: '#8fa7bd',
+                      fillOpacity: 0.10, dashArray: '2 3'})
+        .bindPopup('<b>' + T.virgin_land + '</b><br>' + T.virgin_pop +
+          '<br><button type="button" class="cell-tour" data-lat="' + v.lat.toFixed(5) +
+          '" data-lng="' + v.lng.toFixed(5) + '" data-label="' + T.virgin_land +
+          '">' + T.tour_add_pin + '</button>')
+        .addTo(virginLayer);
+    });
+  }
+  document.querySelectorAll('.layer-chip[data-layer="virgin"]').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      virginOn = !virginOn;
+      chip.classList.toggle('on', virginOn);
+      if (virginOn) { virginLayer.addTo(map); renderVirgin(); snapVirginWater(); }
+      else { virginLayer.clearLayers(); map.removeLayer(virginLayer); }
+    });
+  });
+  // Virgin cells sit purely on geometry, so some land in lakes/rivers (Lake Erie).
+  // Snap the nearest ones to a road via /api/snap; cells with no drivable road
+  // (water/forest) come back null → drop them from virginCells. This runs once on load
+  // (not only when the layer is toggled) so the tour/target list — which reads
+  // virginCells live — never offers a water cell as the nearest target. Bounded to the
+  // nearest ~120 to keep Overpass light; results cache server-side so they stay hidden.
+  var virginSnapped = false;
+  function snapVirginWater() {
+    if (virginSnapped || !virginCells.length) return;
+    virginSnapped = true;
+    var near = virginCells.slice(0, 120), batches = [];
+    for (var i = 0; i < near.length; i += 40) batches.push(near.slice(i, i + 40));
+    var water = {};
+    (function run(bi) {
+      if (bi >= batches.length) return;
+      fetch('/api/snap', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cells: batches[bi].map(function (v) { return [v.i, v.j]; })})})
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (d && d.points) {
+            Object.keys(d.points).forEach(function (k) { if (d.points[k] === null) water[k] = 1; });
+            if (Object.keys(water).length) {
+              virginCells = virginCells.filter(function (v) { return !water[v.i + '_' + v.j]; });
+              indexVirgin(); if (virginOn) renderVirgin();
+            }
+          }
+          run(bi + 1);
+        })
+        .catch(function () { run(bi + 1); });
+    })(0);
+  }
+
+  function fitAll() {
+    if (rects.length) map.fitBounds(L.featureGroup(rects).getBounds(), {padding: [30, 30]});
+  }
+  function fitInitial() {
+    if (theatres.length) map.fitBounds(theatres[0].bounds, {padding: [30, 30]});
+    else fitAll();
+  }
+  fitInitial();
+  // Filter water cells out of the target/tour list even without a layer toggle.
+  snapVirginWater();
+
+  document.querySelectorAll('.rb-jump[data-b]').forEach(function (b) {
+    b.addEventListener('click', function () { map.fitBounds(JSON.parse(b.dataset.b), {padding: [30, 30]}); });
+  });
+  var ja = document.getElementById('jump-all');
+  if (ja) ja.addEventListener('click', fitAll);
+
+  // Delegation instead of individual handlers: the planner list is replaced by the live update
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest) return;
+    if (e.target.closest('.tour-add')) return;  // the + button must not fly along
+    if (e.target.closest('.pl-chip') || e.target.closest('.pl-sort')) return;
+    var el = e.target.closest('.pl-item[data-lat]');
+    if (el) map.flyTo([parseFloat(el.dataset.lat), parseFloat(el.dataset.lng)], 12, {duration: 0.7});
+  });
+
+  // ---- Planner: filter + sorting + distance ----
+  // Separate steps because they differ in cost: filtering only toggles
+  // `hidden` (cheap), sorting rebuilds the list (expensive → only when needed, and in
+  // ONE go via a fragment instead of 180 individual moves).
+  var plFilter = {mode: 'all', gang: null};
+  var plSort = 'dist';
+  var plLastSortAt = 0;
+
+  // Window size: this many rows live in the DOM. The rest stays in memory —
+  // a large turf can have thousands of cells, which would strangle the phone.
+  var PL_PAGE = 60;
+  var plShown = PL_PAGE;
+  var plRef = null;      // reference point of the most recently computed distances
+
+  function plRef_() {
+    return myPos() || (map ? {lat: map.getCenter().lat, lng: map.getCenter().lng} : null);
+  }
+
+  // All candidates as data: enemy + free (from the server) and virgin land (all cells).
+  function plCandidates() {
+    var out = targets.slice();
+    virginCells.forEach(function (v) {
+      out.push({t: 'virgin', lat: v.lat, lng: v.lng, my: 0, gap: 0});
+    });
+    return out;
+  }
+
+  function plMatch(c) {
+    var m = plFilter.mode;
+    return m === 'all'
+      || (m === 'ahead' && c.t === 'enemy' && c.gap === 0)
+      || (m === 'free' && c.t === 'free')
+      || (m === 'virgin' && c.t === 'virgin')
+      || (m === 'gang' && c.t === 'enemy' && c.g === plFilter.gang);
+  }
+
+  function plEffort(c) {
+    // Fogged enemy cells (gap unknown) sort last under "easiest first" — we can't
+    // rank an unknown deficit, so don't pretend it's 0.
+    if (c.t === 'free') return 0;
+    if (c.t === 'virgin') return 1;
+    return c.gap == null ? 9e9 : c.gap + 1;
+  }
+
+  function plRow(c, gps) {
+    var li = document.createElement('li');
+    li.className = 'pl-item' + (c.t === 'enemy' && c.gap === 0 ? ' pl-lead' : '');
+    li.dataset.lat = c.lat;
+    li.dataset.lng = c.lng;
+    var dist = (gps && c._d != null)
+      ? tf(T.km_away, {n: c._d < 10 ? c._d.toFixed(1) : Math.round(c._d)}) : '';
+    var label, dot, tag, line;
+    if (c.t === 'enemy') {
+      label = esc(c.g);
+      dot = '<span class="pl-dot"' + (c.c ? ' style="background:' + esc(c.c) + '"' : '') + '></span>';
+      if (c.gap == null) {   // feed fogs enemy strength this season — no bogus gap/bar
+        tag = '<span class="pl-gap fog">' + esc(T.fog_tag) + '</span>';
+        line = '<div class="pl-row2">' + esc(T.fog_line) + '</div>';
+      } else {
+        tag = '<span class="pl-gap' + (c.gap === 0 ? ' lead' : '') + '">' +
+              (c.gap === 0 ? esc(T.lead) : esc(tf(T.gap_aps, {n: c.gap}))) + '</span>';
+        var pct = c.gap === 0 ? 100 : Math.round(100 * c.my / (c.cnt + 1));
+        line = '<div class="pl-bar"><i style="width:' + pct + '%"></i></div>' +
+               '<div class="pl-row2">' + tf(T.pl_vs, {my: c.my, cnt: c.cnt}) + '</div>';
+      }
+    } else if (c.t === 'free') {
+      label = '<span class="free-name">' + esc(T.free_tag) + '</span>';
+      dot = '<span class="pl-dot free"></span>';
+      tag = '<span class="pl-gap free">' + esc(T.free_grab) + '</span>';
+      line = '<div class="pl-row2">' + tf(T.free_line, {my: c.my}) + '</div>';
+    } else {
+      label = '<span class="virgin-name">' + esc(T.virgin_land) + '</span>';
+      dot = '<span class="pl-dot virgin"></span>';
+      tag = '<span class="pl-gap virgin">' + esc(T.virgin_tag) + '</span>';
+      line = '<div class="pl-row2">' + esc(T.virgin_line) + '</div>';
+    }
+    li.innerHTML =
+      '<div class="pl-main"><div class="pl-row1">' + dot +
+        '<span class="pl-gang">' + label + '</span>' +
+        '<span class="pl-dist">' + dist + '</span>' + tag +
+      '</div>' + line + '</div>' +
+      '<button type="button" class="tour-add" data-lat="' + c.lat + '" data-lng="' + c.lng +
+        '" data-label="' + esc(c.t === 'enemy' ? c.g : c.t === 'free' ? T.free_tag : T.virgin_land) +
+        '">+</button>';
+    return li;
+  }
+
+  // Filtering + sorting run over ALL candidates (otherwise "nearest first" would
+  // again just be sorting a pre-selection) — only the window is rendered.
+  function plRender() {
+    var list = document.getElementById('pl-list');
+    if (!list) return;
+    var gps = myPos();
+    var ref = plRef_();
+    plRef = ref;
+
+    var cand = plCandidates().filter(plMatch);
+    if (ref) {
+      cand.forEach(function (c) { c._d = hav(ref, {lat: c.lat, lng: c.lng}); });
+    }
+    var key = plSort === 'dist' ? function (c) { return c._d != null ? c._d : 1e9; }
+            : plSort === 'aps' ? function (c) { return -(c.my || 0); }
+            : plEffort;
+    cand.sort(function (a, b) { return key(a) - key(b); });
+
+    var page = cand.slice(0, plShown);
+    var frag = document.createDocumentFragment();
+    page.forEach(function (c) { frag.appendChild(plRow(c, gps)); });
+    list.innerHTML = '';
+    list.appendChild(frag);
+
+    var none = document.getElementById('pl-none');
+    if (none) none.hidden = cand.length > 0;
+    var more = document.getElementById('pl-more');
+    if (more) {
+      more.hidden = cand.length <= page.length;
+      var txt = document.getElementById('pl-more-txt');
+      if (txt) txt.textContent = tf(T.shown_of, {k: page.length, n: cand.length});
+    }
+    var chip = document.querySelector('.pl-chip.on b');
+    if (chip && plFilter.mode !== 'gang') chip.textContent = cand.length;
+    plLastSortAt = Date.now();
+    renderTour();   // set the "+" states of the fresh rows
+  }
+
+  function plRefresh() { plShown = PL_PAGE; plRender(); }
+
+  // While driving, GPS fires every second. Rebuild only when the reference
+  // point has moved noticeably (>300 m) or 10 s have passed — otherwise the list
+  // jumps away from under your thumb. The first fix takes effect immediately.
+  var plHadGps = false;
+  function plOnPosition() {
+    var ref = plRef_();
+    if (!ref) return;
+    if (!plHadGps) { plHadGps = true; plRender(); return; }
+    if (plSort !== 'dist') return;
+    var moved = plRef ? hav(plRef, ref) : 999;
+    if (moved > 0.3 && Date.now() - plLastSortAt > 10000) plRender();
+  }
+
+  document.addEventListener('click', function (e) {
+    var chip = e.target.closest ? e.target.closest('.pl-chip') : null;
+    if (chip) {
+      plFilter = {mode: chip.dataset.filter, gang: chip.dataset.gang || null};
+      document.querySelectorAll('.pl-chip').forEach(function (c) { c.classList.toggle('on', c === chip); });
+      plShown = PL_PAGE;
+      plRender();
+      return;
+    }
+    if (e.target.closest && e.target.closest('#pl-more-btn')) {
+      plShown += PL_PAGE;
+      plRender();
+    }
+  });
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.id === 'pl-sort') { plSort = e.target.value; plShown = PL_PAGE; plRender(); }
+  });
+
+  function showTab(name) {
+    document.querySelectorAll('.tab').forEach(function (x) { x.classList.toggle('active', x.dataset.tab === name); });
+    document.querySelectorAll('.tabc').forEach(function (c) { c.hidden = c.dataset.tabc !== name; });
+    map.invalidateSize();
+  }
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () { showTab(t.dataset.tab); });
+  });
+  if (initTab && initTab !== 'planer') showTab(initTab);
+
+  // ---- Follow mode: own live position + "you are here" context ----
+  var meMarker = null, meCircle = null, follow = false, watchId = null;
+  var here = document.getElementById('here');
+  function updateHere(lat, lng) {
+    var c = cellAt(lat, lng);
+    here.hidden = false;
+    if (!c) {
+      // No feed entry: either virgin land (never scanned → grab it!) or outside
+      var k = Math.floor(lat / grid.lat + 1e-9) + '_' + Math.floor(lng / grid.lng + 1e-9);
+      if (virginByKey[k]) {
+        here.className = 'here-banner virgin';
+        here.innerHTML = T.here_virgin;
+      } else {
+        here.className = 'here-banner out'; here.innerHTML = T.here_out;
+      }
+      return;
+    }
+    if (c.status === 'mine') {
+      here.className = 'here-banner mine'; here.innerHTML = tf(T.here_mine, {n: (c.my_aps || 0)});
+    } else if (c.status === 'free') {
+      here.className = 'here-banner free'; here.innerHTML = tf(T.here_free, {n: (c.my_aps || 0)});
+    } else {
+      here.className = 'here-banner enemy';
+      here.innerHTML = c.gap == null ? tf(T.here_enemy_fog, {g: esc(c.gang)})
+                     : c.gap === 0 ? tf(T.here_enemy_lead, {g: esc(c.gang)})
+                                   : tf(T.here_enemy_gap, {g: esc(c.gang), n: c.gap});
+    }
+  }
+  function onPos(p) {
+    var lat = p.coords.latitude, lng = p.coords.longitude, acc = p.coords.accuracy || 0, ll = [lat, lng];
+    if (!meMarker) {
+      meMarker = L.marker(ll, {icon: L.divIcon({className: 'me-dot', iconSize: [18, 18],
+        iconAnchor: [9, 9], html: '<span></span>'}), zIndexOffset: 1000}).addTo(map);
+      meCircle = L.circle(ll, {radius: acc, color: '#3b82f6', weight: 1, fillOpacity: 0.08}).addTo(map);
+    } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(acc); }
+    if (follow) map.setView(ll, Math.max(map.getZoom(), 13));
+    updateHere(lat, lng);
+    maybePush(lat, lng);
+    navUpdate(lat, lng);
+    plOnPosition();  // keep distances updated; re-sorting only throttled
+  }
+  function onPosErr() { here.hidden = false; here.className = 'here-banner out'; here.innerHTML = T.no_gps; }
+  var LocateCtl = L.Control.extend({options: {position: 'topleft'}, onAdd: function () {
+    var d = L.DomUtil.create('div', 'leaflet-bar locate-ctl');
+    d.innerHTML = '<a href="#" id="loc-btn" title="Follow" role="button">◎</a>';
+    L.DomEvent.disableClickPropagation(d);
+    return d;
+  }});
+  map.addControl(new LocateCtl());
+  document.getElementById('loc-btn').addEventListener('click', function (e) {
+    e.preventDefault();
+    var btn = document.getElementById('loc-btn');
+    if (!navigator.geolocation) { onPosErr(); return; }
+    if (!watchId) {
+      watchId = navigator.geolocation.watchPosition(onPos, onPosErr,
+        {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
+      follow = true; btn.classList.add('active');
+    } else {
+      follow = !follow; btn.classList.toggle('active', follow);
+      if (follow && meMarker) map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 13));
+    }
+    void btn.offsetWidth;  // otherwise iOS paints class changes on Leaflet controls only on the next reflow
+  });
+
+  // ---- Manual location: drag the map under the centre crosshair, confirm ----
+  // For planning from the couch or when GPS is off/indoors. Sets the same meMarker
+  // that GPS would, so the here-banner, planner distances and tour guidance all use it.
+  var SetLocCtl = L.Control.extend({options: {position: 'topleft'}, onAdd: function () {
+    var d = L.DomUtil.create('div', 'leaflet-bar locate-ctl');
+    d.innerHTML = '<a href="#" id="setloc-btn" title="' + esc(T.loc_set_title) + '" role="button">⌖</a>';
+    L.DomEvent.disableClickPropagation(d);
+    return d;
+  }});
+  map.addControl(new SetLocCtl());
+  function locModeShow(on) {
+    document.getElementById('loc-cross').hidden = !on;
+    document.getElementById('loc-setbar').hidden = !on;
+    var hero = document.getElementById('map-hero');
+    if (hero) hero.style.visibility = on ? 'hidden' : (guidanceOn ? 'hidden' : '');
+    var b = document.getElementById('setloc-btn'); if (b) b.classList.toggle('active', on);
+  }
+  function setManualPos(lat, lng) {
+    if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+    follow = false;
+    var lb = document.getElementById('loc-btn'); if (lb) lb.classList.remove('active');
+    var ll = [lat, lng];
+    if (!meMarker) {
+      meMarker = L.marker(ll, {icon: L.divIcon({className: 'me-dot manual', iconSize: [18, 18],
+        iconAnchor: [9, 9], html: '<span></span>'}), zIndexOffset: 1000}).addTo(map);
+    } else { meMarker.setLatLng(ll); }
+    if (meCircle) { map.removeLayer(meCircle); meCircle = null; }  // no accuracy circle for a manual pin
+    updateHere(lat, lng);
+    navUpdate(lat, lng);
+    plOnPosition();
+  }
+  document.getElementById('setloc-btn').addEventListener('click', function (e) {
+    e.preventDefault();
+    if (meMarker) map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 12));
+    locModeShow(true);
+  });
+  document.getElementById('loc-cancel').addEventListener('click', function () { locModeShow(false); });
+  document.getElementById('loc-confirm').addEventListener('click', function () {
+    var c = map.getCenter();
+    setManualPos(c.lat, c.lng);
+    locModeShow(false);
+  });
+
+  // ---- Crew: friends' live positions (12s poll) + own push while sharing ----
+  var friendLayer = L.layerGroup().addTo(map);
+  function loadFriends() {
+    fetch('/friends/positions.json', {headers: {'X-Requested-With': 'fetch'}})
+      .then(function (r) { return r.ok ? r.json() : {friends: []}; })
+      .then(function (d) {
+        friendLayer.clearLayers();
+        (d.friends || []).forEach(function (f) {
+          var ago = f.age_s < 60 ? T.friend_now : tf(T.friend_ago, {n: Math.round(f.age_s / 60)});
+          L.marker([f.lat, f.lng], {zIndexOffset: 800, icon: L.divIcon({className: 'friend-dot',
+            iconSize: [16, 16], iconAnchor: [8, 8], html: '<span></span>'})}).addTo(friendLayer)
+            .bindPopup('<b>' + esc(f.username) + '</b>' + (f.gang ? ' · ' + esc(f.gang) : '') + '<br>' + ago);
+        });
+        if (d.last_poll && String(d.last_poll) !== String(POLL_EPOCH)) applyLive();
+      }).catch(function () {});
+  }
+  loadFriends();
+  setInterval(loadFriends, 12000);
+
+  // ---- Live update without reloading ----
+  // If the poller has fresher data, we patch map, counters, watcher and planner
+  // in-place. No reload (no flashing, no state loss) — which is why it also runs
+  // during tour guidance: right during an attack the watcher has to get through.
+  var applying = false;
+  function applyLive() {
+    if (applying) return;
+    applying = true;
+    fetch('/api/live', {headers: {'X-Requested-With': 'fetch'}})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        POLL_EPOCH = d.poll;
+
+        var ig = document.getElementById('info-grid');
+        if (ig && d.info_html != null) ig.innerHTML = d.info_html;
+
+        var wb = document.getElementById('watcher-body');
+        if (wb && d.watcher_html != null) wb.innerHTML = d.watcher_html;
+        var badge = document.getElementById('watch-badge');
+        if (badge) { badge.textContent = d.events_n; badge.hidden = !d.events_n; }
+
+        if (d.virgin) { virginCells = expandVirgin(d.virgin); indexVirgin(); renderVirgin(); virginSnapped = false; if (virginOn) snapVirginWater(); }
+        if (d.targets) targets = d.targets;
+
+        var pb = document.getElementById('planner-body');
+        if (pb && d.planner_html != null) {
+          pb.innerHTML = d.planner_html;   // only chips + sort field
+          // Restore the user's filter/sorting after the swap
+          var sel = document.getElementById('pl-sort');
+          if (sel) sel.value = plSort;
+          var known = false;
+          document.querySelectorAll('.pl-chip').forEach(function (c) {
+            var same = c.dataset.filter === plFilter.mode &&
+                       (c.dataset.gang || null) === plFilter.gang;
+            c.classList.toggle('on', same);
+            if (same) known = true;
+          });
+          // The filtered gang may have vanished (cell flipped) → back to All
+          if (!known) {
+            plFilter = {mode: 'all', gang: null};
+            var all = document.querySelector('.pl-chip[data-filter="all"]');
+            if (all) all.classList.add('on');
+          }
+          plRender();   // plShown stays: whoever clicked "more" keeps their list
+        }
+
+        if (d.counts) {
+          ['mine', 'enemy', 'free'].forEach(function (k) {
+            var el = document.querySelector('.rb.' + k + ' b');
+            if (el) el.textContent = d.counts[k];
+          });
+        }
+        // Only redraw cells when no popup is open (redrawing would close it).
+        // Map view/zoom stay untouched — we only redraw the layer.
+        if (d.cells && !document.querySelector('.leaflet-popup')) {
+          cells = d.cells;
+          renderCells();
+          var mp = myPos();
+          if (mp && !here.hidden) updateHere(mp.lat, mp.lng);
+        }
+      })
+      .catch(function () {})
+      .then(function () { applying = false; });
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') loadFriends();
+  });
+
+  var lastPush = 0;
+  function maybePush(lat, lng) {
+    if (!SHARING) return;
+    var now = Date.now();
+    if (now - lastPush < 12000) return;
+    lastPush = now;
+    fetch('/position', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'lat=' + encodeURIComponent(lat) + '&lng=' + encodeURIComponent(lng)}).catch(function () {});
+  }
+
+  // ---- Dashboard sparklines from the stats time series ----
+  (function () {
+    if (!HISTORY || HISTORY.length < 2) return;
+    var box = document.getElementById('charts');
+    if (!box) return;
+    function spark(vals, color, invert) {
+      var nums = vals.filter(function (v) { return v !== null && v !== undefined; });
+      if (nums.length < 2) return '';
+      var min = Math.min.apply(null, nums), max = Math.max.apply(null, nums), rng = (max - min) || 1;
+      var pts = vals.map(function (v, i) {
+        var norm = ((v == null ? min : v) - min) / rng; if (invert) norm = 1 - norm;
+        return ((i / (vals.length - 1)) * 100).toFixed(1) + ',' + (28 - norm * 26).toFixed(1);
+      });
+      return '<svg viewBox="0 0 100 30" preserveAspectRatio="none" class="spark"><polyline points="' +
+        pts.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1.5"/></svg>';
+    }
+    function row(label, val, svg) {
+      return '<div class="chart-row"><div class="chart-lbl">' + label + ' <b>' + val + '</b></div>' + svg + '</div>';
+    }
+    var last = HISTORY[HISTORY.length - 1], html = '';
+    html += row(T.chart_total, last.total != null ? last.total : '—',
+                spark(HISTORY.map(function (h) { return h.total; }), '#e8b64c', false));
+    html += row(T.chart_rank, last.gang_rank != null ? '#' + last.gang_rank : '—',
+                spark(HISTORY.map(function (h) { return h.gang_rank; }), '#8fa7bd', true));
+    html += row(T.chart_cl,
+                (last.team_captured != null ? last.team_captured : '—') + ' / ' + (last.team_lost != null ? last.team_lost : '—'),
+                spark(HISTORY.map(function (h) { return (h.team_captured || 0) - (h.team_lost || 0); }), '#d63b41', false));
+    box.innerHTML = html;
+  })();
+
+  // ---- Loot tour: pick targets → optimize the order → guide ----
+  var tour = [];
+  try { tour = JSON.parse(localStorage.getItem('wr_tour') || '[]') || []; } catch (e) { tour = []; }
+  var tourOrdered = null;
+  var tourLayer = L.layerGroup().addTo(map);
+  var panel = document.getElementById('tour-panel');
+  var tourHint = document.getElementById('tour-hint');
+  var tourList = document.getElementById('tour-list');
+  var tourCount = document.getElementById('tour-count');
+  var mapsLink = document.getElementById('tour-maps');
+  var navBanner = document.getElementById('nav');
+  var guidanceOn = false, navIdx = 0;
+
+  // ---- Snap waypoints onto the road ----
+  // The cell center often sits in a forest/field/river → Google builds routes to
+  // nowhere from that. We fetch the nearest road point per cell (server-side
+  // from OpenStreetMap, cached permanently). The cell identity (lat/lng = center)
+  // stays untouched — the "+" matching and the auto-advance depend on it.
+  function cellOf(s) {
+    return [Math.floor(s.lat / grid.lat + 1e-9), Math.floor(s.lng / grid.lng + 1e-9)];
+  }
+  function stopPos(s) {
+    return (s.rlat != null) ? {lat: s.rlat, lng: s.rlng} : {lat: s.lat, lng: s.lng};
+  }
+  // Batched: tapping several cells in quick succession fires ONE request instead of five.
+  // Cells the server could not answer (Overpass momentarily down) stay
+  // open and are retried — they must NOT count as "no road".
+  var snapT = null, snapTries = 0;
+  function snapTour() {
+    if (snapT) clearTimeout(snapT);
+    snapTries = 0;
+    snapT = setTimeout(doSnap, 600);
+  }
+  function doSnap() {
+    var need = tour.filter(function (s) { return s.rlat === undefined; });
+    if (!need.length) return;
+    fetch('/api/snap', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cells: need.map(cellOf)})})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && d.points) {
+          tour.forEach(function (s) {
+            var c = cellOf(s), k = c[0] + '_' + c[1];
+            if (!(k in d.points)) return;        // unanswered → leave open
+            var p = d.points[k];
+            if (p) { s.rlat = p[0]; s.rlng = p[1]; s.noRoad = false; }
+            else { s.rlat = null; s.rlng = null; s.noRoad = true; }
+          });
+          saveTour();
+          renderTour();
+          if (tourOrdered) drawRoute();
+        }
+        // Cells still open? Try again later — Overpass is sometimes briefly gone.
+        var open = tour.some(function (s) { return s.rlat === undefined; });
+        if (open && snapTries < 3) {
+          snapTries++;
+          if (snapT) clearTimeout(snapT);
+          snapT = setTimeout(doSnap, 6000 * snapTries);
+        }
+      })
+      .catch(function () {
+        if (snapTries < 3) {
+          snapTries++;
+          if (snapT) clearTimeout(snapT);
+          snapT = setTimeout(doSnap, 6000 * snapTries);
+        }
+      });
+  }
+
+  function tKey(lat, lng) { return (+lat).toFixed(4) + ',' + (+lng).toFixed(4); }
+  function inTour(lat, lng) { var k = tKey(lat, lng); return tour.some(function (s) { return tKey(s.lat, s.lng) === k; }); }
+  function saveTour() { try { localStorage.setItem('wr_tour', JSON.stringify(tour)); } catch (e) {} }
+  function hav(a, b) {
+    var R = 6371, dLa = (b.lat - a.lat) * Math.PI / 180, dLo = (b.lng - a.lng) * Math.PI / 180;
+    var s = Math.sin(dLa / 2) * Math.sin(dLa / 2) + Math.cos(a.lat * Math.PI / 180) *
+      Math.cos(b.lat * Math.PI / 180) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+  function bearing(a, b) {
+    var y = Math.sin((b.lng - a.lng) * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180);
+    var x = Math.cos(a.lat * Math.PI / 180) * Math.sin(b.lat * Math.PI / 180) - Math.sin(a.lat * Math.PI / 180) *
+      Math.cos(b.lat * Math.PI / 180) * Math.cos((b.lng - a.lng) * Math.PI / 180);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+  function myPos() {
+    // Without a GPS marker there is no own position. (A never-defined variable
+    // `own` used to sit here → ReferenceError that, without GPS, broke tour optimization among other things.)
+    if (meMarker) { var ll = meMarker.getLatLng(); return {lat: ll.lat, lng: ll.lng}; }
+    return null;
+  }
+  function cellKeyOf(lat, lng) { return Math.floor(lat / grid.lat + 1e-9) + '_' + Math.floor(lng / grid.lng + 1e-9); }
+
+  function toggleTour(lat, lng, label) {
+    lat = +lat; lng = +lng;
+    var k = tKey(lat, lng), i = -1;
+    tour.forEach(function (s, idx) { if (tKey(s.lat, s.lng) === k) i = idx; });
+    var before = tour.length;
+    if (i >= 0) tour.splice(i, 1); else tour.push({lat: lat, lng: lng, label: label || ''});
+    // Notify exactly once when crossing the Google limit
+    if (tour.length > MAPS_MAX && before <= MAPS_MAX) {
+      toast('<b>' + esc(tf(T.maps_cap, {max: MAPS_MAX})) + '</b><br>' +
+            esc(tf(T.maps_cap_toast, {max: MAPS_MAX, n: tour.length})), 6500, true);
+    }
+    tourOrdered = null; stopGuidance(); tourLayer.clearLayers(); saveTour(); renderTour();
+    snapTour();
+  }
+
+  function optimize() {
+    if (!tour.length) return;
+    var start = myPos() || stopPos(tour[0]), pts = tour.slice(), order = [], cur = start;
+    while (pts.length) {
+      var bi = 0, bd = Infinity;
+      for (var i = 0; i < pts.length; i++) {
+        var d = hav(cur, stopPos(pts[i]));
+        if (d < bd) { bd = d; bi = i; }
+      }
+      cur = stopPos(pts[bi]); order.push(pts[bi]); pts.splice(bi, 1);
+    }
+    function len(o) {
+      var d = hav(start, stopPos(o[0]));
+      for (var i = 1; i < o.length; i++) d += hav(stopPos(o[i - 1]), stopPos(o[i]));
+      return d;
+    }
+    var improved = true, guard = 0;
+    while (improved && guard++ < 80) {
+      improved = false;
+      for (var a = 0; a < order.length - 1; a++)
+        for (var b = a + 1; b < order.length; b++) {
+          var no = order.slice(0, a).concat(order.slice(a, b + 1).reverse(), order.slice(b + 1));
+          if (len(no) + 1e-9 < len(order)) { order = no; improved = true; }
+        }
+    }
+    tour = order; tourOrdered = order; saveTour(); drawRoute(); renderTour();
+  }
+
+  function totalKm() {
+    if (!tourOrdered || !tourOrdered.length) return null;
+    var start = myPos(), prev = start || stopPos(tourOrdered[0]), d = 0, i = start ? 0 : 1;
+    for (; i < tourOrdered.length; i++) {
+      var p = stopPos(tourOrdered[i]);
+      d += hav(prev, p);
+      prev = p;
+    }
+    return d;
+  }
+
+  function drawRoute() {
+    tourLayer.clearLayers();
+    if (!tourOrdered || !tourOrdered.length) return;
+    var start = myPos();
+    var lls = (start ? [[start.lat, start.lng]] : []).concat(
+      tourOrdered.map(function (s) { var p = stopPos(s); return [p.lat, p.lng]; }));
+    L.polyline(lls, {color: '#e8b64c', weight: 3, opacity: 0.85, dashArray: '6 6', interactive: false}).addTo(tourLayer);
+    tourOrdered.forEach(function (s, i) {
+      var p = stopPos(s);
+      L.marker([p.lat, p.lng], {zIndexOffset: 700, interactive: false, icon: L.divIcon({className: 'tour-num',
+        iconSize: [22, 22], iconAnchor: [11, 11], html: '<span>' + (i + 1) + '</span>'})}).addTo(tourLayer);
+    });
+  }
+
+  // Google Maps takes at most 9 waypoints + 1 destination = 10 stops. Everything
+  // beyond that used to be cut off SILENTLY — now we say so.
+  var MAPS_MAX = 10;
+  function mapsUrl() {
+    var stops = (tourOrdered || tour).slice(0, MAPS_MAX);
+    if (!stops.length) return '#';
+    // Road points instead of cell centers — otherwise Google sends you into a field
+    var ll = stops.map(stopPos);
+    var dest = ll[ll.length - 1], wps = ll.slice(0, -1);
+    var u = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' +
+            dest.lat + ',' + dest.lng;
+    if (wps.length) u += '&waypoints=' + wps.map(function (s) { return s.lat + ',' + s.lng; }).join('|');
+    return u;
+  }
+
+  // ---- Short notice above the map, announced by the herald ----
+  // The warlord leaps out of the map center, pauses menacingly for a moment and
+  // flies, shrinking, into the notice, where he stays seated as a seal.
+  var toastEl = document.getElementById('toast');
+  var toastTxt = document.getElementById('toast-txt');
+  var toastApe = document.getElementById('toast-ape');
+  var toastT = null, heraldT = [];
+  var REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- Jump to the scene of the action (click on a watcher report) ----
+  // The map flies to the cell, the warlord strikes there and puffs away — like a
+  // "HERE!" finger pointing at the crime scene.
+  function apeStrike() {
+    var stage = document.querySelector('.stage');
+    if (!stage || REDUCED) return;
+    var sr = stage.getBoundingClientRect();
+    var SIZE = Math.min(180, Math.round(Math.min(sr.width, sr.height) * 0.5));
+    var burst = document.createElement('div');
+    burst.className = 'ape-burst strike';
+    burst.innerHTML = '<span class="ape-ring"></span>' +
+                      '<img src="/static/img/ape-herald.webp" alt="">';
+    burst.style.width = burst.style.height = SIZE + 'px';
+    burst.style.left = Math.round(sr.width / 2 - SIZE / 2) + 'px';
+    burst.style.top = Math.round(sr.height / 2 - SIZE / 2) + 'px';
+    stage.appendChild(burst);
+    burst.classList.add('pop');
+    setTimeout(function () {
+      burst.classList.add('vanish');
+      setTimeout(function () { if (burst.parentNode) burst.parentNode.removeChild(burst); }, 480);
+    }, 950);
+  }
+
+  var strikePending = false;
+  function jumpToEvent(lat, lng) {
+    strikePending = true;
+    function fire() { if (!strikePending) return; strikePending = false; apeStrike(); }
+    map.once('moveend', fire);
+    setTimeout(fire, 1100);   // fallback in case the map barely moves (moveend never fires)
+    map.flyTo([lat, lng], Math.max(map.getZoom(), 13), {duration: 0.8});
+  }
+
+  document.addEventListener('click', function (e) {
+    var ev = e.target.closest ? e.target.closest('.ev[data-lat]') : null;
+    if (!ev) return;
+    jumpToEvent(parseFloat(ev.dataset.lat), parseFloat(ev.dataset.lng));
+  });
+
+  function hideToast() {
+    toastEl.classList.remove('on');
+    setTimeout(function () { toastEl.hidden = true; }, 300);
+  }
+
+  function toast(html, ms, herald) {
+    if (!toastEl) return;
+    heraldT.forEach(clearTimeout); heraldT = [];
+    if (toastT) clearTimeout(toastT);
+    toastTxt.innerHTML = html;
+    var life = ms || 5000;
+
+    if (!herald || REDUCED || !document.querySelector('.stage')) {
+      toastApe.classList.toggle('on', !!herald);
+      toastEl.hidden = false;
+      requestAnimationFrame(function () { toastEl.classList.add('on'); });
+      toastT = setTimeout(hideToast, life);
+      return;
+    }
+
+    // 1) Herald bursts out of the center — the notice is already there, just invisible,
+    //    so we can measure the seal's target spot.
+    toastApe.classList.remove('on');
+    toastEl.hidden = false;
+    toastEl.classList.remove('on');
+    toastEl.classList.add('pre');
+
+    var stage = document.querySelector('.stage');
+    var burst = document.createElement('div');
+    burst.className = 'ape-burst';
+    burst.innerHTML = '<span class="ape-ring"></span>' +
+                      '<img src="/static/img/ape-herald.webp" alt="">';
+    stage.appendChild(burst);
+
+    var sr = stage.getBoundingClientRect();
+    var SIZE = Math.min(200, Math.round(Math.min(sr.width, sr.height) * 0.52));
+    burst.style.width = burst.style.height = SIZE + 'px';
+    burst.style.left = Math.round(sr.width / 2 - SIZE / 2) + 'px';
+    burst.style.top = Math.round(sr.height * 0.44 - SIZE / 2) + 'px';
+    burst.classList.add('pop');
+
+    // 2) …pauses, then flies into the notice's seal slot.
+    heraldT.push(setTimeout(function () {
+      var br = burst.getBoundingClientRect();
+      var tr = toastApe.getBoundingClientRect();
+      var dx = (tr.left + tr.width / 2) - (br.left + br.width / 2);
+      var dy = (tr.top + tr.height / 2) - (br.top + br.height / 2);
+      var sc = tr.width / SIZE;
+      burst.classList.remove('pop');
+      burst.classList.add('fly');
+      var anim = burst.animate([
+        {transform: 'translate(0,0) scale(1) rotate(0deg)', opacity: 1},
+        {transform: 'translate(' + dx + 'px,' + dy + 'px) scale(' + sc + ') rotate(-12deg)',
+         opacity: 1}
+      ], {duration: 480, easing: 'cubic-bezier(.55,-0.2,.35,1.2)', fill: 'forwards'});
+      toastEl.classList.remove('pre');
+      requestAnimationFrame(function () { toastEl.classList.add('on'); });
+      anim.onfinish = function () {
+        toastApe.classList.add('on');
+        if (burst.parentNode) burst.parentNode.removeChild(burst);
+      };
+    }, 820));
+
+    toastT = setTimeout(hideToast, life + 1300);
+  }
+
+  // Selected cells pulse on the map — immediately on tap, not only after
+  // optimizing. Separate pane with one outline per stop: that way it also works
+  // for virgin land (whose cell rectangles are not drawn while the layer is off).
+  map.createPane('picks');
+  map.getPane('picks').style.zIndex = 450;
+  var pickLayer = L.layerGroup().addTo(map);
+  function markTourCells() {
+    pickLayer.clearLayers();
+    if (!tour || !tour.length) return;
+    tour.forEach(function (t) {
+      var i = Math.floor(t.lat / grid.lat + 1e-9), j = Math.floor(t.lng / grid.lng + 1e-9);
+      var r = L.rectangle([[i * grid.lat, j * grid.lng],
+                           [(i + 1) * grid.lat, (j + 1) * grid.lng]],
+        {pane: 'picks', color: '#ffd15e', weight: 2, fill: false, interactive: false});
+      r.addTo(pickLayer);
+      var el = r.getElement();
+      if (el) el.classList.add('cell-picked');
+    });
+  }
+
+  function renderTour() {
+    var n = tour.length;
+    panel.hidden = n === 0; tourHint.hidden = n !== 0;
+    document.querySelectorAll('.tour-add').forEach(function (b) {
+      var on = inTour(b.dataset.lat, b.dataset.lng);
+      b.classList.toggle('on', on); b.textContent = on ? '✓' : '+';
+    });
+    markTourCells();
+    var warn = document.getElementById('tour-warn');
+    if (warn) {
+      // Persistent notice while the tour is over the Google limit
+      warn.hidden = n <= MAPS_MAX;
+      if (n > MAPS_MAX) {
+        warn.innerHTML = '⚠ <b>' + esc(tf(T.maps_cap, {max: MAPS_MAX})) + '</b> — ' +
+                         tf(T.maps_cap_note, {n: n, max: MAPS_MAX});
+      }
+    }
+    if (!n) { tourLayer.clearLayers(); return; }
+    var km = totalKm();
+    tourCount.textContent = km != null ? tf(T.tour_total, {n: n, km: km.toFixed(1)}) : tf(T.tour_one, {n: n});
+    tourList.innerHTML = tour.map(function (s, i) {
+      return '<li' + (tourOrdered && i >= MAPS_MAX ? ' class="over-cap"' : '') + '>' +
+        (tourOrdered ? '<b>' + (i + 1) + '.</b> ' : '') +
+        esc(s.label || (s.lat.toFixed(3) + ',' + s.lng.toFixed(3))) +
+        (s.noRoad ? ' <span class="no-road" title="' + esc(T.no_road) + '">⚑</span>' : '') +
+        '<button type="button" class="tour-del" data-lat="' + s.lat + '" data-lng="' + s.lng + '">✕</button></li>';
+    }).join('');
+    mapsLink.href = mapsUrl();
+  }
+
+  function stopGuidance() {
+    guidanceOn = false; navBanner.hidden = true;
+    var g = document.getElementById('tour-go'); if (g) g.textContent = T.tour_go;
+    var h = document.getElementById('map-hero'); if (h) h.style.visibility = '';
+  }
+  function startGuidance() {
+    if (!tourOrdered || !tourOrdered.length) optimize();
+    if (!tourOrdered || !tourOrdered.length) return;
+    guidanceOn = true; navIdx = 0;
+    var h = document.getElementById('map-hero'); if (h) h.style.visibility = 'hidden';
+    document.getElementById('tour-go').textContent = T.tour_stop_nav;
+    if (!watchId && navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(onPos, onPosErr, {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
+      follow = true;
+    }
+    var mp = myPos(); if (mp) navUpdate(mp.lat, mp.lng);
+    else { navBanner.hidden = false; navBanner.className = 'nav-banner'; navBanner.innerHTML = tf(T.nav_to, {k: 1, n: tourOrdered.length, km: '…'}); }
+  }
+  function navUpdate(lat, lng) {
+    if (!guidanceOn || !tourOrdered) return;
+    while (navIdx < tourOrdered.length &&
+           cellKeyOf(lat, lng) === cellKeyOf(tourOrdered[navIdx].lat, tourOrdered[navIdx].lng)) navIdx++;
+    if (navIdx >= tourOrdered.length) {
+      navBanner.hidden = false; navBanner.className = 'nav-banner done';
+      navBanner.innerHTML = tf(T.nav_done, {n: tourOrdered.length});
+      stopGuidance(); return;
+    }
+    // Arrow and distance point at the road point; the auto-advance above keeps
+    // comparing cell keys (center) — that stays correct.
+    var tgt = stopPos(tourOrdered[navIdx]), here = {lat: lat, lng: lng};
+    navBanner.hidden = false; navBanner.className = 'nav-banner';
+    navBanner.innerHTML = '<span class="nav-arrow" style="transform:rotate(' + bearing(here, tgt).toFixed(0) + 'deg)">↑</span> ' +
+      tf(T.nav_to, {k: navIdx + 1, n: tourOrdered.length, km: hav(here, tgt).toFixed(1)});
+  }
+
+  document.addEventListener('click', function (e) {
+    var add = e.target.closest ? e.target.closest('.tour-add') : null;
+    if (add) { e.preventDefault(); toggleTour(add.dataset.lat, add.dataset.lng, add.dataset.label); return; }
+    var del = e.target.closest ? e.target.closest('.tour-del') : null;
+    if (del) { e.preventDefault(); toggleTour(del.dataset.lat, del.dataset.lng); return; }
+    var pin = e.target.closest ? e.target.closest('.cell-tour') : null;
+    if (pin) { e.preventDefault(); toggleTour(pin.dataset.lat, pin.dataset.lng, pin.dataset.label); map.closePopup(); }
+  });
+  document.getElementById('tour-optimize').addEventListener('click', optimize);
+  document.getElementById('tour-clear').addEventListener('click', function () {
+    tour = []; tourOrdered = null; stopGuidance(); tourLayer.clearLayers(); saveTour(); renderTour();
+  });
+  document.getElementById('tour-go').addEventListener('click', function () {
+    if (guidanceOn) stopGuidance(); else startGuidance();
+  });
+  renderTour();
+  snapTour();   // retroactively snap a tour saved in an old session
+  plRefresh();
+
+  // ---- Raven post: web push on/off for this device ----
+  (function () {
+    var box = document.getElementById('push-box');
+    if (!box || !('serviceWorker' in navigator) || !('PushManager' in window) ||
+        !('Notification' in window)) return;
+    box.hidden = false;
+    var stat = document.getElementById('push-status');
+    var btn = document.getElementById('push-toggle');
+    var sub = null;
+    function ui() {
+      stat.textContent = sub ? T.push_on : T.push_off;
+      btn.textContent = sub ? T.push_disable : T.push_enable;
+      box.classList.toggle('on', !!sub);
+    }
+    navigator.serviceWorker.ready.then(function (reg) {
+      return reg.pushManager.getSubscription();
+    }).then(function (s) { sub = s; ui(); }).catch(function () {});
+    function b64ToU8(s) {
+      var pad = '='.repeat((4 - s.length % 4) % 4);
+      var raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+      var arr = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+      return arr;
+    }
+    btn.addEventListener('click', function () {
+      if (sub) {
+        var ep = sub.endpoint;
+        sub.unsubscribe().catch(function () {});
+        fetch('/push/unsubscribe', {method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({endpoint: ep})}).catch(function () {});
+        sub = null; ui();
+        return;
+      }
+      btn.disabled = true;
+      stat.textContent = T.push_working;
+      // Never hang silently again: every stage gets a deadline, otherwise the UI says why.
+      function withTimeout(p, ms, what) {
+        return Promise.race([p, new Promise(function (_, rej) {
+          setTimeout(function () { rej(new Error(what)); }, ms);
+        })]);
+      }
+      Notification.requestPermission().then(function (perm) {
+        if (perm !== 'granted') { btn.disabled = false; stat.textContent = T.push_denied; return; }
+        return Promise.all([withTimeout(navigator.serviceWorker.ready, 8000, 'service worker'),
+                            fetch('/push/pubkey').then(function (r) { return r.json(); })])
+          .then(function (rs) {
+            // First pick up a possibly orphaned subscription (server no longer knows it)
+            return withTimeout(rs[0].pushManager.getSubscription().then(function (old) {
+              if (old) return old;
+              return rs[0].pushManager.subscribe({userVisibleOnly: true,
+                applicationServerKey: b64ToU8(rs[1].key)});
+            }), 15000, 'subscribe');
+          })
+          .then(function (s) {
+            sub = s;
+            return fetch('/push/subscribe', {method: 'POST',
+              headers: {'Content-Type': 'application/json'}, body: JSON.stringify(s.toJSON())})
+              .then(function (r) {
+                if (!r.ok) throw new Error('subscribe ' + r.status);
+                btn.disabled = false; ui();
+              });
+          })
+          .catch(function (err) {
+            btn.disabled = false; sub = null; ui();
+            stat.textContent = (err && err.message) ? (T.push_failed + ' (' + err.message + ')')
+                                                    : T.push_failed;
+          });
+      }).catch(function () { btn.disabled = false; stat.textContent = T.push_denied; });
+    });
+  })();
+
+  // Mobile: Leaflet often initializes before the flex layout has the real map
+  // size → the map stays empty/wrong until you reload manually. invalidateSize +
+  // refit once the layout has settled (several times, up to window.load).
+  // On first build the map is still on the start view (Atlantic) — the distances
+  // therefore have to be pulled along once it is fitted to the turf.
+  function relayout() { map.invalidateSize(); fitInitial(); plRefresh(); }
+  setTimeout(relayout, 250);
+  setTimeout(relayout, 900);
+  window.addEventListener('load', relayout);
+  window.addEventListener('resize', function () { map.invalidateSize(); });
+});

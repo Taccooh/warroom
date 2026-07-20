@@ -18,7 +18,8 @@ LANG_COOKIE = "wr_lang"
 # Cache buster: highest mtime of our own assets. Changes on every edit →
 # new ?v= URL → Cloudflare/browsers fetch fresh (CF otherwise caches /static/* for 4 h).
 ASSET_V = 0
-for _p in (STATIC_DIR / "style.css", STATIC_DIR / "sw.js"):
+for _p in (STATIC_DIR / "style.css", STATIC_DIR / "sw.js",
+           STATIC_DIR / "warroom.js", STATIC_DIR / "sw-register.js"):
     try:
         ASSET_V = max(ASSET_V, int(_p.stat().st_mtime))
     except OSError:
