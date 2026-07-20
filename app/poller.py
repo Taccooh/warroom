@@ -423,6 +423,11 @@ def poll_all(conn) -> dict:
         for fut, u in futures.items():
             try:
                 total_events += fut.result()["events"]
+            except WdgError as e:
+                # Expected operational failure: a revoked/rotated API key (401) or
+                # a transient wdgwars 5xx. Not a bug in our code — log one line, not
+                # a full stack trace, so a single dead key can't drown the log.
+                log.warning("poll für %s uebersprungen: %s", u["wdg_username"], e)
             except Exception:
                 log.exception("poll für %s fehlgeschlagen", u["wdg_username"])
     db.kv_set(conn, "last_poll", time.time())
