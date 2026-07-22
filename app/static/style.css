@@ -333,6 +333,10 @@ body.wr-setloc .revier-bar,
 body.wr-setloc .panel,
 body.wr-setloc #nav,
 body.wr-setloc #here { display: none !important; }
+/* Desktop grid keeps the (now hidden) panel's column track, which would sit there
+   as black space — let the map span BOTH columns so it fills the freed width.
+   (On mobile .stage is a flex child, so grid-column is simply ignored.) */
+body.wr-setloc .stage { grid-column: 1 / -1; }
 .nav-banner.done { background: linear-gradient(180deg, #ffe9ad, var(--gold)); color: #191204; }
 .nav-body {
   flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.5rem;
