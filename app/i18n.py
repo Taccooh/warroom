@@ -334,6 +334,11 @@ JS = {
     "chart_cl": {"en": "Team captured / lost", "de": "Team erobert / verloren"},
     "rings_need_pos": {"en": "Set your position first (GPS or ⌖)",
                        "de": "Erst Standort setzen (GPS oder ⌖)"},
+    # Planner coaching — shown once as a toast (moved out of permanent hint blocks)
+    "planner_hint": {"en": "Easiest flips first. <b class=\"lead-txt\">Already ahead</b> = you already have more APs there than the owner — just drive there once.",
+                     "de": "Leichteste Flips zuerst. <b class=\"lead-txt\">Führst schon</b> = du hast dort bereits mehr APs als der Besitzer — nur noch einmal hinfahren."},
+    "tour_empty": {"en": "Tap + on targets below or on map cells to plan a drive.",
+                   "de": "Tipp + an Zielen unten oder auf Karten-Zellen, um eine Fahrt zu planen."},
 }
 
 

@@ -389,11 +389,22 @@ document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.tab').forEach(function (x) { x.classList.toggle('active', x.dataset.tab === name); });
     document.querySelectorAll('.tabc').forEach(function (c) { c.hidden = c.dataset.tabc !== name; });
     map.invalidateSize();
+    if (name === 'planer') maybeCoach();
+  }
+  // Planner/tour how-to as a ONE-TIME coach toast instead of two permanent hint
+  // paragraphs — fires the first time the planner is seen, then never again.
+  function maybeCoach() {
+    var seen;
+    try { seen = localStorage.getItem('wr_hints_seen'); } catch (e) {}
+    if (seen) return;
+    try { localStorage.setItem('wr_hints_seen', '1'); } catch (e) {}
+    toast(T.planner_hint + '<br>' + T.tour_empty, 8000);
   }
   document.querySelectorAll('.tab').forEach(function (t) {
     t.addEventListener('click', function () { showTab(t.dataset.tab); });
   });
   if (initTab && initTab !== 'planer') showTab(initTab);
+  else setTimeout(maybeCoach, 1200);   // planner is the landing tab → coach after load settles
 
   // ---- Follow mode: own live position + "you are here" context ----
   var meMarker = null, meCircle = null, follow = false, watchId = null;
@@ -698,7 +709,6 @@ document.addEventListener('DOMContentLoaded', function () {
   var tourOrdered = null;
   var tourLayer = L.layerGroup().addTo(map);
   var panel = document.getElementById('tour-panel');
-  var tourHint = document.getElementById('tour-hint');
   var tourList = document.getElementById('tour-list');
   var tourCount = document.getElementById('tour-count');
   var mapsLink = document.getElementById('tour-maps');
@@ -1002,7 +1012,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function renderTour() {
     var n = tour.length;
-    panel.hidden = n === 0; tourHint.hidden = n !== 0;
+    panel.hidden = n === 0;
     document.querySelectorAll('.tour-add').forEach(function (b) {
       var on = inTour(b.dataset.lat, b.dataset.lng);
       b.classList.toggle('on', on); b.textContent = on ? '✓' : '+';

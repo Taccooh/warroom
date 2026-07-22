@@ -101,9 +101,9 @@
         <button type="button" class="rb-jump stop" id="tour-clear">{{ t('tour_clear') }}</button>
       </div>
     </div>
-    <p class="hint tour-hint" id="tour-hint">{{ t('tour_empty') }}</p>
-    <p class="hint">{{ t('planner_hint') | safe }}
-      {% if free %}<br>{{ t('planner_free_extra', n=counts.free) | safe }}{% endif %}</p>
+    {# The planner/tour how-to used to sit here as two permanent paragraphs; it is
+       now a one-time coach toast (warroom.js maybeCoach, gated by wr_hints_seen),
+       so the target list gets those ~2 rows back. #}
     <div id="planner-body">{% include "_planner_body.html" %}</div>
   </div>
 
