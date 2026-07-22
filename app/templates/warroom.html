@@ -63,7 +63,13 @@
       <path d="M22 39 18.8 22 22 25.2 25.2 22Z" fill="currentColor" opacity="0.3"/>
     </svg>
   </div>
-  <div id="nav" class="nav-banner" hidden></div>
+  {# Guidance strip docks at the bottom (step 6): #nav-body holds the arrow+distance
+     (JS-updated), #nav-end is a persistent END button so you can stop navigating
+     from the thumb zone without opening the panel. #}
+  <div id="nav" class="nav-banner" hidden>
+    <span id="nav-body"></span>
+    <button type="button" id="nav-end" class="nav-end">{{ t('tour_stop_nav') }}</button>
+  </div>
   <div id="toast" class="toast" hidden>
     <span class="toast-ape" id="toast-ape" aria-hidden="true"></span>
     <div class="toast-txt" id="toast-txt"></div>

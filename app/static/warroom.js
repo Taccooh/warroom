@@ -497,6 +497,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var meMarker = null, meCircle = null, follow = false, watchId = null;
   var here = document.getElementById('here');
   function updateHere(lat, lng) {
+    if (guidanceOn) { here.hidden = true; return; }   // the nav strip owns the bottom slot during guidance
     var c = cellAt(lat, lng);
     here.hidden = false;
     if (!c) {
@@ -535,7 +536,10 @@ document.addEventListener('DOMContentLoaded', function () {
     plOnPosition();  // keep distances updated; re-sorting only throttled
     if (ringsOn) renderRings();   // rings follow the moving GPS position
   }
-  function onPosErr() { here.hidden = false; here.className = 'here-banner out'; here.innerHTML = T.no_gps; }
+  function onPosErr() {
+    if (guidanceOn) return;   // the nav strip owns the bottom slot; don't flash a GPS-error banner over it
+    here.hidden = false; here.className = 'here-banner out'; here.innerHTML = T.no_gps;
+  }
   var LocateCtl = L.Control.extend({options: {position: 'bottomright'}, onAdd: function () {
     var d = L.DomUtil.create('div', 'leaflet-bar locate-ctl');
     d.innerHTML = '<a href="#" id="loc-btn" title="Follow" role="button">◎</a>';
@@ -800,6 +804,9 @@ document.addEventListener('DOMContentLoaded', function () {
   var tourCount = document.getElementById('tour-count');
   var mapsLink = document.getElementById('tour-maps');
   var navBanner = document.getElementById('nav');
+  var navBody = document.getElementById('nav-body');
+  var navEnd = document.getElementById('nav-end');
+  if (navEnd) navEnd.addEventListener('click', function () { stopGuidance(); });
   var guidanceOn = false, navIdx = 0;
 
   // ---- Snap waypoints onto the road ----
@@ -1131,11 +1138,13 @@ document.addEventListener('DOMContentLoaded', function () {
     guidanceOn = false; navBanner.hidden = true;
     var g = document.getElementById('tour-go'); if (g) g.textContent = T.tour_go;
     var h = document.getElementById('map-hero'); if (h) h.style.visibility = '';
+    var mp = myPos(); if (mp) updateHere(mp.lat, mp.lng);   // restore the here-banner the strip replaced
   }
   function startGuidance() {
     if (!tourOrdered || !tourOrdered.length) optimize();
     if (!tourOrdered || !tourOrdered.length) return;
     guidanceOn = true; navIdx = 0;
+    here.hidden = true;   // slot spec: the nav strip owns the bottom during guidance
     var h = document.getElementById('map-hero'); if (h) h.style.visibility = 'hidden';
     document.getElementById('tour-go').textContent = T.tour_stop_nav;
     if (!watchId && navigator.geolocation) {
@@ -1143,7 +1152,7 @@ document.addEventListener('DOMContentLoaded', function () {
       follow = true;
     }
     var mp = myPos(); if (mp) navUpdate(mp.lat, mp.lng);
-    else { navBanner.hidden = false; navBanner.className = 'nav-banner'; navBanner.innerHTML = tf(T.nav_to, {k: 1, n: tourOrdered.length, d: '…'}); }
+    else { navBanner.hidden = false; navBanner.className = 'nav-banner'; navBody.innerHTML = tf(T.nav_to, {k: 1, n: tourOrdered.length, d: '…'}); }
   }
   function navUpdate(lat, lng) {
     if (!guidanceOn || !tourOrdered) return;
@@ -1151,15 +1160,15 @@ document.addEventListener('DOMContentLoaded', function () {
            cellKeyOf(lat, lng) === cellKeyOf(tourOrdered[navIdx].lat, tourOrdered[navIdx].lng)) navIdx++;
     if (navIdx >= tourOrdered.length) {
       navBanner.hidden = false; navBanner.className = 'nav-banner done';
-      navBanner.innerHTML = tf(T.nav_done, {n: tourOrdered.length});
+      navBody.innerHTML = tf(T.nav_done, {n: tourOrdered.length});
       stopGuidance(); return;
     }
     // Arrow and distance point at the road point; the auto-advance above keeps
     // comparing cell keys (center) — that stays correct.
-    var tgt = stopPos(tourOrdered[navIdx]), here = {lat: lat, lng: lng};
+    var tgt = stopPos(tourOrdered[navIdx]), pt = {lat: lat, lng: lng};
     navBanner.hidden = false; navBanner.className = 'nav-banner';
-    navBanner.innerHTML = '<span class="nav-arrow" style="transform:rotate(' + bearing(here, tgt).toFixed(0) + 'deg)">↑</span> ' +
-      tf(T.nav_to, {k: navIdx + 1, n: tourOrdered.length, d: fmtDist(hav(here, tgt))});
+    navBody.innerHTML = '<span class="nav-arrow" style="transform:rotate(' + bearing(pt, tgt).toFixed(0) + 'deg)">↑</span> ' +
+      tf(T.nav_to, {k: navIdx + 1, n: tourOrdered.length, d: fmtDist(hav(pt, tgt))});
   }
 
   document.addEventListener('click', function (e) {

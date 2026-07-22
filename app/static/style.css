@@ -309,15 +309,30 @@ path.cell-picked {
 .tour-list li.over-cap b { color: var(--muted); }
 
 /* Tour guidance: marching orders */
+/* Guidance strip docked at the BOTTOM (step 6): spans from the left edge to just
+   before the right control rail, so the two never overlap. Big driving type, and
+   an END button inside so navigation stops from the thumb zone. */
 .nav-banner {
-  position: absolute; left: 50%; top: 0.6rem; transform: translateX(-50%); z-index: 520;
-  max-width: 94%; padding: 0.44rem 1rem; border-radius: 0; clip-path: var(--notch);
-  font-size: 0.92rem; white-space: nowrap;
+  position: absolute; left: 0.6rem; right: 66px; bottom: 0.6rem; z-index: 520;
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.35rem 0.4rem 0.35rem 0.85rem; clip-path: var(--notch);
   background: linear-gradient(180deg, var(--gold-bright), #d3a037); color: #191204;
   font-weight: 800; letter-spacing: 0.02em;
 }
 .nav-banner.done { background: linear-gradient(180deg, #ffe9ad, var(--gold)); color: #191204; }
-.nav-arrow { display: inline-block; font-weight: 900; }
+.nav-body {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.5rem;
+  font-family: var(--display); font-size: 1.25rem; line-height: 1.1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nav-arrow { display: inline-block; font-weight: 900; font-size: 1.4rem; flex: 0 0 auto; }
+.nav-end {
+  flex: 0 0 auto; min-height: 44px; padding: 0 0.85rem;
+  background: rgba(20, 14, 3, 0.92); color: var(--gold-bright); border: 0;
+  font-family: var(--display); font-weight: 800; font-size: 0.9rem;
+  letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; clip-path: var(--notch);
+}
+.nav-end:hover { background: #100b02; color: #ffe9ad; }
 
 /* Own GPS dot (blue stays the functional color) */
 .me-dot span {
