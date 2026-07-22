@@ -352,6 +352,31 @@ body.wr-setloc .stage { grid-column: 1 / -1; }
 }
 .nav-end:hover { background: #100b02; color: #ffe9ad; }
 
+/* "Next move" card (step 11): same bottom slot as the nav strip, but a frost/dark
+   plate so it never looks like active gold guidance. Red accent when it is an attack. */
+.nextmove-card {
+  position: absolute; left: 0.6rem; right: 66px; bottom: 0.6rem; z-index: 510;
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.4rem 0.4rem 0.4rem 0.8rem; clip-path: var(--notch);
+  background: rgba(10, 14, 18, 0.95); border: 1px solid var(--frost); color: var(--frost);
+}
+.nextmove-card[hidden] { display: none; }   /* display:flex beats [hidden] — restore it */
+.nextmove-card.attack { border-color: var(--enemy); color: var(--enemy-hot); }
+.nextmove-card.empty { color: var(--muted); border-color: var(--edge); }
+#nm-body {
+  flex: 1 1 auto; min-width: 0; cursor: pointer;
+  font-family: var(--display); font-size: 1.05rem; letter-spacing: 0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nm-icon { font-weight: 900; }
+.nm-dist { font-family: var(--mono); color: var(--frost); opacity: 0.85; }
+.nextmove-card.attack .nm-dist { color: var(--enemy-hot); }
+.nm-skip {
+  flex: 0 0 auto; min-height: 40px; min-width: 40px; font-size: 1.1rem;
+  background: none; border: 0; color: inherit; cursor: pointer; opacity: 0.8;
+}
+.nm-skip:hover { opacity: 1; }
+
 /* Own GPS dot (blue stays the functional color) */
 .me-dot span {
   display: block; width: 14px; height: 14px; border-radius: 50%;

@@ -507,7 +507,7 @@ document.addEventListener('DOMContentLoaded', function () {
     return ' <span class="hb-fresh ' + cls + '">◈ ' + txt + '</span>';
   }
   function updateHere(lat, lng) {
-    if (guidanceOn) { here.hidden = true; return; }   // the nav strip owns the bottom slot during guidance
+    if (guidanceOn || (nextmoveOn && nmCard && !nmCard.hidden)) { here.hidden = true; return; }   // nav strip / next-move card own the bottom slot
     var c = cellAt(lat, lng);
     here.hidden = false;
     var cls, html;
@@ -542,6 +542,7 @@ document.addEventListener('DOMContentLoaded', function () {
     navUpdate(lat, lng);
     plOnPosition();  // keep distances updated; re-sorting only throttled
     if (ringsOn) renderRings();   // rings follow the moving GPS position
+    if (nextmoveOn) renderNextmove();
   }
   function onPosErr() {
     if (guidanceOn) return;   // the nav strip owns the bottom slot; don't flash a GPS-error banner over it
@@ -605,6 +606,7 @@ document.addEventListener('DOMContentLoaded', function () {
     navUpdate(lat, lng);
     plOnPosition();
     if (ringsOn) renderRings();   // re-center rings on the new manual pin
+    if (nextmoveOn) renderNextmove();
   }
   document.getElementById('setloc-btn').addEventListener('click', function (e) {
     e.preventDefault();
@@ -677,6 +679,70 @@ document.addEventListener('DOMContentLoaded', function () {
       else { ringLayer.clearLayers(); map.removeLayer(ringLayer); }
     });
   });
+
+  // ---- "Next move" card (step 11, opt-in via the ⚡ rail toggle) ----
+  // One suggested next action in the bottom slot when no tour navigation runs:
+  // escalated watcher events (attack on your turf) first, then the nearest flip
+  // target. Client-side from data already present; tap the body to fly there, ↻ cycles.
+  var nextmoveOn = false, nmIdx = 0;
+  var nmCard = document.getElementById('nextmove');
+  var nmBody = document.getElementById('nm-body');
+  var nmSkip = document.getElementById('nm-skip');
+  function nmCandidates() {
+    var list = [];
+    var wb = document.getElementById('watcher-body');
+    if (wb) {
+      wb.querySelectorAll('.ev.prox-mine[data-lat], .ev.prox-gang[data-lat]').forEach(function (el) {
+        var m = el.querySelector('.ev-motto');
+        list.push({lat: +el.dataset.lat, lng: +el.dataset.lng, kind: 'attack',
+                   label: m ? m.textContent.trim() : T.nm_attack});
+      });
+    }
+    var mp = myPos();
+    if (mp) {   // nearest flip target — enemy/free only (bounded; virgin land is thousands)
+      var best = null, bd = Infinity;
+      targets.forEach(function (c) {
+        if (c.lat == null) return;
+        var d = hav(mp, {lat: c.lat, lng: c.lng});
+        if (d < bd) { bd = d; best = c; }
+      });
+      if (best) list.push({lat: best.lat, lng: best.lng, kind: 'target',
+        label: best.t === 'free' ? T.nm_free : (best.g || T.nm_target)});
+    }
+    return list;
+  }
+  function renderNextmove() {
+    if (!nmCard) return;
+    if (!nextmoveOn || guidanceOn) { nmCard.hidden = true; return; }
+    var cand = nmCandidates();
+    nmCard.hidden = false;
+    if (!cand.length) {
+      nmCard.className = 'nextmove-card empty';
+      nmBody.textContent = T.nm_none;
+      nmBody.removeAttribute('data-lat');
+      if (nmSkip) nmSkip.hidden = true;
+      return;
+    }
+    if (nmIdx >= cand.length) nmIdx = 0;
+    var c = cand[nmIdx], mp = myPos();
+    var dist = mp ? fmtDist(hav(mp, {lat: c.lat, lng: c.lng})) : '';
+    nmCard.className = 'nextmove-card ' + c.kind;
+    nmBody.innerHTML = '<span class="nm-icon">' + (c.kind === 'attack' ? '⚔' : '◇') + '</span> ' +
+      esc(c.label) + (dist ? ' <span class="nm-dist">· ' + dist + '</span>' : '');
+    nmBody.dataset.lat = c.lat; nmBody.dataset.lng = c.lng;
+    if (nmSkip) nmSkip.hidden = cand.length <= 1;
+  }
+  var nmToggle = document.getElementById('nextmove-toggle');
+  if (nmToggle) nmToggle.addEventListener('click', function () {
+    nextmoveOn = !nextmoveOn; nmIdx = 0;
+    nmToggle.classList.toggle('on', nextmoveOn);
+    renderNextmove();
+    var mp = myPos(); if (mp) updateHere(mp.lat, mp.lng);   // here-banner yields / returns
+  });
+  if (nmBody) nmBody.addEventListener('click', function () {
+    if (nmBody.dataset.lat) jumpToEvent(+nmBody.dataset.lat, +nmBody.dataset.lng);
+  });
+  if (nmSkip) nmSkip.addEventListener('click', function () { nmIdx++; renderNextmove(); });
 
   // ---- Crew: friends' live positions (12s poll) + own push while sharing ----
   var friendLayer = L.layerGroup().addTo(map);
@@ -764,6 +830,7 @@ document.addEventListener('DOMContentLoaded', function () {
           var mp = myPos();
           if (mp && !here.hidden) updateHere(mp.lat, mp.lng);
         }
+        if (nextmoveOn) renderNextmove();   // fresh events/targets → refresh the suggestion
       })
       .catch(function () {})
       .then(function () { applying = false; });
@@ -1160,6 +1227,7 @@ document.addEventListener('DOMContentLoaded', function () {
     guidanceOn = false; navBanner.hidden = true;
     var g = document.getElementById('tour-go'); if (g) g.textContent = T.tour_go;
     var h = document.getElementById('map-hero'); if (h) h.style.visibility = '';
+    renderNextmove();   // the bottom slot is free again → the next-move card may return
     var mp = myPos(); if (mp) updateHere(mp.lat, mp.lng);   // restore the here-banner the strip replaced
   }
   function startGuidance() {
@@ -1167,6 +1235,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!tourOrdered || !tourOrdered.length) return;
     guidanceOn = true; navIdx = 0;
     here.hidden = true;   // slot spec: the nav strip owns the bottom during guidance
+    renderNextmove();     // guidance takes the bottom slot → hide any next-move card
     var h = document.getElementById('map-hero'); if (h) h.style.visibility = 'hidden';
     document.getElementById('tour-go').textContent = T.tour_stop_nav;
     if (!watchId && navigator.geolocation) {

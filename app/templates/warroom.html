@@ -40,6 +40,7 @@
     </button>
     {% endif %}
     <button class="rb-jump layer-chip" data-layer="rings">⊚ {{ t('rings_layer') }}</button>
+    <button class="rb-jump layer-chip" id="nextmove-toggle">⚡ {{ t('nextmove') }}</button>
   </div>
 </div>
 
@@ -66,6 +67,12 @@
   <div id="nav" class="nav-banner" hidden>
     <span id="nav-body"></span>
     <button type="button" id="nav-end" class="nav-end">{{ t('tour_stop_nav') }}</button>
+  </div>
+  {# "Next move" card (step 11, opt-in via the ⚡ rail toggle): a single suggested
+     next action in the bottom slot when no tour navigation runs. #}
+  <div id="nextmove" class="nextmove-card" hidden>
+    <span id="nm-body" role="button" tabindex="0"></span>
+    <button type="button" id="nm-skip" class="nm-skip" hidden aria-label="skip">↻</button>
   </div>
   <div id="toast" class="toast" hidden>
     <span class="toast-ape" id="toast-ape" aria-hidden="true"></span>

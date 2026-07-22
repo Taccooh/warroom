@@ -207,6 +207,8 @@ STRINGS = {
     # Settings section in the Info tab
     "settings_head": {"en": "Settings", "de": "Einstellungen"},
     "lang_label": {"en": "Language", "de": "Sprache"},
+    # "Next move" rail toggle (server-rendered chip label)
+    "nextmove": {"en": "Next move", "de": "Nächster Zug"},
     # Bottom sheet
     "tab_map": {"en": "Map", "de": "Karte"},
     "sheet_toggle": {"en": "Resize panel", "de": "Panel-Höhe"},
@@ -347,6 +349,11 @@ JS = {
                    "de": "Tipp + an Zielen unten oder auf Karten-Zellen, um eine Fahrt zu planen."},
     # here-banner data-freshness segment (client-rendered via T.hb_live)
     "hb_live": {"en": "live", "de": "live"},
+    # "Next move" card (client-rendered)
+    "nm_none": {"en": "Nothing pressing — free to roam", "de": "Nichts Dringendes — freie Fahrt"},
+    "nm_target": {"en": "Nearest target", "de": "Nächstes Ziel"},
+    "nm_free": {"en": "Free cell", "de": "Freie Zelle"},
+    "nm_attack": {"en": "Turf under attack", "de": "Revier unter Beschuss"},
 }
 
 
