@@ -478,6 +478,15 @@ path.cell-picked {
   scrollbar-width: none;
 }
 .pl-chips::-webkit-scrollbar { display: none; }
+/* Desktop has no touch-swipe but plenty of vertical room: let the chip rails WRAP
+   to the next line instead of scrolling sideways, so nothing is cut off and
+   unreachable. Mobile keeps the horizontal scroll (swipeable). */
+@media (min-width: 1000px) {
+  .rb-rail, .pl-chips {
+    flex-wrap: wrap; overflow-x: visible;
+    -webkit-mask-image: none; mask-image: none;
+  }
+}
 .pl-chip {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 0.3rem;
   background: var(--iron); border: 1px solid var(--edge); color: var(--muted);
