@@ -471,6 +471,21 @@ async def api_route(request: Request, user=Depends(current_user)):
     return JSONResponse({"ok": bool(r), "route": r})
 
 
+@app.post("/api/nearest")
+async def api_nearest(request: Request, user=Depends(current_user)):
+    """Exact point → nearest drivable road (OSRM /nearest proxy). Snaps a
+    hand-dropped stop marker onto the street."""
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    try:
+        body = await request.json()
+        lat, lng = body.get("lat"), body.get("lng")
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "bad request"}, status_code=400)
+    pt = await asyncio.to_thread(routing.nearest, lat, lng)
+    return JSONResponse({"ok": bool(pt), "pt": pt})
+
+
 @app.get("/api/live")
 def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
          user=Depends(current_user)):

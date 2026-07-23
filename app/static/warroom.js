@@ -1392,20 +1392,69 @@ document.addEventListener('DOMContentLoaded', function () {
       // route. The dropped point becomes the stop AND its routing point (no
       // re-snap yanking the hand-picked spot away); the label follows the new
       // location honestly.
-      var m = L.marker([p.lat, p.lng], {zIndexOffset: 700, draggable: true,
+      var m = L.marker([p.lat, p.lng], {zIndexOffset: 700,
         icon: L.divIcon({className: 'tour-num',
         iconSize: [22, 22], iconAnchor: [11, 11], html: '<span>' + (i + 1) + '</span>'})});
-      m.on('dragend', function () {
-        var ll = m.getLatLng();
-        s.lat = ll.lat; s.lng = ll.lng;
-        s.rlat = ll.lat; s.rlng = ll.lng; s.noRoad = false;
-        s.label = stopLabelAt(ll.lat, ll.lng);
-        saveTour(); stopGuidance();
-        // auto mode re-optimizes around the moved point; a hand order only re-routes
-        if (tourManual) applyManualOrder(); else optimize();
-      });
       m.addTo(tourLayer);
+      bindStopDrag(m, s);
     });
+  }
+
+  // Custom pointer drag for stop markers (replaces Leaflet's built-in drag):
+  // on TOUCH the badge lifts ~70 px above the finger — enlarged, with a stem
+  // down to the fingertip — so the thumb never hides the drop point (the
+  // classic mobile pin-drag pattern). Mouse stays 1:1.
+  function bindStopDrag(m, s) {
+    var el = m.getElement();
+    if (!el) return;
+    var pid = null, lift = 0, moved = false;
+    function toLatLng(e) {
+      var r = map.getContainer().getBoundingClientRect();
+      return map.containerPointToLatLng([e.clientX - r.left, e.clientY - r.top - lift]);
+    }
+    el.addEventListener('pointerdown', function (e) {
+      pid = e.pointerId; moved = false;
+      lift = e.pointerType === 'touch' ? 70 : 0;
+      el.classList.add('drag-live');
+      if (lift) el.classList.add('drag-touch');
+      map.dragging.disable();
+      try { el.setPointerCapture(pid); } catch (ex) {}
+      e.preventDefault(); e.stopPropagation();
+    });
+    el.addEventListener('pointermove', function (e) {
+      if (pid === null || e.pointerId !== pid) return;
+      e.preventDefault();
+      moved = true;
+      m.setLatLng(toLatLng(e));
+    });
+    function commit(ll) {
+      m.setLatLng(ll);   // visible snap onto the road
+      s.lat = ll.lat; s.lng = ll.lng;
+      s.rlat = ll.lat; s.rlng = ll.lng; s.noRoad = false;
+      s.label = stopLabelAt(ll.lat, ll.lng);
+      saveTour(); stopGuidance();
+      // auto mode re-optimizes around the moved point; a hand order only re-routes
+      if (tourManual) applyManualOrder(); else optimize();
+    }
+    function fin(e) {
+      if (pid === null || (e.pointerId !== undefined && e.pointerId !== pid)) return;
+      pid = null;
+      el.classList.remove('drag-live', 'drag-touch');
+      map.dragging.enable();
+      if (!moved) return;   // a plain tap moves nothing
+      // magnet: the dropped pin snaps onto the nearest drivable road (OSRM
+      // /nearest via our proxy); if no instance answers, the raw point stands
+      var raw = m.getLatLng();
+      fetch('/api/nearest', {method: 'POST', headers: {'Content-Type': 'application/json',
+        'X-Requested-With': 'fetch'}, body: JSON.stringify({lat: raw.lat, lng: raw.lng})})
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          commit((d && d.ok && d.pt) ? {lat: d.pt[0], lng: d.pt[1]} : raw);
+        })
+        .catch(function () { commit(raw); });
+    }
+    el.addEventListener('pointerup', fin);
+    el.addEventListener('pointercancel', fin);
   }
 
   // Honest label for a hand-placed stop: whatever actually sits at that spot.

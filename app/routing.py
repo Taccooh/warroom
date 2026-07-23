@@ -32,6 +32,35 @@ TIMEOUT = 12
 MAX_STOPS = 30   # tours are human-sized; anything bigger is garbage input
 
 
+def nearest(lat: float, lng: float) -> list | None:
+    """Nearest drivable road point to an exact coordinate (OSRM /nearest).
+    Used when a stop marker is dropped by hand: the pin snaps onto the road.
+    Returns [lat, lng] or None when no instance answered."""
+    try:
+        lat, lng = float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lng <= 180.0):
+        return None
+    path = f"/nearest/v1/driving/{lng:.6f},{lat:.6f}?number=1"
+    for base in OSRM_INSTANCES:
+        req = urllib.request.Request(
+            base + path,
+            headers={"User-Agent": config.USER_AGENT, "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                d = json.loads(r.read().decode("utf-8"))
+            wps = d.get("waypoints") or []
+            if d.get("code") != "Ok" or not wps:
+                return None
+            loc = wps[0]["location"]          # lon,lat
+            return [loc[1], loc[0]]
+        except Exception as ex:
+            log.info("OSRM nearest %s: %s — nächste Instanz",
+                     urllib.parse.urlparse(base).netloc, ex)
+    return None
+
+
 def route(points: list) -> dict | None:
     """points: [[lat, lng], ...] ordered stops (>= 2). Returns
     {"geometry": [[lat, lng], ...], "km": float, "legs": [float, ...]} with the

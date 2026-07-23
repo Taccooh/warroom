@@ -429,9 +429,23 @@ body.wr-setloc .stage { grid-column: 1 / -1; }
 }
 
 /* Tour stop numbers: gold badges (octagon, the number stays upright).
-   Draggable on the map to shape the route. */
-.tour-num { cursor: grab; }
+   Draggable on the map to shape the route; touch-action none so the browser
+   never turns the drag into a map pan / pull-to-refresh. */
+.tour-num { cursor: grab; touch-action: none; }
 .tour-num:active { cursor: grabbing; }
+/* While dragging: badge enlarged and above everything… */
+.tour-num.drag-live { z-index: 10000 !important; }
+.tour-num.drag-live span {
+  transform: scale(1.6);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+/* …and on touch a stem from the lifted badge down to the fingertip, so the
+   thumb never hides where the stop will land */
+.tour-num.drag-touch::after {
+  content: ''; position: absolute; left: 10px; top: 100%; width: 2px; height: 66px;
+  background: linear-gradient(180deg, var(--gold-bright), transparent);
+  pointer-events: none;
+}
 .tour-num span {
   display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
   clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 6px, 100% calc(100% - 6px),
