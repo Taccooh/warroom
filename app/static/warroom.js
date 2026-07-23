@@ -1218,6 +1218,10 @@ document.addEventListener('DOMContentLoaded', function () {
           snapTries++;
           if (snapT) clearTimeout(snapT);
           snapT = setTimeout(doSnap, 6000 * snapTries);
+        } else if (open) {
+          // Overpass gave up for good — route via cell centers anyway, OSRM
+          // snaps onto roads itself. Better an approximate real route than none.
+          fetchRoute(true);
         }
       })
       .catch(function () {
@@ -1225,6 +1229,8 @@ document.addEventListener('DOMContentLoaded', function () {
           snapTries++;
           if (snapT) clearTimeout(snapT);
           snapT = setTimeout(doSnap, 6000 * snapTries);
+        } else {
+          fetchRoute(true);   // same fallback on hard fetch failure
         }
       });
   }
@@ -1324,13 +1330,15 @@ document.addEventListener('DOMContentLoaded', function () {
   // When no OSRM instance answers, everything falls back to the old dashed
   // straight lines and the total is marked approximate.
   var routeGeo = null, routeKm = null, routeFromPos = false, routeSeq = 0, routeT = null;
-  function fetchRoute() {
+  function fetchRoute(force) {
     if (routeT) clearTimeout(routeT);
     routeT = setTimeout(function () {
       if (!tourOrdered || !tourOrdered.length) { routeGeo = null; routeKm = null; return; }
       // road-snapping still pending → the post-snap optimize will refetch with
-      // the real road points; routing cell centers now would just be wasted
-      if (tour.some(function (s) { return s.rlat === undefined; })) return;
+      // the real road points; routing cell centers now would just be wasted.
+      // force=true overrides: when Overpass has given up entirely, OSRM's own
+      // snapping is better than never showing a route at all.
+      if (!force && tour.some(function (s) { return s.rlat === undefined; })) return;
       var start = myPos();
       var pts = (start ? [[start.lat, start.lng]] : []).concat(
         tourOrdered.map(function (s) { var p = stopPos(s); return [p.lat, p.lng]; }));
@@ -1380,9 +1388,36 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     tourOrdered.forEach(function (s, i) {
       var p = stopPos(s);
-      L.marker([p.lat, p.lng], {zIndexOffset: 700, interactive: false, icon: L.divIcon({className: 'tour-num',
-        iconSize: [22, 22], iconAnchor: [11, 11], html: '<span>' + (i + 1) + '</span>'})}).addTo(tourLayer);
+      // Draggable: grab a numbered stop and move it ON THE MAP to shape the
+      // route. The dropped point becomes the stop AND its routing point (no
+      // re-snap yanking the hand-picked spot away); the label follows the new
+      // location honestly.
+      var m = L.marker([p.lat, p.lng], {zIndexOffset: 700, draggable: true,
+        icon: L.divIcon({className: 'tour-num',
+        iconSize: [22, 22], iconAnchor: [11, 11], html: '<span>' + (i + 1) + '</span>'})});
+      m.on('dragend', function () {
+        var ll = m.getLatLng();
+        s.lat = ll.lat; s.lng = ll.lng;
+        s.rlat = ll.lat; s.rlng = ll.lng; s.noRoad = false;
+        s.label = stopLabelAt(ll.lat, ll.lng);
+        saveTour(); stopGuidance();
+        // auto mode re-optimizes around the moved point; a hand order only re-routes
+        if (tourManual) applyManualOrder(); else optimize();
+      });
+      m.addTo(tourLayer);
     });
+  }
+
+  // Honest label for a hand-placed stop: whatever actually sits at that spot.
+  function stopLabelAt(lat, lng) {
+    var c = cellAt(lat, lng);
+    if (c) {
+      return c.status === 'enemy' ? (c.gang || T.unclaimed)
+           : c.status === 'free' ? T.free_tag : T.gang_your;
+    }
+    var vk = Math.floor(lat / grid.lat + 1e-9) + '_' + Math.floor(lng / grid.lng + 1e-9);
+    if (virginByKey[vk]) return T.virgin_land;
+    return lat.toFixed(3) + ',' + lng.toFixed(3);
   }
 
   // Google Maps takes at most 9 waypoints + 1 destination = 10 stops. Everything
