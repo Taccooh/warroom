@@ -13,7 +13,8 @@ https://warroom.mechanics-toolbox.org/about
 ## Features
 
 - **Battle map** — your turf glowing gold, enemy gangs in their real colors,
-  unclaimed and virgin cells, full-screen with follow mode (GPS)
+  unclaimed and virgin cells, distance rings and the coverage brush as
+  toggleable layers, full-screen with follow mode (GPS)
 - **Watcher** — polls the wdgwars API every 5 minutes and reports ownership
   changes on your turf, with configurable scope (own cells / gang turf / anything
   near), front detection and web push ("raven post")
@@ -21,6 +22,9 @@ https://warroom.mechanics-toolbox.org/about
   cells, and *virgin land* (cells nobody ever scanned), sorted by real GPS distance
 - **Loot tour** — pick cells, get an optimized route with waypoints snapped to
   actual roads (OpenStreetMap), in-app guidance or Google Maps hand-off
+- **Coverage brush** — opt-in GPS recording of the ground you actually covered
+  while driving: every stamp carries your expected reception radius, the screen
+  stays awake while recording, and an interrupted session resumes on its own
 - **Crew** — friends and opt-in live position sharing (auto-expires, no history)
 - EN/DE, installable as PWA, works on phone and desktop
 
@@ -36,7 +40,10 @@ Your wdgwars API key is the entry ticket. It is:
 - instantly dead the moment you rotate your key in your wdgwars profile
 
 Raw AP data (exact positions, BSSIDs, names) is aggregated into map cells on
-arrival and never stored. Deleting your account removes everything, immediately.
+arrival and never stored. The coverage brush is the one deliberate exception:
+while you actively record, it stores your own GPS trail (point + reception
+radius) — visible to nobody but you, clearable in one tap, gone with your
+account. Deleting your account removes everything, immediately.
 Details: [/about](https://warroom.mechanics-toolbox.org/about)
 
 ## Self-hosting
