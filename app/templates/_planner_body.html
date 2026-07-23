@@ -14,14 +14,13 @@
     {% endfor %}
   </div>
   {# Nearest first as the default: the app is used while DRIVING — a target
-     3000 km away is the easiest flip in the world and still useless. #}
-  <label class="pl-sort">{{ t('sort_by') }}
-    <select id="pl-sort">
-      <option value="dist" selected>{{ t('sort_dist') }}</option>
-      <option value="easy">{{ t('sort_easy') }}</option>
-      <option value="aps">{{ t('sort_aps') }}</option>
-    </select>
-  </label>
+     3000 km away is the easiest flip in the world and still useless. One fat
+     cycle button instead of a native select: two precise taps plus a system
+     picker are unusable at 80 km/h. The client rewrites the label on cycle
+     and after live swaps (labels come from the JS string bundle). #}
+  <div class="pl-sort">{{ t('sort_by') }}
+    <button type="button" id="pl-sort" class="pl-sort-btn">{{ t('sort_dist') }}</button>
+  </div>
 </div>
 
 <ol class="planer-list" id="pl-list"></ol>

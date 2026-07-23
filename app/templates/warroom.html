@@ -66,6 +66,9 @@
      from the thumb zone without opening the panel. #}
   <div id="nav" class="nav-banner" hidden>
     <span id="nav-body"></span>
+    {# One-tap escape hatch: a blocked road must not brick the tour — skip
+       advances to the next stop without leaving the car or the strip. #}
+    <button type="button" id="nav-skip" class="nav-skip">⤼ {{ t('nav_skip') }}</button>
     <button type="button" id="nav-end" class="nav-end">{{ t('tour_stop_nav') }}</button>
   </div>
   {# "Next move" card (step 11, opt-in via the ⚡ rail toggle): a single suggested
@@ -100,7 +103,9 @@
       <ol class="tour-list" id="tour-list"></ol>
       <div class="tour-warn" id="tour-warn" hidden></div>
       <div class="tour-btns">
-        <button type="button" class="rb-jump" id="tour-optimize">{{ t('tour_optimize') }}</button>
+        {# The Optimize button is gone: the tour re-optimizes itself on every
+           add/remove and after road-snapping — an unordered Google-Maps export
+           was a silent trap for anyone who didn't know to tap it first. #}
         <button type="button" class="rb-jump go" id="tour-go">{{ t('tour_go') }}</button>
         <a class="rb-jump" id="tour-maps" target="_blank" rel="noopener">{{ t('tour_maps') }}</a>
         <button type="button" class="rb-jump stop" id="tour-clear">{{ t('tour_clear') }}</button>

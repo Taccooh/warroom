@@ -324,22 +324,24 @@ document.addEventListener('DOMContentLoaded', function () {
         tag = '<span class="pl-gap fog">' + esc(T.fog_tag) + '</span>';
         line = '<div class="pl-row2">' + esc(T.fog_line) + '</div>';
       } else {
+        // Row diet: the bar already encodes my-vs-their — no text repeat of it.
         tag = '<span class="pl-gap' + (c.gap === 0 ? ' lead' : '') + '">' +
               (c.gap === 0 ? esc(T.lead) : esc(tf(T.gap_aps, {n: c.gap}))) + '</span>';
         var pct = c.gap === 0 ? 100 : Math.round(100 * c.my / (c.cnt + 1));
-        line = '<div class="pl-bar"><i style="width:' + pct + '%"></i></div>' +
-               '<div class="pl-row2">' + tf(T.pl_vs, {my: c.my, cnt: c.cnt}) + '</div>';
+        line = '<div class="pl-bar"><i style="width:' + pct + '%"></i></div>';
       }
     } else if (c.t === 'free') {
       label = '<span class="free-name">' + esc(T.free_tag) + '</span>';
       dot = '<span class="pl-dot free"></span>';
       tag = '<span class="pl-gap free">' + esc(T.free_grab) + '</span>';
-      line = '<div class="pl-row2">' + tf(T.free_line, {my: c.my}) + '</div>';
+      // second line only when it carries information (own APs already there)
+      line = c.my ? '<div class="pl-row2">' + tf(T.free_line, {my: c.my}) + '</div>' : '';
     } else {
+      // "Virgin land" + "untouched" tag say it all — the explainer row repeated it
       label = '<span class="virgin-name">' + esc(T.virgin_land) + '</span>';
       dot = '<span class="pl-dot virgin"></span>';
       tag = '<span class="pl-gap virgin">' + esc(T.virgin_tag) + '</span>';
-      line = '<div class="pl-row2">' + esc(T.virgin_line) + '</div>';
+      line = '';
     }
     li.innerHTML =
       '<div class="pl-main"><div class="pl-row1">' + dot +
@@ -367,6 +369,15 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     var key = plSort === 'dist' ? function (c) { return c._d != null ? c._d : 1e9; }
             : plSort === 'aps' ? function (c) { return -(c.my || 0); }
+            // "Worth the drive": effort × air-distance, ascending — the score is a
+            // ranking proxy (straight-line, not road km) and stays internal; rows
+            // keep showing only the honest gap + distance. Fogged cells sort last
+            // (unknown effort never pretends to be cheap); without a position the
+            // distance factor collapses to 1 → pure effort order.
+            : plSort === 'worth' ? function (c) {
+                var e = plEffort(c);
+                return e >= 9e9 ? 9e18 : (e + 1) * (c._d != null ? c._d : 1);
+              }
             : plEffort;
     cand.sort(function (a, b) { return key(a) - key(b); });
 
@@ -419,8 +430,18 @@ document.addEventListener('DOMContentLoaded', function () {
       plRender();
     }
   });
-  document.addEventListener('change', function (e) {
-    if (e.target && e.target.id === 'pl-sort') { plSort = e.target.value; plShown = PL_PAGE; plRender(); }
+  // One fat cycle button instead of a native select — two precise taps plus a
+  // system picker overlay are unusable in a moving car. Delegated: the button is
+  // replaced by every applyLive planner swap.
+  var PL_SORTS = ['dist', 'easy', 'aps', 'worth'];
+  function sortLabel(s) { return T['sort_' + s] || s; }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('#pl-sort') : null;
+    if (!b) return;
+    plSort = PL_SORTS[(PL_SORTS.indexOf(plSort) + 1) % PL_SORTS.length];
+    b.textContent = sortLabel(plSort);
+    plShown = PL_PAGE;
+    plRender();
   });
 
   // ---- Bottom sheet: the panel snaps between peek/half/full (UI redesign step 4) ----
@@ -1043,9 +1064,9 @@ document.addEventListener('DOMContentLoaded', function () {
         var pb = document.getElementById('planner-body');
         if (pb && d.planner_html != null) {
           pb.innerHTML = d.planner_html;   // only chips + sort field
-          // Restore the user's filter/sorting after the swap
+          // Restore the user's filter/sorting after the swap (cycle-button label)
           var sel = document.getElementById('pl-sort');
-          if (sel) sel.value = plSort;
+          if (sel) sel.textContent = sortLabel(plSort);
           var known = false;
           document.querySelectorAll('.pl-chip').forEach(function (c) {
             var same = c.dataset.filter === plFilter.mode &&
@@ -1178,7 +1199,10 @@ document.addEventListener('DOMContentLoaded', function () {
           });
           saveTour();
           renderTour();
-          if (tourOrdered) drawRoute();
+          // Road points moved the stops — re-optimize, EXCEPT during guidance:
+          // reordering under an active navIdx would silently retarget the driver.
+          if (!guidanceOn && tour.length) optimize();
+          else if (tourOrdered) drawRoute();
         }
         // Cells still open? Try again later — Overpass is sometimes briefly gone.
         var open = tour.some(function (s) { return s.rlat === undefined; });
@@ -1232,6 +1256,9 @@ document.addEventListener('DOMContentLoaded', function () {
             esc(tf(T.maps_cap_toast, {max: MAPS_MAX, n: tour.length})), 6500, true);
     }
     tourOrdered = null; stopGuidance(); tourLayer.clearLayers(); saveTour(); renderTour();
+    // Auto-optimize on every change: the Optimize button is gone. Unordered
+    // tours silently exported an insertion-order route to Google Maps.
+    if (tour.length) optimize();
     snapTour();
   }
 
@@ -1517,14 +1544,31 @@ document.addEventListener('DOMContentLoaded', function () {
     var pin = e.target.closest ? e.target.closest('.cell-tour') : null;
     if (pin) { e.preventDefault(); toggleTour(pin.dataset.lat, pin.dataset.lng, pin.dataset.label); map.closePopup(); }
   });
-  document.getElementById('tour-optimize').addEventListener('click', optimize);
   document.getElementById('tour-clear').addEventListener('click', function () {
     tour = []; tourOrdered = null; stopGuidance(); tourLayer.clearLayers(); saveTour(); renderTour();
   });
   document.getElementById('tour-go').addEventListener('click', function () {
     if (guidanceOn) stopGuidance(); else startGuidance();
   });
+  // Skip the current stop without leaving the car: a closed bridge or private
+  // lane must not brick the tour. The stop stays in the list — only guidance
+  // moves past it (auto-advance still fires if the cell is entered later).
+  document.getElementById('nav-skip').addEventListener('click', function () {
+    if (!guidanceOn || !tourOrdered) return;
+    navIdx++;
+    var mp = myPos();
+    if (mp) { navUpdate(mp.lat, mp.lng); return; }
+    if (navIdx >= tourOrdered.length) {
+      navBanner.hidden = false; navBanner.className = 'nav-banner done';
+      navBody.innerHTML = tf(T.nav_done, {n: tourOrdered.length});
+      stopGuidance(); return;
+    }
+    navBody.innerHTML = tf(T.nav_to, {k: navIdx + 1, n: tourOrdered.length, d: '…'});
+  });
   renderTour();
+  // A restored fully-snapped tour never reaches doSnap's optimize path — order
+  // it right away so the Maps link is never insertion-order.
+  if (tour.length) optimize();
   snapTour();   // retroactively snap a tour saved in an old session
   plRefresh();
 

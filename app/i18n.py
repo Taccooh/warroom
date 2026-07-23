@@ -183,7 +183,7 @@ STRINGS = {
     "tour_head": {"en": "Loot tour", "de": "Beute-Tour"},
     "tour_empty": {"en": "Tap + on targets below or on map cells to plan a drive.",
                    "de": "Tipp + an Zielen unten oder auf Karten-Zellen, um eine Fahrt zu planen."},
-    "tour_optimize": {"en": "Optimize", "de": "Optimieren"},
+    "nav_skip": {"en": "skip", "de": "skip"},
     "tour_go": {"en": "Guide me", "de": "Losfahren"},
     "tour_stop_nav": {"en": "Stop", "de": "Stopp"},
     "tour_maps": {"en": "Maps", "de": "Maps"},
@@ -354,6 +354,13 @@ JS = {
     "nm_target": {"en": "Nearest target", "de": "Nächstes Ziel"},
     "nm_free": {"en": "Free cell", "de": "Freie Zelle"},
     "nm_attack": {"en": "Turf under attack", "de": "Revier unter Beschuss"},
+    # Planner sort cycle button labels (client rewrites the label on each tap)
+    "sort_dist": {"en": "Nearest first", "de": "Nächste zuerst"},
+    "sort_easy": {"en": "Easiest first", "de": "Leichteste zuerst"},
+    "sort_aps": {"en": "Most of my APs", "de": "Meiste eigene APs"},
+    # honest framing: air-distance proxy, not real road km — the score stays
+    # internal, rows keep showing only real gap + distance
+    "sort_worth": {"en": "Worth the drive", "de": "Lohnt die Fahrt"},
     # Layers popover (◈ control) + coverage brush (all client-rendered)
     "layers_title": {"en": "Map layers", "de": "Kartenebenen"},
     "lyr_virgin": {"en": "Virgin land", "de": "Neuland"},
