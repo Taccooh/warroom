@@ -1151,6 +1151,10 @@ document.addEventListener('DOMContentLoaded', function () {
   var tour = [];
   try { tour = JSON.parse(localStorage.getItem('wr_tour') || '[]') || []; } catch (e) { tour = []; }
   var tourOrdered = null;
+  // true after drag & drop: the hand-made order is authoritative until the
+  // user explicitly taps "auto order" (or clears the tour)
+  var tourManual = false;
+  try { tourManual = localStorage.getItem('wr_tour_manual') === '1'; } catch (e) {}
   var tourLayer = L.layerGroup().addTo(map);
   var panel = document.getElementById('tour-panel');
   var tourList = document.getElementById('tour-list');
@@ -1203,8 +1207,9 @@ document.addEventListener('DOMContentLoaded', function () {
           // reordering under an active navIdx would silently retarget the driver.
           // Fetching the ROUTE is still safe there (geometry for the existing
           // order, no reordering) — without it, "Guide me" tapped before the
-          // snap finished stayed on air lines for the whole drive.
-          if (!guidanceOn && tour.length) optimize();
+          // snap finished stayed on air lines for the whole drive. A hand-made
+          // order is likewise never re-optimized, only re-routed.
+          if (!guidanceOn && !tourManual && tour.length) optimize();
           else if (tourOrdered) { drawRoute(); fetchRoute(); }
         }
         // Cells still open? Try again later — Overpass is sometimes briefly gone.
@@ -1261,8 +1266,25 @@ document.addEventListener('DOMContentLoaded', function () {
     tourOrdered = null; stopGuidance(); tourLayer.clearLayers(); saveTour(); renderTour();
     // Auto-optimize on every change: the Optimize button is gone. Unordered
     // tours silently exported an insertion-order route to Google Maps.
-    if (tour.length) optimize();
+    // EXCEPT while a hand-dragged order is active — then the hand rules: new
+    // stops append at the end, removals keep the rest untouched.
+    if (tour.length) { if (tourManual) applyManualOrder(); else optimize(); }
     snapTour();
+  }
+
+  // Hand order (drag & drop): list order = drive order, no 2-opt on top.
+  function applyManualOrder() {
+    tourOrdered = tour.slice();
+    routeGeo = null; routeKm = null;
+    drawRoute(); renderTour();
+    fetchRoute();
+  }
+  function setManual(on) {
+    tourManual = on;
+    try {
+      if (on) localStorage.setItem('wr_tour_manual', '1');
+      else localStorage.removeItem('wr_tour_manual');
+    } catch (e) {}
   }
 
   function optimize() {
@@ -1538,12 +1560,15 @@ document.addEventListener('DOMContentLoaded', function () {
     var kmTxt = km != null ? (routeKm != null ? fmtDist(km) : '≈ ' + fmtDist(km)) : null;
     tourCount.textContent = kmTxt != null ? tf(T.tour_total, {n: n, d: kmTxt}) : tf(T.tour_one, {n: n});
     tourList.innerHTML = tour.map(function (s, i) {
-      return '<li' + (tourOrdered && i >= MAPS_MAX ? ' class="over-cap"' : '') + '>' +
+      return '<li data-i="' + i + '"' + (tourOrdered && i >= MAPS_MAX ? ' class="over-cap"' : '') + '>' +
+        '<span class="tour-drag" aria-hidden="true">≡</span>' +
         (tourOrdered ? '<b>' + (i + 1) + '.</b> ' : '') +
         esc(s.label || (s.lat.toFixed(3) + ',' + s.lng.toFixed(3))) +
         (s.noRoad ? ' <span class="no-road" title="' + esc(T.no_road) + '">⚑</span>' : '') +
         '<button type="button" class="tour-del" data-lat="' + s.lat + '" data-lng="' + s.lng + '">✕</button></li>';
     }).join('');
+    var ab = document.getElementById('tour-auto');
+    if (ab) ab.hidden = !tourManual;   // only offered while a hand order is active
     mapsLink.href = mapsUrl();
   }
 
@@ -1555,7 +1580,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var mp = myPos(); if (mp) updateHere(mp.lat, mp.lng);   // restore the here-banner the strip replaced
   }
   function startGuidance() {
-    if (!tourOrdered || !tourOrdered.length) optimize();
+    if (!tourOrdered || !tourOrdered.length) { if (tourManual) applyManualOrder(); else optimize(); }
     if (!tourOrdered || !tourOrdered.length) return;
     guidanceOn = true; navIdx = 0;
     // always refetch on guidance start: an earlier fetch may have failed, been
@@ -1599,8 +1624,65 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   document.getElementById('tour-clear').addEventListener('click', function () {
     tour = []; tourOrdered = null; routeGeo = null; routeKm = null;
+    setManual(false);
     stopGuidance(); tourLayer.clearLayers(); saveTour(); renderTour();
   });
+  document.getElementById('tour-auto').addEventListener('click', function () {
+    setManual(false);
+    optimize();
+  });
+
+  // ---- Drag & drop reordering of tour stops ----
+  // Pointer events, not HTML5 drag&drop: this must work with a thumb on the
+  // phone. Dragging only starts on the ≡ handle so the list still scrolls
+  // normally; the row follows the finger, siblings shift live, and the drop
+  // commits the DOM order back into `tour` and switches to hand-order mode.
+  (function () {
+    var dragLi = null, dragPid = null;
+    tourList.addEventListener('pointerdown', function (e) {
+      var h = e.target.closest ? e.target.closest('.tour-drag') : null;
+      if (!h) return;
+      dragLi = h.closest('li');
+      if (!dragLi) return;
+      dragPid = e.pointerId;
+      dragLi.classList.add('dragging');
+      try { tourList.setPointerCapture(dragPid); } catch (ex) {}
+      e.preventDefault();
+    });
+    tourList.addEventListener('pointermove', function (e) {
+      if (!dragLi || e.pointerId !== dragPid) return;
+      e.preventDefault();
+      var lis = [].slice.call(tourList.children);
+      for (var i = 0; i < lis.length; i++) {
+        if (lis[i] === dragLi) continue;
+        var r = lis[i].getBoundingClientRect();
+        if (e.clientY < r.top + r.height / 2) {
+          if (dragLi.nextSibling !== lis[i]) tourList.insertBefore(dragLi, lis[i]);
+          return;
+        }
+      }
+      if (tourList.lastElementChild !== dragLi) tourList.appendChild(dragLi);
+    });
+    function drop(e) {
+      if (!dragLi || (e.pointerId !== undefined && e.pointerId !== dragPid)) return;
+      dragLi.classList.remove('dragging');
+      try { tourList.releasePointerCapture(dragPid); } catch (ex) {}
+      var order = [].slice.call(tourList.children).map(function (li) {
+        return tour[+li.dataset.i];
+      }).filter(Boolean);
+      dragLi = null; dragPid = null;
+      if (order.length !== tour.length) { renderTour(); return; }   // defensive
+      var changed = order.some(function (s, i) { return s !== tour[i]; });
+      tour = order;
+      saveTour();
+      if (!changed) { renderTour(); return; }   // picked up and put back
+      setManual(true);
+      stopGuidance();   // same rule as add/remove: order changed under the tour
+      applyManualOrder();
+    }
+    tourList.addEventListener('pointerup', drop);
+    tourList.addEventListener('pointercancel', drop);
+  })();
   document.getElementById('tour-go').addEventListener('click', function () {
     if (guidanceOn) stopGuidance(); else startGuidance();
   });
@@ -1621,8 +1703,9 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   renderTour();
   // A restored fully-snapped tour never reaches doSnap's optimize path — order
-  // it right away so the Maps link is never insertion-order.
-  if (tour.length) optimize();
+  // it right away so the Maps link is never insertion-order. A restored HAND
+  // order is authoritative as saved: route it, don't re-sort it.
+  if (tour.length) { if (tourManual) applyManualOrder(); else optimize(); }
   snapTour();   // retroactively snap a tour saved in an old session
   plRefresh();
 

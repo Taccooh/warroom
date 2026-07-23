@@ -105,7 +105,10 @@
       <div class="tour-btns">
         {# The Optimize button is gone: the tour re-optimizes itself on every
            add/remove and after road-snapping — an unordered Google-Maps export
-           was a silent trap for anyone who didn't know to tap it first. #}
+           was a silent trap for anyone who didn't know to tap it first.
+           Exception: after drag-and-drop the HAND order rules; this button
+           appears only then, as the way back to automatic 2-opt. #}
+        <button type="button" class="rb-jump" id="tour-auto" hidden>{{ t('tour_auto') }}</button>
         <button type="button" class="rb-jump go" id="tour-go">{{ t('tour_go') }}</button>
         <a class="rb-jump" id="tour-maps" target="_blank" rel="noopener">{{ t('tour_maps') }}</a>
         <button type="button" class="rb-jump stop" id="tour-clear">{{ t('tour_clear') }}</button>

@@ -1082,6 +1082,17 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
   font-size: 0.88rem; border-bottom: 1px solid var(--line);
 }
 .tour-list li b { color: var(--gold); font-family: var(--mono); }
+/* Drag handle: the only place a row drag can start (touch-action none keeps
+   the list scrollable everywhere else); fat enough for a thumb */
+.tour-drag {
+  flex: 0 0 auto; touch-action: none; cursor: grab; user-select: none;
+  color: var(--muted); font-size: 1rem; padding: 0.1rem 0.5rem 0.1rem 0.1rem;
+}
+.tour-list li.dragging {
+  opacity: 0.75; background: var(--panel2);
+  outline: 1px dashed var(--gold); outline-offset: -1px;
+}
+.tour-list li.dragging .tour-drag { cursor: grabbing; }
 .tour-del { margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 0.9rem; }
 .tour-del:hover { color: var(--enemy-hot); }
 .tour-btns { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.45rem; }

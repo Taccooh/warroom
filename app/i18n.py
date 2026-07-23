@@ -184,6 +184,8 @@ STRINGS = {
     "tour_empty": {"en": "Tap + on targets below or on map cells to plan a drive.",
                    "de": "Tipp + an Zielen unten oder auf Karten-Zellen, um eine Fahrt zu planen."},
     "nav_skip": {"en": "skip", "de": "skip"},
+    # shown only while a hand-dragged order is active — the way back to 2-opt
+    "tour_auto": {"en": "↻ auto order", "de": "↻ automatisch ordnen"},
     "tour_go": {"en": "Guide me", "de": "Losfahren"},
     "tour_stop_nav": {"en": "Stop", "de": "Stopp"},
     "tour_maps": {"en": "Maps", "de": "Maps"},
