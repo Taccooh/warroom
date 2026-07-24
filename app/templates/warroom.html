@@ -3,6 +3,8 @@
 {% block head %}
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
 <script src="/static/vendor/leaflet/leaflet.js" defer></script>
+{# heading-up map rotation while follow (◎) is on — vendored, GPL-3 (see THIRD_PARTY_NOTICES) #}
+<script src="/static/vendor/leaflet-rotate/leaflet-rotate.js" defer></script>
 {# Auto-refresh ONLY while the first poll is actually still running — an account
    without APs (terr_init set, footprint empty) would otherwise get an endless loop #}
 {% if not meta.terr_init %}<meta http-equiv="refresh" content="6">{% endif %}

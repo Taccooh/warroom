@@ -431,18 +431,28 @@ body.wr-setloc .stage { grid-column: 1 / -1; }
 /* Tour stop numbers: gold badges (octagon, the number stays upright).
    Draggable on the map to shape the route; touch-action none so the browser
    never turns the drag into a map pan / pull-to-refresh. */
-.tour-num { cursor: grab; touch-action: none; }
+/* pointer-events auto: the marker is interactive:false in Leaflet (so its
+   interaction layer doesn't fight our pointer drag / leaflet-rotate), but we
+   still need the badge itself to receive pointerdown. */
+.tour-num { cursor: grab; touch-action: none; pointer-events: auto; }
+.tour-num span { pointer-events: auto; }
 .tour-num:active { cursor: grabbing; }
-/* While dragging: badge enlarged and above everything… */
+/* While dragging (Leaflet owns the element's transform for positioning, so the
+   lift/scale go on the inner span): badge enlarged and above everything. */
 .tour-num.drag-live { z-index: 10000 !important; }
 .tour-num.drag-live span {
   transform: scale(1.6);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
 }
-/* …and on touch a stem from the lifted badge down to the fingertip, so the
-   thumb never hides where the stop will land */
+/* On touch the marker itself is positioned 70 px above the finger (via the drag
+   latlng in JS, so the drop point is exactly the lifted badge). A stem drops
+   from the badge down to the fingertip so the thumb never hides the drop point. */
+.tour-num.drag-touch span {
+  transform: scale(1.75);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+}
 .tour-num.drag-touch::after {
-  content: ''; position: absolute; left: 10px; top: 100%; width: 2px; height: 66px;
+  content: ''; position: absolute; left: 10px; top: 100%; width: 2px; height: 70px;
   background: linear-gradient(180deg, var(--gold-bright), transparent);
   pointer-events: none;
 }

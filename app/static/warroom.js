@@ -51,11 +51,19 @@ document.addEventListener('DOMContentLoaded', function () {
   // Attribution lives behind the ⓘ button (bottom right) instead of the permanent
   // banner — see the InfoCtl control below. Links stay one tap away (OSM requires
   // accessible attribution), they just don't cover the map corner all the time.
-  var map = L.map('map', {zoomControl: true, zoomSnap: 0.5, attributionControl: false}).setView([50, -20], 3);
+  // rotate:true enables heading-up mode (leaflet-rotate plugin) — used only
+  // while follow (◎) is on; touchRotate/shiftKeyRotate off so the user never
+  // spins the map by accident, we drive the bearing ourselves. rotateControl
+  // off — the ◎ button owns it.
+  var canRotate = typeof L.Map.prototype.setBearing === 'function';
+  var map = L.map('map', {zoomControl: true, zoomSnap: 0.5, attributionControl: false,
+    rotate: canRotate, touchRotate: false, shiftKeyRotate: false, rotateControl: false,
+    bearing: 0}).setView([50, -20], 3);
   // Map controls live in a right-edge column (UI redesign step 5): thumb reach, and
   // Leaflet's bottom-right corner sits at the map's bottom edge = right above the
   // sheet, so the buttons stay reachable as the sheet is dragged.
   map.zoomControl.setPosition('bottomright');
+  window.wrMap = map;   // handle for debugging / e2e (harmless read-only ref)
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 18
   }).addTo(map);
@@ -580,6 +588,7 @@ document.addEventListener('DOMContentLoaded', function () {
     here.className = cls;
     here.innerHTML = html + freshTag();   // append the data-freshness segment
   }
+  var lastFix = null;   // for a heading fallback from consecutive fixes
   function onPos(p) {
     var lat = p.coords.latitude, lng = p.coords.longitude, acc = p.coords.accuracy || 0, ll = [lat, lng];
     if (!meMarker) {
@@ -587,7 +596,21 @@ document.addEventListener('DOMContentLoaded', function () {
         iconAnchor: [9, 9], html: '<span></span>'}), zIndexOffset: 1000}).addTo(map);
       meCircle = L.circle(ll, {radius: acc, color: '#3b82f6', weight: 1, fillOpacity: 0.08}).addTo(map);
     } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(acc); }
-    if (follow) map.setView(ll, Math.max(map.getZoom(), 13));
+    if (follow) {
+      map.setView(ll, Math.max(map.getZoom(), 13));
+      // Heading-up: prefer the GPS heading; fall back to the bearing between
+      // the last two fixes (heading is NaN when stationary or on some devices).
+      // Only rotate once actually moving (~>1.4 m/s) so a parked map doesn't spin.
+      if (rotateOn) {
+        var hd = (typeof p.coords.heading === 'number' && !isNaN(p.coords.heading)
+                  && (p.coords.speed == null || p.coords.speed > 1.4)) ? p.coords.heading : null;
+        if (hd == null && lastFix && (p.coords.speed == null || p.coords.speed > 1.4)) {
+          if (hav(lastFix, {lat: lat, lng: lng}) > 0.006) hd = bearing(lastFix, {lat: lat, lng: lng});
+        }
+        if (hd != null) setHeading(hd);
+      }
+    }
+    lastFix = {lat: lat, lng: lng};
     updateHere(lat, lng);
     maybePush(lat, lng);
     navUpdate(lat, lng);
@@ -599,6 +622,22 @@ document.addEventListener('DOMContentLoaded', function () {
   function onPosErr() {
     if (guidanceOn) return;   // the nav strip owns the bottom slot; don't flash a GPS-error banner over it
     here.hidden = false; here.className = 'here-banner out'; here.innerHTML = T.no_gps;
+  }
+  // ---- Heading-up rotation (leaflet-rotate) ----
+  // rotateOn tracks whether the map should turn in the driving direction. It is
+  // bound to follow: on while following, straight north the moment following
+  // stops. Guarded by canRotate so a missing plugin degrades to plain follow.
+  var rotateOn = false;
+  function setHeading(deg) {
+    if (!canRotate) return;
+    // leaflet-rotate bearing is the map's rotation; heading-up = -course so the
+    // travel direction points to the top of the screen.
+    map.setBearing(-deg);
+  }
+  function setRotate(on) {
+    rotateOn = on && canRotate;
+    if (!canRotate) return;
+    if (!rotateOn) { map.setBearing(0); lastFix = null; }   // snap back to north
   }
   var LocateCtl = L.Control.extend({options: {position: 'bottomright'}, onAdd: function () {
     var d = L.DomUtil.create('div', 'leaflet-bar locate-ctl');
@@ -614,9 +653,10 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!watchId) {
       watchId = navigator.geolocation.watchPosition(onPos, onPosErr,
         {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
-      follow = true; btn.classList.add('active');
+      follow = true; btn.classList.add('active'); setRotate(true);
     } else {
       follow = !follow; btn.classList.toggle('active', follow);
+      setRotate(follow);
       if (follow && meMarker) map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 13));
     }
     void btn.offsetWidth;  // otherwise iOS paints class changes on Leaflet controls only on the next reflow
@@ -646,7 +686,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   function setManualPos(lat, lng) {
     if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-    follow = false;
+    follow = false; setRotate(false);   // manual pin → north-up, no live heading
     var lb = document.getElementById('loc-btn'); if (lb) lb.classList.remove('active');
     var ll = [lat, lng];
     if (!meMarker) {
@@ -893,7 +933,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!watchId) {   // recording implies GPS follow — start it like the ◎ button does
       watchId = navigator.geolocation.watchPosition(onPos, onPosErr,
         {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
-      follow = true; var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
+      follow = true; setRotate(true); var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
     }
     recOn = true; covLast = null;
     try { localStorage.setItem('wr_cov_rec', '1'); } catch (e) {}   // survive reload/close -> auto-resume
@@ -1392,7 +1432,11 @@ document.addEventListener('DOMContentLoaded', function () {
       // route. The dropped point becomes the stop AND its routing point (no
       // re-snap yanking the hand-picked spot away); the label follows the new
       // location honestly.
-      var m = L.marker([p.lat, p.lng], {zIndexOffset: 700,
+      // interactive:false so Leaflet's own interaction layer doesn't swallow our
+      // pointerdown (it does for interactive markers) and — crucial — doesn't
+      // conflict with leaflet-rotate, whose rotation breaks Leaflet's built-in
+      // marker Draggable. We drive the drag ourselves via pointer events.
+      var m = L.marker([p.lat, p.lng], {zIndexOffset: 700, interactive: false,
         icon: L.divIcon({className: 'tour-num',
         iconSize: [22, 22], iconAnchor: [11, 11], html: '<span>' + (i + 1) + '</span>'})});
       m.addTo(tourLayer);
@@ -1400,21 +1444,26 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  // Custom pointer drag for stop markers (replaces Leaflet's built-in drag):
-  // on TOUCH the badge lifts ~70 px above the finger — enlarged, with a stem
-  // down to the fingertip — so the thumb never hides the drop point (the
-  // classic mobile pin-drag pattern). Mouse stays 1:1.
+  var LIFT_PX = 70;
+
+  // Own pointer drag for a stop marker (Leaflet's own drag breaks under
+  // leaflet-rotate; interactive:false frees our listeners). Two extras:
+  //  • on TOUCH the badge lifts ~70 px above the finger (enlarged, with a stem)
+  //    so the thumb never hides the drop point — the drop latlng is the LIFTED
+  //    badge position, so you aim with what you see, not the fingertip.
+  //  • on release the point snaps onto the nearest drivable road (OSRM /nearest).
   function bindStopDrag(m, s) {
     var el = m.getElement();
     if (!el) return;
     var pid = null, lift = 0, moved = false;
-    function toLatLng(e) {
+    function aimLatLng(e) {
       var r = map.getContainer().getBoundingClientRect();
+      // rotation-safe: containerPointToLatLng accounts for the map bearing
       return map.containerPointToLatLng([e.clientX - r.left, e.clientY - r.top - lift]);
     }
     el.addEventListener('pointerdown', function (e) {
       pid = e.pointerId; moved = false;
-      lift = e.pointerType === 'touch' ? 70 : 0;
+      lift = (e.pointerType === 'touch') ? LIFT_PX : 0;
       el.classList.add('drag-live');
       if (lift) el.classList.add('drag-touch');
       map.dragging.disable();
@@ -1425,7 +1474,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (pid === null || e.pointerId !== pid) return;
       e.preventDefault();
       moved = true;
-      m.setLatLng(toLatLng(e));
+      m.setLatLng(aimLatLng(e));   // marker tracks the aim point (finger, lifted)
     });
     function commit(ll) {
       m.setLatLng(ll);   // visible snap onto the road
@@ -1433,7 +1482,7 @@ document.addEventListener('DOMContentLoaded', function () {
       s.rlat = ll.lat; s.rlng = ll.lng; s.noRoad = false;
       s.label = stopLabelAt(ll.lat, ll.lng);
       saveTour(); stopGuidance();
-      // auto mode re-optimizes around the moved point; a hand order only re-routes
+      // auto mode re-optimizes around the moved point; a hand order re-routes
       if (tourManual) applyManualOrder(); else optimize();
     }
     function fin(e) {
@@ -1442,15 +1491,12 @@ document.addEventListener('DOMContentLoaded', function () {
       el.classList.remove('drag-live', 'drag-touch');
       map.dragging.enable();
       if (!moved) return;   // a plain tap moves nothing
-      // magnet: the dropped pin snaps onto the nearest drivable road (OSRM
-      // /nearest via our proxy); if no instance answers, the raw point stands
       var raw = m.getLatLng();
+      // magnet: snap onto the nearest drivable road; raw point stands on failure
       fetch('/api/nearest', {method: 'POST', headers: {'Content-Type': 'application/json',
         'X-Requested-With': 'fetch'}, body: JSON.stringify({lat: raw.lat, lng: raw.lng})})
         .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) {
-          commit((d && d.ok && d.pt) ? {lat: d.pt[0], lng: d.pt[1]} : raw);
-        })
+        .then(function (d) { commit((d && d.ok && d.pt) ? {lat: d.pt[0], lng: d.pt[1]} : raw); })
         .catch(function () { commit(raw); });
     }
     el.addEventListener('pointerup', fin);
@@ -1676,8 +1722,9 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('tour-go').textContent = T.tour_stop_nav;
     if (!watchId && navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition(onPos, onPosErr, {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
-      follow = true;
+      follow = true; var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
     }
+    if (follow) setRotate(true);   // turn-by-turn wants heading-up too
     var mp = myPos(); if (mp) navUpdate(mp.lat, mp.lng);
     else { navBanner.hidden = false; navBanner.className = 'nav-banner'; navBody.innerHTML = tf(T.nav_to, {k: 1, n: tourOrdered.length, d: '…'}); }
   }

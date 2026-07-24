@@ -10,6 +10,14 @@ those files, not the AGPL of this repository.
 - © 2010–2023 Volodymyr Agafonkin, © 2010–2011 CloudMade
 - https://leafletjs.com
 
+## leaflet-rotate 0.2.8
+
+- Path: `app/static/vendor/leaflet-rotate/`
+- License: GPL-3.0 — see `app/static/vendor/leaflet-rotate/LICENSE`
+  (GPLv3 §13 permits combining with this repository's AGPL-3.0)
+- © Raruto
+- https://github.com/Raruto/leaflet-rotate
+
 ## Germania One (font)
 
 - Path: `app/static/fonts/germania-one.woff2`
