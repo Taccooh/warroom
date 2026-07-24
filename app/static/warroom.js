@@ -1512,7 +1512,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // CURRENT position through the REMAINING stops when you drift >40 m off the
   // line, with a 10 s backup refresh. The stop ORDER never changes mid-drive
   // (that would retarget you) — only the road geometry to the same next stops.
-  var lastReroute = 0;
+  var lastReroute = 0, rerouteFails = 0;
   function segDistKm(p, a, b) {
     // point→segment distance via a local equirectangular projection (fine at
     // these scales), all in km around p
@@ -1553,10 +1553,17 @@ document.addEventListener('DOMContentLoaded', function () {
       .then(function (d) {
         if (seq !== routeSeq) return;
         if (d && d.ok && d.route) {   // keep the old line on failure — never blank mid-drive
+          rerouteFails = 0;
           routeGeo = d.route.geometry; routeKm = d.route.km; routeFromPos = true;
           drawRoute(); renderTour();
-        }
-      }).catch(function () {});
+        } else { rerouteFailSoft(); }
+      }).catch(function () { rerouteFailSoft(); });
+  }
+  // A single reroute can miss (transient OSRM hiccup). Keep the old line, but let
+  // the next 1-2 fixes retry immediately instead of waiting out the full cadence;
+  // after that fall back to the normal gate so a real OSRM outage isn't spammed.
+  function rerouteFailSoft() {
+    if (++rerouteFails <= 2) lastReroute = 0;
   }
   function guidanceReroute(lat, lng) {
     if (!guidanceOn || !tourOrdered || navIdx >= tourOrdered.length) return;
@@ -1819,7 +1826,11 @@ document.addEventListener('DOMContentLoaded', function () {
   // Selected cells pulse on the map — immediately on tap, not only after
   // optimizing. Separate pane with one outline per stop: that way it also works
   // for virgin land (whose cell rectangles are not drawn while the layer is off).
-  map.createPane('picks');
+  // Create the pick-outline pane UNDER the rotate pane, otherwise leaflet-rotate
+  // leaves it screen-aligned: a heading-up-rotated cell then draws as a big
+  // axis-aligned box that falls out of the grid and sticks. (Default createPane
+  // appends to mapPane, which does not rotate.)
+  map.createPane('picks', map.getPane('rotatePane') || undefined);
   map.getPane('picks').style.zIndex = 450;
   var pickLayer = L.layerGroup().addTo(map);
   function markTourCells() {
@@ -1889,7 +1900,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // always refetch on guidance start: an earlier fetch may have failed, been
     // skipped (snap pending), or lack the approach leg from the current position
     fetchRoute();
-    lastReroute = 0;   // let the first fix re-route from the actual start position
+    lastReroute = 0; rerouteFails = 0;   // let the first fix re-route from the actual start position
     here.hidden = true;   // slot spec: the nav strip owns the bottom during guidance
     renderNextmove();     // guidance takes the bottom slot → hide any next-move card
     var h = document.getElementById('map-hero'); if (h) h.style.visibility = 'hidden';
