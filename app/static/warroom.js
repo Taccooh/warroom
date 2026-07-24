@@ -588,27 +588,32 @@ document.addEventListener('DOMContentLoaded', function () {
     here.className = cls;
     here.innerHTML = html + freshTag();   // append the data-freshness segment
   }
-  // Heading-up direction finding. Two field-tested pitfalls encoded here:
-  //  • consecutive 1-s fixes at low speed are GPS jitter — a bearing from them
-  //    points anywhere. So the fallback measures against an ANCHOR fix and only
-  //    trusts the direction after >12 m of real movement from it.
-  //  • a hard speed gate (old: 5 km/h) made the map stick to north while
-  //    walking/pulling away and feel laggy — the 12 m anchor gate replaces it;
-  //    the device heading is used from ~3 km/h up (below that it's noise).
+  // GPS course finding. A bearing from consecutive 1-s fixes at low speed is
+  // GPS jitter pointing anywhere, so the anchor-fix method only trusts a
+  // direction after >12 m of real movement (or the GPS heading field above
+  // ~3 km/h). When the device compass is active the GPS course only CALIBRATES
+  // the sensor's mount offset; otherwise it drives the heading directly.
   var headAnchor = null;
-  function applyHeading(p, lat, lng) {
-    var here2 = {lat: lat, lng: lng};
-    var spd = p.coords.speed;
+  function gpsCourse(p, lat, lng) {
+    var here2 = {lat: lat, lng: lng}, spd = p.coords.speed;
     if (typeof p.coords.heading === 'number' && !isNaN(p.coords.heading)
-        && spd != null && spd > 0.8) {
-      headAnchor = here2;
-      setHeading(p.coords.heading);
-      return;
-    }
-    if (!headAnchor) { headAnchor = here2; return; }
+        && spd != null && spd > 0.8) { headAnchor = here2; return p.coords.heading; }
+    if (!headAnchor) { headAnchor = here2; return null; }
     if (hav(headAnchor, here2) > 0.012) {
-      setHeading(bearing(headAnchor, here2));
-      headAnchor = here2;
+      var b = bearing(headAnchor, here2); headAnchor = here2; return b;
+    }
+    return null;
+  }
+  function applyHeading(p, lat, lng) {
+    var course = gpsCourse(p, lat, lng);
+    if (course == null) return;
+    if (sensorActive && sensorHeading != null) {
+      // slowly align the smooth sensor signal to the real travel direction
+      var off = angDiff(course, sensorHeading);
+      headOffset = headOffsetSet ? (headOffset + 0.3 * angDiff(off, headOffset)) : off;
+      headOffsetSet = true;
+    } else {
+      setTarget(course);   // no compass → GPS drives the rotation
     }
   }
   function onPos(p) {
@@ -638,28 +643,96 @@ document.addEventListener('DOMContentLoaded', function () {
   // rotateOn tracks whether the map should turn in the driving direction. It is
   // bound to follow: on while following, straight north the moment following
   // stops. Guarded by canRotate so a missing plugin degrades to plain follow.
-  var rotateOn = false, curHeading = null;
-  function setHeading(deg) {
-    if (!canRotate) return;
-    // 3° dead band: GPS courses wobble a little even on a straight road — don't
-    // let the whole map tremble with them.
-    if (curHeading != null) {
-      var diff = Math.abs(deg - curHeading) % 360;
-      if (diff > 180) diff = 360 - diff;
-      if (diff < 3) return;
-    }
-    curHeading = deg;
-    // leaflet-rotate bearing is the map's rotation; heading-up = -course so the
-    // travel direction points to the top of the screen.
-    map.setBearing(-deg);
+  var rotateOn = false;
+  // signed shortest angle a-b in (-180, 180]
+  function angDiff(a, b) { var d = ((a - b + 540) % 360) - 180; return d; }
+
+  // Rotation is decoupled from its inputs: inputs set a TARGET heading, and a
+  // requestAnimationFrame loop eases the displayed bearing toward it. That is
+  // what kills the "jerky/hectic" feel — the map glides instead of snapping on
+  // every fix, regardless of how fast or slow the input updates.
+  var targetHeading = null, dispHeading = null, easeRAF = null;
+  function setBearingRaw(h) {
+    map.setBearing(-h);
     var cn = document.getElementById('compass-n');
-    if (cn) { cn.parentElement.hidden = false; cn.style.transform = 'rotate(' + (-deg) + 'deg)'; }
+    if (cn) { cn.parentElement.hidden = false; cn.style.transform = 'rotate(' + (-h) + 'deg)'; }
   }
+  function easeStep() {
+    easeRAF = null;
+    if (!rotateOn || targetHeading == null) return;
+    if (dispHeading == null) dispHeading = targetHeading;
+    var d = angDiff(targetHeading, dispHeading);
+    if (Math.abs(d) < 0.5) { dispHeading = targetHeading; setBearingRaw(dispHeading); return; }
+    dispHeading = (((dispHeading + d * 0.2) % 360) + 360) % 360;   // 20 % per frame
+    setBearingRaw(dispHeading);
+    easeRAF = requestAnimationFrame(easeStep);
+  }
+  function setTarget(h) {
+    h = ((h % 360) + 360) % 360;
+    // 2° dead band on the target: sensor/GPS both wobble a little on a straight
+    // line — don't feed micro-noise into the ease loop.
+    if (targetHeading != null && Math.abs(angDiff(h, targetHeading)) < 2
+        && dispHeading != null && Math.abs(angDiff(h, dispHeading)) < 2) return;
+    targetHeading = h;
+    if (!easeRAF) easeRAF = requestAnimationFrame(easeStep);
+  }
+
+  // ---- Device compass (magnetometer) ----
+  // High-rate, continuous heading — far smoother and more responsive than the
+  // 1 Hz GPS. It reports where the PHONE points, so its offset from the actual
+  // travel direction (phone tilted in the mount) is calibrated against the GPS
+  // course while moving. Falls back to GPS-only heading when unavailable/denied.
+  var sensorActive = false, sensorHeading = null, orientHandler = null;
+  var headOffset = 0, headOffsetSet = false;
+  function headingFromEvent(e) {
+    if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading))
+      return e.webkitCompassHeading;   // iOS: already degrees clockwise from true north
+    if (e.absolute === true && typeof e.alpha === 'number' && !isNaN(e.alpha)) {
+      var scr = 0;
+      try { scr = (screen.orientation && screen.orientation.angle) || window.orientation || 0; } catch (x) {}
+      return (360 - e.alpha + scr) % 360;   // Android absolute alpha -> compass heading
+    }
+    return null;
+  }
+  function onDeviceOrient(e) {
+    var h = headingFromEvent(e);
+    if (h == null) return;
+    sensorHeading = h;
+    setTarget(sensorHeading + (headOffsetSet ? headOffset : 0));
+  }
+  function startHeadingSensor() {
+    if (sensorActive || !('DeviceOrientationEvent' in window)) return;
+    function attach() {
+      orientHandler = onDeviceOrient;
+      window.addEventListener('deviceorientationabsolute', orientHandler, true);
+      window.addEventListener('deviceorientation', orientHandler, true);
+      sensorActive = true;
+    }
+    var DOE = window.DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === 'function') {
+      // iOS 13+: needs a user gesture (this runs from the ◎ / REC / guide tap)
+      DOE.requestPermission().then(function (s) { if (s === 'granted') attach(); }).catch(function () {});
+    } else { attach(); }
+  }
+  function stopHeadingSensor() {
+    if (orientHandler) {
+      window.removeEventListener('deviceorientationabsolute', orientHandler, true);
+      window.removeEventListener('deviceorientation', orientHandler, true);
+      orientHandler = null;
+    }
+    sensorActive = false; sensorHeading = null;
+  }
+
   function setRotate(on) {
     rotateOn = on && canRotate;
     if (!canRotate) return;
-    if (!rotateOn) {
-      map.setBearing(0); curHeading = null; headAnchor = null;   // back to north
+    if (rotateOn) { startHeadingSensor(); }
+    else {
+      stopHeadingSensor();
+      if (easeRAF) { cancelAnimationFrame(easeRAF); easeRAF = null; }
+      targetHeading = null; dispHeading = null; headAnchor = null;
+      headOffset = 0; headOffsetSet = false;
+      map.setBearing(0);   // snap back to north
       var cn = document.getElementById('compass-n');
       if (cn) cn.parentElement.hidden = true;
     }
