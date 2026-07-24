@@ -175,6 +175,18 @@ def recent_events(conn, uid: int, limit: int = 50) -> list[sqlite3.Row]:
         "SELECT * FROM events WHERE user_id = ? ORDER BY ts DESC LIMIT ?", (uid, limit)).fetchall()
 
 
+def unseen_events(conn, uid: int) -> int:
+    """Number of watcher events not yet acknowledged (badge count). Reset to 0 by
+    opening the Watcher tab (mark_events_seen). Unlike recent_events this is not
+    capped at 50 — the old badge just counted the feed and froze at the limit."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM events WHERE user_id = ? AND seen = 0", (uid,)).fetchone()[0]
+
+
+def mark_events_seen(conn, uid: int) -> None:
+    conn.execute("UPDATE events SET seen = 1 WHERE user_id = ? AND seen = 0", (uid,))
+
+
 def stats_history(conn, uid: int, limit: int = 90) -> list[dict]:
     """Time series (ascending) for the dashboard sparklines."""
     rows = conn.execute(

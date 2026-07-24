@@ -478,12 +478,27 @@ document.addEventListener('DOMContentLoaded', function () {
     renderTabsActive();
     invalidateSoon();
   }
+  // Watcher unread badge: shows UNSEEN events (server-side seen flag). Opening
+  // the Watcher tab acknowledges them → the count resets to 0 and can grow again
+  // as new events arrive.
+  function setWatchBadge(n) {
+    var b = document.getElementById('watch-badge');
+    if (!b) return;
+    b.textContent = n > 99 ? '99+' : n;
+    b.hidden = !n;
+  }
+  function markWatcherSeen() {
+    setWatchBadge(0);   // optimistic — the tab is open, they're seen
+    fetch('/watcher/seen', {method: 'POST', headers: {'X-Requested-With': 'fetch'}})
+      .catch(function () {});
+  }
   function showContent(name) {
     activeContent = name;
     document.querySelectorAll('.tabc').forEach(function (c) { c.hidden = c.dataset.tabc !== name; });
     if (currentSnap === 'peek') setSnap('half');
     else { renderTabsActive(); invalidateSoon(); }
     if (name === 'planer') maybeCoach();
+    if (name === 'waechter') markWatcherSeen();   // opening the tab clears the count
   }
   document.querySelectorAll('.tab').forEach(function (t) {
     t.addEventListener('click', function () {
@@ -555,6 +570,7 @@ document.addEventListener('DOMContentLoaded', function () {
   document.querySelectorAll('.tabc').forEach(function (c) { c.hidden = c.dataset.tabc !== activeContent; });
   setSnap('half');
   if (activeContent === 'planer') setTimeout(maybeCoach, 1200);
+  if (activeContent === 'waechter') markWatcherSeen();   // landed on the watcher → clear the badge
 
   // ---- Follow mode: own live position + "you are here" context ----
   var meMarker = null, meCircle = null, follow = false, watchId = null;
@@ -1203,8 +1219,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
         var wb = document.getElementById('watcher-body');
         if (wb && d.watcher_html != null) wb.innerHTML = d.watcher_html;
-        var badge = document.getElementById('watch-badge');
-        if (badge) { badge.textContent = d.events_n; badge.hidden = !d.events_n; }
+        // If the user is currently looking at the Watcher, keep it acknowledged
+        // (don't let the badge climb under their eyes); otherwise show the unseen count.
+        if (activeContent === 'waechter' && currentSnap !== 'peek') {
+          if (d.events_n) markWatcherSeen(); else setWatchBadge(0);
+        } else {
+          setWatchBadge(d.events_n);
+        }
 
         if (d.virgin) { virginCells = expandVirgin(d.virgin); indexVirgin(); renderVirgin(); virginSnapped = false; if (virginOn) snapVirginWater(); }
         if (d.targets) targets = d.targets;

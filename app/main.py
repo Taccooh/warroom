@@ -272,6 +272,16 @@ def friends_remove(other_id: int = Form(...), conn: sqlite3.Connection = Depends
 
 
 # ---- Watcher setting ----
+@app.post("/watcher/seen")
+def watcher_seen(conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    """Acknowledge the watcher feed — clears the unseen badge. Fired when the
+    user opens the Watcher tab."""
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    queries.mark_events_seen(conn, user["id"])
+    return JSONResponse({"ok": True})
+
+
 @app.post("/watch")
 def set_watch(level: str = Form(...), conn: sqlite3.Connection = Depends(get_db),
               user=Depends(current_user)):
@@ -434,6 +444,7 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
         "n_free": sum(1 for t in _tg if t["t"] == "free"),
         "n_virgin": len(_vg) // 2,
         "events": queries.recent_events(conn, uid), "theatres": queries.theatres(conn, uid),
+        "unseen": queries.unseen_events(conn, uid),
         "fronts": queries.fronts(conn, uid),
         "friends": social.overview(conn, uid), "sharing": social.sharing_state(conn, uid),
         "history": queries.stats_history(conn, uid),
@@ -531,7 +542,7 @@ def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
         "cells": queries.revier_cells(conn, uid),
         "virgin": _virgin,
         "targets": _targets,
-        "events_n": len(ctx["events"]),
+        "events_n": queries.unseen_events(conn, uid),   # badge = UNSEEN, not the capped feed length
         "watcher_html": env.get_template("_watcher_body.html").render(**ctx),
         "planner_html": env.get_template("_planner_body.html").render(**ctx),
         "info_html": env.get_template("_info_grid.html").render(**ctx),

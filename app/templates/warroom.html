@@ -257,7 +257,7 @@
   <div class="tabs">
     <button class="tab" data-tab="map">{{ t('tab_map') }}</button>
     <button class="tab active" data-tab="planer">{{ t('tab_planner') }} <span class="badge" id="tour-badge" hidden></span></button>
-    <button class="tab" data-tab="waechter">{{ t('tab_watcher') }} <span class="badge" id="watch-badge" {% if not events %}hidden{% endif %}>{{ events | length }}</span></button>
+    <button class="tab" data-tab="waechter">{{ t('tab_watcher') }} <span class="badge" id="watch-badge" {% if not unseen %}hidden{% endif %}>{{ unseen if unseen <= 99 else '99+' }}</span></button>
     <button class="tab" data-tab="friends">{{ t('tab_friends') }}{% if friends.incoming %} <span class="badge">{{ friends.incoming | length }}</span>{% endif %}</button>
     <button class="tab" data-tab="info">{{ t('tab_info') }}</button>
   </div>
