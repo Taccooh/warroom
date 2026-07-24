@@ -995,6 +995,8 @@ body.wr-setloc .stage { grid-column: 1 / -1; }
 .auth-btn:hover { filter: brightness(1.08); }
 .auth-alt { text-align: center; color: var(--muted); font-size: 0.84rem; margin: 1.1rem 0 0; }
 .auth-alt a { color: var(--gold); }
+.auth-recover { text-align: center; font-size: 0.78rem; margin: 0.9rem 0 0; }
+.auth-recover a { color: var(--muted); text-decoration: underline; }
 .auth-note {
   border: 1px solid var(--gold-dim); border-left-width: 3px; background: rgba(232, 182, 76, 0.07);
   color: var(--text); padding: 0.6rem 0.75rem; font-size: 0.87rem; line-height: 1.55;

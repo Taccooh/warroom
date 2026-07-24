@@ -191,8 +191,6 @@ def register_page(request: Request, user=Depends(current_user),
 def register(request: Request, password: str = Form(...), api_key: str = Form(...),
              conn: sqlite3.Connection = Depends(get_db)):
     lang = web.lang_of(request)
-    if _reg_full(conn):
-        return render(request, "login.html", {"mode": "register", "full": True})
     if _rate_limited(request, "register", limit=5):
         return render(request, "login.html",
                       {"mode": "register", "error": i18n.t(lang, "err_ratelimit")})
@@ -210,12 +208,23 @@ def register(request: Request, password: str = Form(...), api_key: str = Form(..
     if not username:
         return render(request, "login.html",
             {"mode": "register", "error": i18n.t(lang, "err_no_username")})
-    if auth.get_user(conn, username):
-        return render(request, "login.html",
-            {"mode": "register", "error": i18n.t(lang, "err_registered", u=username)})
-    uid = auth.create_user(conn, username=username, wdg_user_id=me.get("user_id"),
-                           gang_id=me.get("gang_id"), gang=me.get("gang"),
-                           password=password, key_plain=key)
+    existing = auth.get_user(conn, username)
+    if existing:
+        # Account recovery, not a duplicate: a valid key for this username proves
+        # ownership (same proof as signup), so reset the password + store the
+        # fresh key instead of rejecting. This is the only way back in when the
+        # password is forgotten AND the old key was rotated. No user count change,
+        # so the sign-up cap does not apply here.
+        uid = existing["id"]
+        auth.recover_account(conn, uid, password=password, key_plain=key,
+                             gang_id=me.get("gang_id"), gang=me.get("gang"))
+        auth.delete_all_sessions(conn, uid)   # old sessions are invalidated by a reset
+    else:
+        if _reg_full(conn):
+            return render(request, "login.html", {"mode": "register", "full": True})
+        uid = auth.create_user(conn, username=username, wdg_user_id=me.get("user_id"),
+                               gang_id=me.get("gang_id"), gang=me.get("gang"),
+                               password=password, key_plain=key)
     # First poll in the background (the download from PL takes ~30s) — registration
     # responds immediately, the page shows "loading your turf" in the meantime.
     threading.Thread(target=_poll_one_bg, args=(uid,), daemon=True).start()

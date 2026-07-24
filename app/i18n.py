@@ -240,6 +240,9 @@ STRINGS = {
     "auth_key_ph": {"en": "64-character hex key", "de": "64-stelliger Hex-Key"},
     "auth_hint": {"en": "Your key is checked via <code>/api/me</code> and stored <b>encrypted</b>. Your wdgwars username automatically becomes your login.",
                   "de": "Dein Key wird per <code>/api/me</code> geprüft und <b>verschlüsselt</b> gespeichert. Dein wdgwars-Username wird automatisch dein Login."},
+    # Recovery: no email in this system, so a valid key resets the account
+    "auth_recover": {"en": "Forgot your password? Enter a new one here with a valid wdgwars key — it resets your account and updates the stored key.",
+                     "de": "Passwort vergessen? Hier ein neues eingeben plus gültigen wdgwars-Key — das setzt dein Konto zurück und aktualisiert den gespeicherten Key."},
     "auth_create": {"en": "Create account", "de": "Account anlegen"},
     "about_link": {"en": "What is this — and what does it store?",
                    "de": "Was ist das — und was speichert es?"},

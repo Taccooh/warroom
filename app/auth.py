@@ -38,6 +38,18 @@ def create_user(conn, *, username, wdg_user_id, gang_id, gang, password, key_pla
     return cur.lastrowid
 
 
+def recover_account(conn, user_id: int, *, password, key_plain, gang_id, gang) -> None:
+    """Reset an existing account: set a new password and store a fresh key. There
+    is no email in this system, so a valid wdgwars key (proven via /api/me before
+    this call) IS the recovery proof — only the account owner can mint one for
+    their username. Also refreshes the (possibly changed) gang and revives the
+    poller, whose stored key was dead after the user rotated it."""
+    conn.execute(
+        "UPDATE users SET password_hash = ?, key_enc = ?, gang_id = ?, gang = ? "
+        "WHERE id = ?",
+        (hash_password(password), crypto.encrypt(key_plain), gang_id, gang, user_id))
+
+
 def user_key(row: sqlite3.Row) -> str:
     return crypto.decrypt(row["key_enc"])
 
@@ -66,3 +78,9 @@ def session_user(conn, token: str | None) -> sqlite3.Row | None:
 def delete_session(conn, token: str | None) -> None:
     if token:
         conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+
+
+def delete_all_sessions(conn, user_id: int) -> None:
+    """Kill every session of a user — used on a password reset so any device that
+    still held an old cookie is logged out."""
+    conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))

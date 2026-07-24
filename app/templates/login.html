@@ -23,6 +23,7 @@
       <label>{{ t('auth_key') }} <small>{{ t('auth_key_note') }}</small>
         <input type="text" name="api_key" required autocomplete="off" spellcheck="false" placeholder="{{ t('auth_key_ph') }}"></label>
       <p class="auth-hint">{{ t('auth_hint') | safe }}</p>
+      <p class="auth-hint">{{ t('auth_recover') }}</p>
       <button class="auth-btn" type="submit">{{ t('auth_create') }}</button>
     </form>
     {% endif %}
@@ -35,6 +36,7 @@
         <input type="password" name="password" required autocomplete="current-password"></label>
       <button class="auth-btn" type="submit">{{ t('auth_login_btn') }}</button>
     </form>
+    <p class="auth-recover"><a href="/register">{{ t('auth_recover') }}</a></p>
     <p class="auth-alt">{{ t('auth_new') }} <a href="/register">{{ t('auth_register_link') }}</a></p>
     {% endif %}
 
