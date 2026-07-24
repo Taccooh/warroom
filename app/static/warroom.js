@@ -1506,6 +1506,71 @@ document.addEventListener('DOMContentLoaded', function () {
     }, 600);
   }
 
+  // ---- Live re-routing during guidance ----
+  // A wrong turn used to leave the drawn road line stale (it stayed as computed
+  // from the route start). Now, while guiding, the route recomputes from the
+  // CURRENT position through the REMAINING stops when you drift >40 m off the
+  // line, with a 10 s backup refresh. The stop ORDER never changes mid-drive
+  // (that would retarget you) — only the road geometry to the same next stops.
+  var lastReroute = 0;
+  function segDistKm(p, a, b) {
+    // point→segment distance via a local equirectangular projection (fine at
+    // these scales), all in km around p
+    var kx = 111.320 * Math.cos(p.lat * Math.PI / 180), ky = 110.574;
+    var ax = (a[1] - p.lng) * kx, ay = (a[0] - p.lat) * ky;
+    var bx = (b[1] - p.lng) * kx, by = (b[0] - p.lat) * ky;
+    var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    var t = l2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+    var cx = ax + t * dx, cy = ay + t * dy;
+    return Math.sqrt(cx * cx + cy * cy);
+  }
+  function distToRouteKm(lat, lng) {
+    var pt = {lat: lat, lng: lng};
+    var line = (routeGeo && routeGeo.length > 1) ? routeGeo : null;
+    if (!line) {   // no road geometry (OSRM down) → measure to the straight legs
+      line = [[lat, lng]];
+      for (var i = navIdx; i < tourOrdered.length; i++) {
+        var sp = stopPos(tourOrdered[i]); line.push([sp.lat, sp.lng]);
+      }
+    }
+    var best = Infinity;
+    for (var j = 1; j < line.length; j++) {
+      var d = segDistKm(pt, line[j - 1], line[j]);
+      if (d < best) best = d;
+    }
+    return best === Infinity ? null : best;
+  }
+  function reroute(lat, lng) {
+    var pts = [[lat, lng]];
+    for (var i = navIdx; i < tourOrdered.length; i++) {
+      var p = stopPos(tourOrdered[i]); pts.push([p.lat, p.lng]);
+    }
+    if (pts.length < 2) return;
+    var seq = ++routeSeq;
+    fetch('/api/route', {method: 'POST', headers: {'Content-Type': 'application/json',
+      'X-Requested-With': 'fetch'}, body: JSON.stringify({pts: pts})})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (seq !== routeSeq) return;
+        if (d && d.ok && d.route) {   // keep the old line on failure — never blank mid-drive
+          routeGeo = d.route.geometry; routeKm = d.route.km; routeFromPos = true;
+          drawRoute(); renderTour();
+        }
+      }).catch(function () {});
+  }
+  function guidanceReroute(lat, lng) {
+    if (!guidanceOn || !tourOrdered || navIdx >= tourOrdered.length) return;
+    var now = Date.now();
+    var off = false;
+    var d = distToRouteKm(lat, lng);
+    if (d != null && d > 0.040) off = true;               // 40 m off-route window
+    var due = (now - lastReroute) > 10000;                // 10 s backup refresh
+    if (!off && !due) return;
+    if (off && (now - lastReroute) < 5000) return;         // don't spam while off-route
+    lastReroute = now;
+    reroute(lat, lng);
+  }
+
   function totalKm() {
     if (!tourOrdered || !tourOrdered.length) return null;
     if (routeKm != null) return routeKm;   // real road km across the stops
@@ -1824,6 +1889,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // always refetch on guidance start: an earlier fetch may have failed, been
     // skipped (snap pending), or lack the approach leg from the current position
     fetchRoute();
+    lastReroute = 0;   // let the first fix re-route from the actual start position
     here.hidden = true;   // slot spec: the nav strip owns the bottom during guidance
     renderNextmove();     // guidance takes the bottom slot → hide any next-move card
     var h = document.getElementById('map-hero'); if (h) h.style.visibility = 'hidden';
@@ -1845,6 +1911,8 @@ document.addEventListener('DOMContentLoaded', function () {
       navBody.innerHTML = tf(T.nav_done, {n: tourOrdered.length});
       stopGuidance(); return;
     }
+    // Wrong turn? Recompute the road line from here through the remaining stops.
+    guidanceReroute(lat, lng);
     // Arrow and distance point at the road point; the auto-advance above keeps
     // comparing cell keys (center) — that stays correct.
     var tgt = stopPos(tourOrdered[navIdx]), pt = {lat: lat, lng: lng};
