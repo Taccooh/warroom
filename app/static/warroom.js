@@ -588,7 +588,29 @@ document.addEventListener('DOMContentLoaded', function () {
     here.className = cls;
     here.innerHTML = html + freshTag();   // append the data-freshness segment
   }
-  var lastFix = null;   // for a heading fallback from consecutive fixes
+  // Heading-up direction finding. Two field-tested pitfalls encoded here:
+  //  • consecutive 1-s fixes at low speed are GPS jitter — a bearing from them
+  //    points anywhere. So the fallback measures against an ANCHOR fix and only
+  //    trusts the direction after >12 m of real movement from it.
+  //  • a hard speed gate (old: 5 km/h) made the map stick to north while
+  //    walking/pulling away and feel laggy — the 12 m anchor gate replaces it;
+  //    the device heading is used from ~3 km/h up (below that it's noise).
+  var headAnchor = null;
+  function applyHeading(p, lat, lng) {
+    var here2 = {lat: lat, lng: lng};
+    var spd = p.coords.speed;
+    if (typeof p.coords.heading === 'number' && !isNaN(p.coords.heading)
+        && spd != null && spd > 0.8) {
+      headAnchor = here2;
+      setHeading(p.coords.heading);
+      return;
+    }
+    if (!headAnchor) { headAnchor = here2; return; }
+    if (hav(headAnchor, here2) > 0.012) {
+      setHeading(bearing(headAnchor, here2));
+      headAnchor = here2;
+    }
+  }
   function onPos(p) {
     var lat = p.coords.latitude, lng = p.coords.longitude, acc = p.coords.accuracy || 0, ll = [lat, lng];
     if (!meMarker) {
@@ -598,19 +620,8 @@ document.addEventListener('DOMContentLoaded', function () {
     } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(acc); }
     if (follow) {
       map.setView(ll, Math.max(map.getZoom(), 13));
-      // Heading-up: prefer the GPS heading; fall back to the bearing between
-      // the last two fixes (heading is NaN when stationary or on some devices).
-      // Only rotate once actually moving (~>1.4 m/s) so a parked map doesn't spin.
-      if (rotateOn) {
-        var hd = (typeof p.coords.heading === 'number' && !isNaN(p.coords.heading)
-                  && (p.coords.speed == null || p.coords.speed > 1.4)) ? p.coords.heading : null;
-        if (hd == null && lastFix && (p.coords.speed == null || p.coords.speed > 1.4)) {
-          if (hav(lastFix, {lat: lat, lng: lng}) > 0.006) hd = bearing(lastFix, {lat: lat, lng: lng});
-        }
-        if (hd != null) setHeading(hd);
-      }
+      if (rotateOn) applyHeading(p, lat, lng);
     }
-    lastFix = {lat: lat, lng: lng};
     updateHere(lat, lng);
     maybePush(lat, lng);
     navUpdate(lat, lng);
@@ -627,18 +638,42 @@ document.addEventListener('DOMContentLoaded', function () {
   // rotateOn tracks whether the map should turn in the driving direction. It is
   // bound to follow: on while following, straight north the moment following
   // stops. Guarded by canRotate so a missing plugin degrades to plain follow.
-  var rotateOn = false;
+  var rotateOn = false, curHeading = null;
   function setHeading(deg) {
     if (!canRotate) return;
+    // 3° dead band: GPS courses wobble a little even on a straight road — don't
+    // let the whole map tremble with them.
+    if (curHeading != null) {
+      var diff = Math.abs(deg - curHeading) % 360;
+      if (diff > 180) diff = 360 - diff;
+      if (diff < 3) return;
+    }
+    curHeading = deg;
     // leaflet-rotate bearing is the map's rotation; heading-up = -course so the
     // travel direction points to the top of the screen.
     map.setBearing(-deg);
+    var cn = document.getElementById('compass-n');
+    if (cn) { cn.parentElement.hidden = false; cn.style.transform = 'rotate(' + (-deg) + 'deg)'; }
   }
   function setRotate(on) {
     rotateOn = on && canRotate;
     if (!canRotate) return;
-    if (!rotateOn) { map.setBearing(0); lastFix = null; }   // snap back to north
+    if (!rotateOn) {
+      map.setBearing(0); curHeading = null; headAnchor = null;   // back to north
+      var cn = document.getElementById('compass-n');
+      if (cn) cn.parentElement.hidden = true;
+    }
   }
+  // Compass (top right): pure indicator of where north points while the map is
+  // rotated — no tap behaviour, so nothing fights the automatic heading.
+  var CompassCtl = L.Control.extend({options: {position: 'topright'}, onAdd: function () {
+    var d = L.DomUtil.create('div', 'leaflet-bar compass-ctl');
+    d.hidden = true;
+    d.innerHTML = '<span id="compass-n" class="compass-n">⇧<b>N</b></span>';
+    L.DomEvent.disableClickPropagation(d);
+    return d;
+  }});
+  if (canRotate) map.addControl(new CompassCtl());
   var LocateCtl = L.Control.extend({options: {position: 'bottomright'}, onAdd: function () {
     var d = L.DomUtil.create('div', 'leaflet-bar locate-ctl');
     d.innerHTML = '<a href="#" id="loc-btn" title="Follow" role="button">◎</a>';

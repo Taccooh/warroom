@@ -701,6 +701,17 @@ body.wr-setloc .stage { grid-column: 1 / -1; }
    count). Just a dashed outline hook — this is map info, not drama. */
 .masts-cell { stroke-dasharray: 5 4; stroke-opacity: 0.75; }
 
+/* Compass (heading-up mode): shows where north points while the map is rotated.
+   Indicator only — no tap surface. */
+.compass-ctl { background: var(--panel2); border: 1px solid var(--edge); }
+.compass-ctl[hidden] { display: none; }
+.compass-n {
+  display: flex; align-items: center; justify-content: center; gap: 1px;
+  width: 34px; height: 34px; color: var(--gold-bright);
+  font-family: var(--mono); font-size: 0.72rem; font-weight: 800;
+  transition: transform 0.35s ease; pointer-events: none;
+}
+
 /* Distance-ring labels (radar layer): small tag at each ring's north point.
    Near-white like the rings — gold vanished on top of gold own-cells. */
 .ring-label {
