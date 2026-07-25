@@ -1178,7 +1178,14 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
   outline: 1px dashed var(--gold); outline-offset: -1px;
 }
 .tour-list li.dragging .tour-drag { cursor: grabbing; }
-.tour-del { margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 0.9rem; }
+/* Street View at a stop (Maps pano deep link). The row's auto margin moved here
+   so it sits flush with the delete button at the right edge. */
+.tour-sv {
+  margin-left: auto; flex: 0 0 auto; color: var(--muted); text-decoration: none;
+  font-size: 0.9rem; padding: 0.25rem 0.45rem; line-height: 1;
+}
+.tour-sv:hover { color: var(--gold-bright); }
+.tour-del { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 0.9rem; }
 .tour-del:hover { color: var(--enemy-hot); }
 .tour-btns { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.45rem; }
 .cell-tour {

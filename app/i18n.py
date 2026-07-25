@@ -365,6 +365,7 @@ JS = {
     "exp_no_route": {"en": "stops only — no road line routed yet",
                      "de": "nur Stopps — noch keine Straßenroute berechnet"},
     "exp_doc_name": {"en": "Warroom loot tour", "de": "Warroom Beute-Tour"},
+    "tour_sv": {"en": "Street View at this stop", "de": "Street View an diesem Stopp"},
     "exp_done": {"en": "<b>{f}</b> saved", "de": "<b>{f}</b> gespeichert"},
     "chart_total": {"en": "APs total", "de": "APs gesamt"},
     "chart_rank": {"en": "Gang rank", "de": "Gang-Rang"},

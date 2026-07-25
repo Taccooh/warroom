@@ -1731,6 +1731,15 @@ document.addEventListener('DOMContentLoaded', function () {
     return u;
   }
 
+  // Look at a stop before driving there: Google's pano deep link, aimed at the
+  // SNAPPED road point — a cell centre often sits in a field, where there is no
+  // panorama. Plain Maps URL: no API key, no third-party script, no CSP change.
+  function svUrl(s) {
+    var p = stopPos(s);
+    return 'https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' +
+           p.lat + ',' + p.lng;
+  }
+
   // ---- Export: Maps hand-off, or a real file ---------------------------------
   // Google Maps is a hand-off, not an export: it takes 10 stops and re-plans the
   // way itself. GPX/KML carry EVERY stop plus the road line we already routed via
@@ -2018,6 +2027,8 @@ document.addEventListener('DOMContentLoaded', function () {
         (tourOrdered ? '<b>' + (i + 1) + '.</b> ' : '') +
         esc(s.label || (s.lat.toFixed(3) + ',' + s.lng.toFixed(3))) +
         (s.noRoad ? ' <span class="no-road" title="' + esc(T.no_road) + '">⚑</span>' : '') +
+        '<a class="tour-sv" href="' + svUrl(s) + '" target="_blank" rel="noopener" ' +
+          'title="' + esc(T.tour_sv) + '" aria-label="' + esc(T.tour_sv) + '">◉</a>' +
         '<button type="button" class="tour-del" data-lat="' + s.lat + '" data-lng="' + s.lng + '">✕</button></li>';
     }).join('');
     var ab = document.getElementById('tour-auto');
