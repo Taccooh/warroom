@@ -1328,7 +1328,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var panel = document.getElementById('tour-panel');
   var tourList = document.getElementById('tour-list');
   var tourCount = document.getElementById('tour-count');
-  var mapsLink = document.getElementById('tour-maps');
+  var expBtn = document.getElementById('tour-maps');   // opens the export chooser
   var navBanner = document.getElementById('nav');
   var navBody = document.getElementById('nav-body');
   var navEnd = document.getElementById('nav-end');
@@ -1731,6 +1731,124 @@ document.addEventListener('DOMContentLoaded', function () {
     return u;
   }
 
+  // ---- Export: Maps hand-off, or a real file ---------------------------------
+  // Google Maps is a hand-off, not an export: it takes 10 stops and re-plans the
+  // way itself. GPX/KML carry EVERY stop plus the road line we already routed via
+  // OSRM, which is what a dedicated navigation app can actually follow. So the
+  // button opens a chooser instead of assuming Maps is what you wanted.
+  var expDlg = document.getElementById('exp-dlg');
+
+  function xesc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'}[c];
+    });
+  }
+  // 6 decimals ≈ 0.1 m — more would only bloat a 600-point road line.
+  function c6(v) { return (+v).toFixed(6); }
+  function stampName(ext) {
+    var d = new Date(), p = function (v) { return (v < 10 ? '0' : '') + v; };
+    return 'warroom-tour-' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' +
+           p(d.getDate()) + '.' + ext;
+  }
+  // Drive order, road-snapped points, numbered like the list in the panel.
+  function expStops() {
+    return (tourOrdered || tour).map(function (s, i) {
+      var p = stopPos(s);
+      return {lat: p.lat, lng: p.lng,
+              name: (i + 1) + '. ' + (s.label || (p.lat.toFixed(4) + ', ' + p.lng.toFixed(4)))};
+    });
+  }
+  function expLine() { return (routeGeo && routeGeo.length > 1) ? routeGeo : null; }
+
+  function gpxDoc() {
+    var st = expStops(), line = expLine(), name = T.exp_doc_name, o = [];
+    o.push('<?xml version="1.0" encoding="UTF-8"?>');
+    o.push('<gpx version="1.1" creator="warroom" xmlns="http://www.topografix.com/GPX/1/1">');
+    o.push('  <metadata><name>' + xesc(name) + '</name><time>' + new Date().toISOString() +
+           '</time></metadata>');
+    st.forEach(function (s) {
+      o.push('  <wpt lat="' + c6(s.lat) + '" lon="' + c6(s.lng) + '">' +
+             '<name>' + xesc(s.name) + '</name><sym>Flag</sym></wpt>');
+    });
+    // <rte> is the stop list; <trk> is the way between them. Apps that route
+    // themselves read the first, apps that just follow a line read the second —
+    // shipping both means the file works either way.
+    o.push('  <rte><name>' + xesc(name) + '</name>');
+    st.forEach(function (s) {
+      o.push('    <rtept lat="' + c6(s.lat) + '" lon="' + c6(s.lng) + '">' +
+             '<name>' + xesc(s.name) + '</name></rtept>');
+    });
+    o.push('  </rte>');
+    if (line) {
+      o.push('  <trk><name>' + xesc(name) + '</name><trkseg>');
+      line.forEach(function (p) {
+        o.push('    <trkpt lat="' + c6(p[0]) + '" lon="' + c6(p[1]) + '"/>');
+      });
+      o.push('  </trkseg></trk>');
+    }
+    o.push('</gpx>');
+    return o.join('\n');
+  }
+
+  function kmlDoc() {
+    var st = expStops(), line = expLine(), name = T.exp_doc_name, o = [];
+    o.push('<?xml version="1.0" encoding="UTF-8"?>');
+    o.push('<kml xmlns="http://www.opengis.net/kml/2.2"><Document>');
+    o.push('  <name>' + xesc(name) + '</name>');
+    o.push('  <Style id="wrRoute"><LineStyle><color>ff4cb6e8</color><width>4</width></LineStyle></Style>');
+    if (line) {
+      // KML wants lon,lat — the reverse of everything else in this file.
+      o.push('  <Placemark><name>' + xesc(name) + '</name><styleUrl>#wrRoute</styleUrl>');
+      o.push('    <LineString><tessellate>1</tessellate><coordinates>');
+      o.push('      ' + line.map(function (p) { return c6(p[1]) + ',' + c6(p[0]); }).join(' '));
+      o.push('    </coordinates></LineString></Placemark>');
+    }
+    o.push('  <Folder><name>' + xesc(name) + '</name>');
+    st.forEach(function (s) {
+      o.push('    <Placemark><name>' + xesc(s.name) + '</name>' +
+             '<Point><coordinates>' + c6(s.lng) + ',' + c6(s.lat) + '</coordinates></Point></Placemark>');
+    });
+    o.push('  </Folder>');
+    o.push('</Document></kml>');
+    return o.join('\n');
+  }
+
+  function saveFile(name, mime, text) {
+    var url = URL.createObjectURL(new Blob([text], {type: mime}));
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    toast(tf(T.exp_done, {f: esc(name)}), 4000);
+  }
+
+  function openExport() {
+    if (!tour.length) return;
+    if (!expDlg || !expDlg.showModal) { window.open(mapsUrl(), '_blank', 'noopener'); return; }
+    var n = (tourOrdered || tour).length, km = totalKm();
+    var sub = km != null ? tf(T.tour_total, {n: n, d: (routeKm != null ? '' : '≈ ') + fmtDist(km)})
+                         : tf(T.tour_one, {n: n});
+    document.getElementById('exp-sub').textContent =
+      sub + ' · ' + (expLine() ? T.exp_has_route : T.exp_no_route);
+    document.getElementById('exp-maps').href = mapsUrl();
+    var cap = document.getElementById('exp-maps-cap');
+    cap.hidden = n <= MAPS_MAX;
+    if (n > MAPS_MAX) cap.textContent = tf(T.exp_cap, {max: MAPS_MAX, n: n});
+    expDlg.showModal();
+  }
+  if (expDlg) {
+    document.getElementById('exp-close').addEventListener('click', function () { expDlg.close(); });
+    // Click on the backdrop = outside the dialog box → close, like a sheet.
+    expDlg.addEventListener('click', function (e) { if (e.target === expDlg) expDlg.close(); });
+    document.getElementById('exp-maps').addEventListener('click', function () { expDlg.close(); });
+    document.getElementById('exp-gpx').addEventListener('click', function () {
+      saveFile(stampName('gpx'), 'application/gpx+xml', gpxDoc()); expDlg.close();
+    });
+    document.getElementById('exp-kml').addEventListener('click', function () {
+      saveFile(stampName('kml'), 'application/vnd.google-earth.kml+xml', kmlDoc()); expDlg.close();
+    });
+  }
+
   // ---- Short notice above the map, announced by the herald ----
   // The warlord leaps out of the map center, pauses menacingly for a moment and
   // flies, shrinking, into the notice, where he stays seated as a seal.
@@ -1904,7 +2022,6 @@ document.addEventListener('DOMContentLoaded', function () {
     }).join('');
     var ab = document.getElementById('tour-auto');
     if (ab) ab.hidden = !tourManual;   // only offered while a hand order is active
-    mapsLink.href = mapsUrl();
   }
 
   function stopGuidance() {
@@ -1970,6 +2087,7 @@ document.addEventListener('DOMContentLoaded', function () {
     setManual(false);
     optimize();
   });
+  if (expBtn) expBtn.addEventListener('click', openExport);
 
   // ---- Drag & drop reordering of tour stops ----
   // Pointer events, not HTML5 drag&drop: this must work with a thumb on the

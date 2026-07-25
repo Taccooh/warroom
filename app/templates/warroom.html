@@ -112,7 +112,9 @@
            appears only then, as the way back to automatic 2-opt. #}
         <button type="button" class="rb-jump" id="tour-auto" hidden>{{ t('tour_auto') }}</button>
         <button type="button" class="rb-jump go" id="tour-go">{{ t('tour_go') }}</button>
-        <a class="rb-jump" id="tour-maps" target="_blank" rel="noopener">{{ t('tour_maps') }}</a>
+        {# Was a direct Google-Maps link; now opens the export chooser, because
+           Maps is the one target that silently drops stops. #}
+        <button type="button" class="rb-jump" id="tour-maps">{{ t('tour_export') }}</button>
         <button type="button" class="rb-jump stop" id="tour-clear">{{ t('tour_clear') }}</button>
       </div>
     </div>
@@ -262,6 +264,32 @@
     <button class="tab" data-tab="info">{{ t('tab_info') }}</button>
   </div>
 </div>
+
+{# Export chooser. Google Maps caps the hand-off at 10 stops and re-plans the
+   way itself; GPX/KML carry the whole tour plus the road line we already
+   routed. The counts and the cap warning are filled in by warroom.js. #}
+<dialog class="exp-dlg" id="exp-dlg" aria-labelledby="exp-title">
+  <div class="exp-head">
+    <b id="exp-title">{{ t('exp_title') }}</b>
+    <button type="button" class="exp-x" id="exp-close" aria-label="{{ t('exp_close') }}">✕</button>
+  </div>
+  <p class="exp-sub" id="exp-sub"></p>
+  {# autofocus on the first option, not on ✕ — showModal() would otherwise put
+     the focus ring on the close button. #}
+  <a class="exp-opt" id="exp-maps" target="_blank" rel="noopener" autofocus>
+    <b>{{ t('exp_maps') }}</b>
+    <small>{{ t('exp_maps_note') }}</small>
+    <small class="exp-cap" id="exp-maps-cap" hidden></small>
+  </a>
+  <button type="button" class="exp-opt" id="exp-gpx">
+    <b>{{ t('exp_gpx') }}</b>
+    <small>{{ t('exp_gpx_note') }}</small>
+  </button>
+  <button type="button" class="exp-opt" id="exp-kml">
+    <b>{{ t('exp_kml') }}</b>
+    <small>{{ t('exp_kml_note') }}</small>
+  </button>
+</dialog>
 
 {# Per-request data as a JSON island — inert (not executed), so it is exempt
    from script-src and warroom.js can stay a plain static file. #}

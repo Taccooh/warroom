@@ -22,7 +22,9 @@ https://warroom.mechanics-toolbox.org/about
   cells, and *virgin land* (cells nobody ever scanned), sorted by real GPS distance
 - **Loot tour** — pick cells, get an auto-optimized route with waypoints snapped
   to actual roads (OpenStreetMap) and the real driving route drawn in-app
-  (OSRM), in-app guidance or Google Maps hand-off
+  (OSRM), in-app guidance, or export: Google Maps hand-off (10 stops), or a
+  GPX/KML file with every stop plus the routed road line, for OsmAnd, Locus,
+  Garmin, Komoot and Google Earth
 - **Coverage brush** — opt-in GPS recording of the ground you actually covered
   while driving: every stamp carries your expected reception radius, the screen
   stays awake while recording, and an interrupted session resumes on its own

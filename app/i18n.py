@@ -189,7 +189,22 @@ STRINGS = {
     "tour_go": {"en": "Guide me", "de": "Losfahren"},
     "tour_stop_nav": {"en": "Stop", "de": "Stopp"},
     "tour_maps": {"en": "Maps", "de": "Maps"},
+    "tour_export": {"en": "Export", "de": "Export"},
     "tour_clear": {"en": "Clear", "de": "Leeren"},
+
+    # Export chooser: Google Maps is only one of three hand-offs, and the one
+    # with the tightest limit — so the button asks instead of assuming.
+    "exp_title": {"en": "Export tour", "de": "Tour exportieren"},
+    "exp_close": {"en": "Close", "de": "Schließen"},
+    "exp_maps": {"en": "Google Maps", "de": "Google Maps"},
+    "exp_maps_note": {"en": "Opens the navigation. Google plans the way itself.",
+                      "de": "Öffnet die Navigation. Google plant den Weg selbst."},
+    "exp_gpx": {"en": "GPX file", "de": "GPX-Datei"},
+    "exp_gpx_note": {"en": "Every stop, no limit. For OsmAnd, Locus, Garmin, Komoot.",
+                     "de": "Alle Stopps, ohne Limit. Für OsmAnd, Locus, Garmin, Komoot."},
+    "exp_kml": {"en": "KML file", "de": "KML-Datei"},
+    "exp_kml_note": {"en": "Every stop, no limit. For Google Earth and My Maps.",
+                     "de": "Alle Stopps, ohne Limit. Für Google Earth und My Maps."},
     "tour_add_pin": {"en": "+ Tour", "de": "+ Tour"},
     "tour_remove_pin": {"en": "− Tour", "de": "− Tour"},
     "maps_cap": {"en": "Google Maps only takes {max} stops", "de": "Google Maps nimmt nur {max} Stopps"},
@@ -342,6 +357,15 @@ JS = {
     "tour_go": {"en": "Guide me", "de": "Losfahren"},
     "tour_stop_nav": {"en": "Stop", "de": "Stopp"},
     "tour_add_pin": {"en": "+ Tour", "de": "+ Tour"},
+    # Export chooser (dialog labels are server-rendered; these are the parts
+    # that depend on the tour at hand)
+    "exp_cap": {"en": "Only the first {max} of {n} stops.",
+                "de": "Nur die ersten {max} von {n} Stopps."},
+    "exp_has_route": {"en": "incl. road line", "de": "mit Straßenroute"},
+    "exp_no_route": {"en": "stops only — no road line routed yet",
+                     "de": "nur Stopps — noch keine Straßenroute berechnet"},
+    "exp_doc_name": {"en": "Warroom loot tour", "de": "Warroom Beute-Tour"},
+    "exp_done": {"en": "<b>{f}</b> saved", "de": "<b>{f}</b> gespeichert"},
     "chart_total": {"en": "APs total", "de": "APs gesamt"},
     "chart_rank": {"en": "Gang rank", "de": "Gang-Rang"},
     "chart_cl": {"en": "Team captured / lost", "de": "Team erobert / verloren"},

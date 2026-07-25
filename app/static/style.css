@@ -313,6 +313,49 @@ path.cell-picked {
 .tour-list li.over-cap { opacity: 0.5; }
 .tour-list li.over-cap b { color: var(--muted); }
 
+/* Export chooser (native <dialog>, so ESC and the top layer come for free).
+   Full-width rows, thumb-sized — this gets tapped in a parked car. */
+.exp-dlg {
+  width: min(26rem, calc(100vw - 2rem)); padding: 0.9rem;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--edge); border-radius: 0;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.75);
+}
+.exp-dlg::backdrop { background: rgba(4, 6, 9, 0.72); }
+.exp-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.exp-head b {
+  font-family: var(--sans); font-size: 0.9rem; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--gold);
+}
+.exp-x {
+  background: none; border: 0; color: var(--muted); font-size: 1rem;
+  cursor: pointer; padding: 0.2rem 0.35rem; line-height: 1;
+}
+.exp-x:hover { color: var(--gold-bright); }
+.exp-sub {
+  margin: 0.25rem 0 0.7rem; font-family: var(--mono);
+  font-size: 0.72rem; color: var(--muted);
+}
+.exp-opt {
+  display: block; width: 100%; text-align: left; text-decoration: none;
+  margin-bottom: 0.5rem; padding: 0.6rem 0.7rem;
+  background: var(--iron); border: 1px solid var(--line); color: var(--text);
+  cursor: pointer; font-family: var(--sans);
+}
+.exp-opt:last-child { margin-bottom: 0; }
+.exp-opt:hover, .exp-opt:focus-visible { border-color: var(--gold); background: var(--panel2); }
+.exp-opt b {
+  display: block; font-size: 0.82rem; letter-spacing: 0.05em; text-transform: uppercase;
+}
+.exp-opt:hover b, .exp-opt:focus-visible b { color: var(--gold-bright); }
+.exp-opt small {
+  display: block; margin-top: 0.2rem; font-size: 0.72rem;
+  color: var(--muted); line-height: 1.4; text-transform: none; letter-spacing: 0;
+}
+.exp-opt small.exp-cap { color: var(--gold); }
+/* display:block above outranks the UA [hidden] rule — say it explicitly */
+.exp-opt small[hidden] { display: none; }
+
 /* Tour guidance: marching orders */
 /* Guidance strip docked at the BOTTOM (step 6): spans from the left edge to just
    before the right control rail, so the two never overlap. Big driving type, and
