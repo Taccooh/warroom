@@ -79,9 +79,35 @@ docker compose up -d
 To build from source instead, replace `image: ...` with `build: .` and run
 `docker compose up -d --build`.
 
-Put a TLS-terminating reverse proxy (Caddy, nginx, …) in front for production —
-the app itself speaks plain HTTP on port 8000. Push notifications and geolocation
-require HTTPS.
+### HTTPS is not optional
+
+Put a TLS-terminating reverse proxy (Caddy, nginx, …) in front — the app itself
+speaks plain HTTP on port 8000. Behind a plain `http://192.168.x.y:8000` URL it
+is the *browser*, not the app, that takes things away:
+
+- **GPS stops working.** `navigator.geolocation` only runs in a
+  [secure context](https://developer.mozilla.org/docs/Web/Security/Secure_Contexts)
+  — HTTPS, or `localhost`. No server-side setting can lift that.
+- **Push and PWA install stop working**, for the same reason: service workers
+  are secure-context only.
+- **Login does not stick.** The session cookie is `Secure`, so a plain-HTTP
+  origin refuses to store it.
+
+`http://localhost:8000` *does* count as a secure context, so a desktop-only
+setup on the same machine works fully. For a phone you need a real certificate.
+Without owning a domain, the least painful route is
+[Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) — an
+HTTPS `*.ts.net` hostname, no open ports, no cert warnings:
+
+```sh
+tailscale serve --bg 8000
+```
+
+Cloudflare Tunnel, or Caddy with a DNS-01 challenge, work just as well if you
+do own a domain. For a throwaway test you can instead tell Chrome to treat the
+origin as secure under `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
+(add `http://192.168.x.y:8000`, port included) — that weakens the browser for
+that origin, so don't leave it on.
 
 ### Docker image
 
