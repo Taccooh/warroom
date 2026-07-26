@@ -20,7 +20,10 @@ CREATE TABLE IF NOT EXISTS users (
     last_poll     TEXT,
     footprint_at  REAL NOT NULL DEFAULT 0,
     terr_init     INTEGER NOT NULL DEFAULT 0,
-    watch_level   TEXT NOT NULL DEFAULT 'near'   -- own | turf | near
+    watch_level   TEXT NOT NULL DEFAULT 'near',  -- own | turf | near
+    -- 1 once wdgwars answered 401 for this key (rotated or revoked): the
+    -- watcher is dead until a fresh key is pasted, and the user must be told.
+    key_bad       INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token      TEXT PRIMARY KEY,
@@ -157,6 +160,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     # `relay` (the reverted mast-ownership flag) may exist on DBs migrated during
     # its two-day life — it stays as a harmless always-0 vestige. `towers` is live.
     _add_col(conn, "territory", "towers", "INTEGER NOT NULL DEFAULT 0")
+    _add_col(conn, "users", "key_bad", "INTEGER NOT NULL DEFAULT 0")
 
 
 def kv_get(conn, key: str, default=None):

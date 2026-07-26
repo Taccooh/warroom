@@ -11,7 +11,12 @@ from . import config
 
 
 class WdgError(RuntimeError):
-    pass
+    """status carries the HTTP code when there was one, so callers can tell a
+    dead API key (401) apart from wdgwars having a bad minute (5xx)."""
+
+    def __init__(self, msg: str, status: int | None = None):
+        super().__init__(msg)
+        self.status = status
 
 
 class Wdg:
@@ -45,7 +50,7 @@ class Wdg:
                     time.sleep(2 * (attempt + 1))
                     continue
                 body = e.read().decode("utf-8", "replace")[:200]
-                raise WdgError(f"{method} {path} -> HTTP {e.code}: {body}") from e
+                raise WdgError(f"{method} {path} -> HTTP {e.code}: {body}", e.code) from e
             except urllib.error.URLError as e:
                 if attempt < 2:
                     time.sleep(2 * (attempt + 1))

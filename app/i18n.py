@@ -194,6 +194,28 @@ STRINGS = {
 
     # Export chooser: Google Maps is only one of three hand-offs, and the one
     # with the tightest limit — so the button asks instead of assuming.
+    # Dead API key: wdgwars answered 401, so the watcher reports nothing at all.
+    # Said out loud in a dialog — silence reads as "quiet on my turf".
+    "kb_title": {"en": "Your wdgwars key no longer works", "de": "Dein wdgwars-Key geht nicht mehr"},
+    "kb_body": {"en": "wdgwars is rejecting the key stored here, so the watcher has stopped: "
+                      "no ownership changes, no alerts, no fresh turf data. That usually means "
+                      "the key was rotated or revoked.",
+                "de": "wdgwars weist den hier hinterlegten Key ab — der Wächter steht deshalb still: "
+                      "keine Besitzwechsel, keine Meldungen, keine frischen Revierdaten. Meistens "
+                      "wurde der Key rotiert oder zurückgezogen."},
+    "kb_how": {"en": "Get a new key in your wdgwars profile and paste it here — you stay logged in.",
+               "de": "Neuen Key im wdgwars-Profil holen und hier einsetzen — du bleibst eingeloggt."},
+    "kb_save": {"en": "Save key", "de": "Key speichern"},
+    "kb_later": {"en": "Later", "de": "Später"},
+    "kb_err": {"en": "wdgwars did not accept that key.", "de": "wdgwars hat den Key nicht akzeptiert."},
+    "kb_other": {"en": "That key belongs to a different wdgwars account.",
+                 "de": "Der Key gehört zu einem anderen wdgwars-Konto."},
+    "kb_ok": {"en": "Key renewed — the watcher is running again.",
+              "de": "Key erneuert — der Wächter läuft wieder."},
+    "kb_rate": {"en": "Too many attempts — wait a few minutes.",
+                "de": "Zu viele Versuche — warte ein paar Minuten."},
+    "kb_head_info": {"en": "wdgwars key", "de": "wdgwars-Key"},
+
     "exp_title": {"en": "Export tour", "de": "Tour exportieren"},
     "exp_close": {"en": "Close", "de": "Schließen"},
     "exp_maps": {"en": "Google Maps", "de": "Google Maps"},

@@ -228,6 +228,21 @@
     <h3 class="pl-sub">{{ t('chart_head') }}</h3>
     <div id="charts" class="charts"><p class="hint">{{ t('chart_none') }}</p></div>
 
+    {# Key renewal lives here permanently, so the dialog has somewhere to point
+       to after it is dismissed — and so a key can be swapped before it dies. #}
+    <h3 class="pl-sub">{{ t('kb_head_info') }}</h3>
+    {% if key_state == 'ok' %}<div class="ok-msg">{{ t('kb_ok') }}</div>
+    {% elif key_state == 'err' %}<div class="auth-err">{{ t('kb_err') }}</div>
+    {% elif key_state == 'other' %}<div class="auth-err">{{ t('kb_other') }}</div>
+    {% elif key_state == 'rate' %}<div class="auth-err">{{ t('kb_rate') }}</div>{% endif %}
+    {% if key_bad %}<div class="auth-err">{{ t('kb_title') }}</div>{% endif %}
+    <p class="hint">{{ t('kb_how') }}</p>
+    <form method="post" action="/account/key" class="pw-form">
+      <input type="text" name="api_key" required autocomplete="off" spellcheck="false"
+             placeholder="{{ t('auth_key_ph') }}">
+      <button class="rb-jump" type="submit">{{ t('kb_save') }}</button>
+    </form>
+
     <h3 class="pl-sub">{{ t('pw_head') }}</h3>
     {% if pw == 'ok' %}<div class="ok-msg">{{ t('pw_ok') }}</div>
     {% elif pw == 'err' %}<div class="auth-err">{{ t('pw_err') }}</div>{% endif %}
@@ -264,6 +279,25 @@
     <button class="tab" data-tab="info">{{ t('tab_info') }}</button>
   </div>
 </div>
+
+{# Dead wdgwars key. Opened by warroom.js on load while key_bad is set — a
+   watcher that reports nothing looks exactly like a quiet turf, so this has to
+   be said out loud. The form posts the same route as the one in the Info tab. #}
+{% if key_bad %}
+<dialog class="exp-dlg kb-dlg" id="kb-dlg" aria-labelledby="kb-title">
+  <div class="exp-head">
+    <b id="kb-title">⚠ {{ t('kb_title') }}</b>
+  </div>
+  <p class="kb-body">{{ t('kb_body') }}</p>
+  <p class="kb-body">{{ t('kb_how') }}</p>
+  <form method="post" action="/account/key" class="kb-form">
+    <input type="text" name="api_key" required autocomplete="off" spellcheck="false"
+           placeholder="{{ t('auth_key_ph') }}">
+    <button class="rb-jump go" type="submit">{{ t('kb_save') }}</button>
+  </form>
+  <button type="button" class="kb-later" id="kb-later">{{ t('kb_later') }}</button>
+</dialog>
+{% endif %}
 
 {# Export chooser. Google Maps caps the hand-off at 10 stops and re-plans the
    way itself; GPX/KML carry the whole tour plus the road line we already

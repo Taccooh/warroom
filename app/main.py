@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, config, coverage, db, i18n, poller, push, queries, roads, routing, social, web
+from . import auth, config, coverage, crypto, db, i18n, poller, push, queries, roads, routing, social, web
 from .security import SecurityHeadersMiddleware
 from .web import render
 from .wdg import Wdg, WdgError
@@ -405,6 +405,33 @@ def change_password(request: Request, old: str = Form(...), new: str = Form(...)
     return RedirectResponse("/?tab=info&pw=ok", status_code=303)
 
 
+@app.post("/account/key")
+def change_key(request: Request, api_key: str = Form(...),
+               conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    """Paste a fresh wdgwars key without logging out. Needs no password: the
+    session already proves who you are, and the key is validated against
+    /api/me anyway — a key for a DIFFERENT account is refused, otherwise the
+    watcher would quietly start reporting someone else's turf."""
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    if _rate_limited(request, "key", limit=5):
+        return RedirectResponse("/?tab=info&key=rate", status_code=303)
+    try:
+        me = Wdg(api_key.strip()).me()
+    except WdgError:
+        return RedirectResponse("/?tab=info&key=err", status_code=303)
+    if (me.get("username") or "").lower() != user["wdg_username"].lower():
+        return RedirectResponse("/?tab=info&key=other", status_code=303)
+    conn.execute("UPDATE users SET key_enc = ?, gang_id = ?, gang = ?, key_bad = 0 "
+                 "WHERE id = ?",
+                 (crypto.encrypt(api_key.strip()), me.get("gang_id"), me.get("gang"),
+                  user["id"]))
+    # Poll straight away: the point of a new key is that the watcher wakes up.
+    threading.Thread(target=_poll_one_bg, args=(user["id"],), daemon=True).start()
+    log.info("API-Key erneuert für %s", user["wdg_username"])
+    return RedirectResponse("/?tab=info&key=ok", status_code=303)
+
+
 @app.post("/account/delete")
 def delete_account(request: Request, password: str = Form(...),
                    conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
@@ -452,6 +479,10 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
         "user_count": conn.execute("SELECT COUNT(*) FROM users").fetchone()[0],
         "tab": request.query_params.get("tab"), "pw": request.query_params.get("pw"),
         "del_state": request.query_params.get("del"),
+        # wdgwars rejected this key (401) → the watcher is dead until it is
+        # replaced. The page opens a dialog about it instead of staying quiet.
+        "key_bad": bool(user["key_bad"]) if "key_bad" in user.keys() else False,
+        "key_state": request.query_params.get("key"),
         "poll_epoch": db.kv_get(conn, "last_poll", "0"),
     }
     return render(request, "warroom.html", ctx)

@@ -356,6 +356,25 @@ path.cell-picked {
 /* display:block above outranks the UA [hidden] rule — say it explicitly */
 .exp-opt small[hidden] { display: none; }
 
+/* Dead-key dialog: the export chooser's shell in alarm colours */
+.kb-dlg { border-color: var(--enemy); }
+.kb-dlg .exp-head b { color: var(--enemy-hot); }
+.kb-body { margin: 0.5rem 0; font-size: 0.8rem; color: var(--text); line-height: 1.5; }
+.kb-form { display: flex; gap: 0.4rem; margin-top: 0.7rem; }
+.kb-form input {
+  flex: 1 1 auto; min-width: 0; padding: 0.45rem 0.55rem;
+  background: var(--panel2); border: 1px solid var(--edge); color: var(--text);
+  font-family: var(--mono); font-size: 0.8rem;
+}
+.kb-form input:focus { outline: none; border-color: var(--gold); }
+.kb-later {
+  display: block; margin: 0.6rem 0 0 auto; padding: 0.3rem 0.2rem;
+  background: none; border: 0; color: var(--muted); cursor: pointer;
+  font-family: var(--sans); font-size: 0.72rem; letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.kb-later:hover { color: var(--text); }
+
 /* Tour guidance: marching orders */
 /* Guidance strip docked at the BOTTOM (step 6): spans from the left edge to just
    before the right control rail, so the two never overlap. Big driving type, and

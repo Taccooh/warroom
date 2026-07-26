@@ -1731,6 +1731,17 @@ document.addEventListener('DOMContentLoaded', function () {
     return u;
   }
 
+  // Dead wdgwars key. The dialog is only rendered while the server-side flag is
+  // set, so its presence IS the trigger — a stopped watcher is otherwise
+  // indistinguishable from a quiet turf, and the user keeps waiting for reports
+  // that can never arrive.
+  var kbDlg = document.getElementById('kb-dlg');
+  if (kbDlg && kbDlg.showModal) {
+    kbDlg.showModal();
+    var kbLater = document.getElementById('kb-later');
+    if (kbLater) kbLater.addEventListener('click', function () { kbDlg.close(); });
+  }
+
   // Look at a stop before driving there: Google's pano deep link, aimed at the
   // SNAPPED road point — a cell centre often sits in a field, where there is no
   // panorama. Plain Maps URL: no API key, no third-party script, no CSP change.

@@ -406,6 +406,16 @@ def _fetch_global(conn, users) -> tuple[list, float, float, dict]:
     return [], 0.02, 0.02, {}
 
 
+def _set_key_bad(conn, user_id: int, bad: int) -> None:
+    """Only writes on a real change — the flag is read on every page load, so
+    keep it out of the WAL when nothing happened."""
+    try:
+        conn.execute("UPDATE users SET key_bad = ? WHERE id = ? AND key_bad != ?",
+                     (bad, user_id, bad))
+    except Exception:
+        log.exception("key_bad-Flag für user %s nicht setzbar", user_id)
+
+
 def poll_all(conn) -> dict:
     users = conn.execute("SELECT * FROM users").fetchall()
     if not users:
@@ -439,11 +449,18 @@ def poll_all(conn) -> dict:
         for fut, u in futures.items():
             try:
                 total_events += fut.result()["events"]
+                _set_key_bad(conn, u["id"], 0)   # a key that answers is a good key
             except WdgError as e:
                 # Expected operational failure: a revoked/rotated API key (401) or
                 # a transient wdgwars 5xx. Not a bug in our code — log one line, not
                 # a full stack trace, so a single dead key can't drown the log.
                 log.warning("poll für %s uebersprungen: %s", u["wdg_username"], e)
+                # 401 means the key itself is dead. Flag it — otherwise the
+                # watcher just goes quiet and the user reads that as "nothing
+                # happening on my turf". A 5xx is wdgwars having a bad minute
+                # and must never raise the flag.
+                if e.status == 401:
+                    _set_key_bad(conn, u["id"], 1)
             except Exception:
                 log.exception("poll für %s fehlgeschlagen", u["wdg_username"])
     db.kv_set(conn, "last_poll", time.time())
