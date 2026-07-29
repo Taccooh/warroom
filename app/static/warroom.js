@@ -119,6 +119,146 @@ document.addEventListener('DOMContentLoaded', function () {
     var mp = myPos(); if (mp) navUpdate(mp.lat, mp.lng);   // nav banner distance
   });
 
+  // ---- Team colours: keep near-gold gangs apart from our own turf ----
+  // The feed hands us each gang's real colour, and some of them fly a gold
+  // close enough to ours that own and enemy cells look identical on the map.
+  // Only those get moved onto a clearly different hue, picked from the gang
+  // name so it stays the same colour every session and two clashing gangs
+  // don't land on the same one. Every other gang keeps its real colour.
+  // The Info tab has the switch back to the untouched feed colours.
+  var GOLD_HUE = 41, GOLD_SPAN = 22;   // #e8b64c sits at hue 41
+  // Cold half of the wheel, at least 25 deg apart so two clashing gangs stay
+  // apart from each other too, and clear of the red we fall back to when a
+  // gang has no colour at all.
+  var SAFE_HUES = [130, 160, 190, 215, 245, 275, 300, 325];
+  var teamRaw = false;
+  try { teamRaw = localStorage.getItem('wr_teamcol') === 'raw'; } catch (e) {}
+
+  function hex2rgb(s) {
+    if (typeof s !== 'string') return null;
+    var h = s.trim().replace(/^#/, '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;   // named/rgb() colours: hands off
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+  function rgb2hsl(c) {
+    var r = c[0] / 255, g = c[1] / 255, b = c[2] / 255;
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    var l = (mx + mn) / 2, s = 0, h = 0;
+    if (d) {
+      s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+      h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      h *= 60;
+    }
+    return [h, s, l];
+  }
+  function hsl2hex(h, s, l) {
+    h = ((h % 360) + 360) % 360 / 360;
+    function ch(p, q, t) {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    }
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+    return '#' + [ch(p, q, h + 1 / 3), ch(p, q, h), ch(p, q, h - 1 / 3)].map(function (v) {
+      var x = Math.round(v * 255).toString(16);
+      return x.length < 2 ? '0' + x : x;
+    }).join('');
+  }
+  function strHash(s) {
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+  function hueGap(a, b) {
+    var d = Math.abs(a - b);
+    return Math.min(d, 360 - d);
+  }
+  // Reads as gold, i.e. own turf? Dark or washed-out colours never do, whatever
+  // their hue, so they are left alone.
+  function goldish(hsl) {
+    return hueGap(hsl[0], GOLD_HUE) <= GOLD_SPAN && hsl[1] >= 0.25 && hsl[2] >= 0.35;
+  }
+  function shifted(hsl, hue) {
+    return hsl2hex(hue, Math.max(0.55, hsl[1]), Math.min(0.62, Math.max(0.42, hsl[2])));
+  }
+
+  // gang -> replacement colour, rebuilt whenever the cell data changes. Doing it
+  // over the whole set (instead of per gang on the fly) is what keeps a moved
+  // gang off a hue some OTHER gang already flies for real — swapping a clash
+  // with our gold for a clash with the neighbours would have fixed nothing.
+  var teamMap = {};
+  function rebuildTeamColors() {
+    teamMap = {};
+    if (teamRaw) return;
+    var raw = {};
+    cells.forEach(function (c) {
+      if (c.status === 'enemy' && c.gang && c.color) raw[c.gang] = c.color;
+    });
+    var taken = [GOLD_HUE], clash = [];
+    Object.keys(raw).sort().forEach(function (name) {   // sorted: same result every run
+      var rgb = hex2rgb(raw[name]);
+      if (!rgb) return;
+      var hsl = rgb2hsl(rgb);
+      if (goldish(hsl)) clash.push([name, hsl]);
+      else taken.push(hsl[0]);       // keeps its real colour, so its hue is spoken for
+    });
+    clash.forEach(function (e) {
+      var name = e[0], hsl = e[1];
+      // Preferred slot comes from the name, so a gang keeps its colour across
+      // sessions; only an actual conflict pushes it to the next free one.
+      var want = strHash(name) % SAFE_HUES.length, hue = null;
+      for (var k = 0; k < SAFE_HUES.length && hue === null; k++) {
+        var cand = SAFE_HUES[(want + k) % SAFE_HUES.length];
+        var free = taken.every(function (t) { return hueGap(t, cand) >= 25; });
+        if (free) hue = cand;
+      }
+      if (hue === null) hue = SAFE_HUES[want];   // everything crowded: take the wish
+      taken.push(hue);
+      teamMap[name] = shifted(hsl, hue);
+    });
+  }
+
+  function teamColor(gang, raw) {
+    if (!raw || teamRaw) return raw;
+    if (gang && teamMap[gang]) return teamMap[gang];
+    // Gang outside the current cell set (planner chips can outlive a poll):
+    // no neighbour knowledge here, but still keep it out of the gold band.
+    var rgb = hex2rgb(raw);
+    if (!rgb) return raw;
+    var hsl = rgb2hsl(rgb);
+    if (!goldish(hsl)) return raw;
+    return shifted(hsl, SAFE_HUES[strHash(gang || raw) % SAFE_HUES.length]);
+  }
+  // Gang chips come server-rendered and get swapped on every live poll, so the
+  // raw colour rides along in data-color and the dot is painted from here.
+  function paintGangDots() {
+    document.querySelectorAll('.pl-chip .pl-dot[data-color]').forEach(function (d) {
+      var chip = d.parentNode;
+      d.style.background = teamColor(chip && chip.dataset ? chip.dataset.gang : null,
+                                     d.dataset.color);
+    });
+  }
+  rebuildTeamColors();
+  paintGangDots();
+  var teamBtn = document.getElementById('teamcol-toggle');
+  function teamBtnText() {
+    if (teamBtn) teamBtn.textContent = teamRaw ? T.teamcol_raw : T.teamcol_fixed;
+  }
+  teamBtnText();
+  if (teamBtn) teamBtn.addEventListener('click', function () {
+    teamRaw = !teamRaw;
+    try { localStorage.setItem('wr_teamcol', teamRaw ? 'raw' : 'fix'); } catch (e) {}
+    teamBtnText();
+    rebuildTeamColors();
+    renderCells();     // map fills
+    plRender();        // planner row dots
+    paintGangDots();   // filter chips
+  });
+
   var rects = [];
   var cellLayer = L.layerGroup().addTo(map);
   function renderCells() {
@@ -128,8 +268,9 @@ document.addEventListener('DOMContentLoaded', function () {
     cells.forEach(function (c) { cellByKey[c.i + '_' + c.j] = c; });
     cells.forEach(function (c) {
       var lead = c.status === 'enemy' && c.gap === 0;
-      // Enemies in their real gang color (CHAOS vs BWM distinguishable), own gold, free cold
-      var fill = c.status === 'enemy' ? (c.color || COLOR.enemy) : COLOR[c.status];
+      // Enemies in their gang color (CHAOS vs BWM distinguishable), own gold, free cold
+      var fill = c.status === 'enemy'
+        ? (teamColor(c.gang, c.color) || COLOR.enemy) : COLOR[c.status];
       var r = L.rectangle(c.b, {
         color: lead ? '#ffd15e' : fill, weight: lead ? 2 : 1,
         opacity: c.status === 'free' ? 0.6 : 0.9, fillColor: fill,
@@ -327,7 +468,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var label, dot, tag, line;
     if (c.t === 'enemy') {
       label = esc(c.g);
-      dot = '<span class="pl-dot"' + (c.c ? ' style="background:' + esc(c.c) + '"' : '') + '></span>';
+      var pc = teamColor(c.g, c.c);
+      dot = '<span class="pl-dot"' + (pc ? ' style="background:' + esc(pc) + '"' : '') + '></span>';
       if (c.gap == null) {   // feed fogs enemy strength this season — no bogus gap/bar
         tag = '<span class="pl-gap fog">' + esc(T.fog_tag) + '</span>';
         line = '<div class="pl-row2">' + esc(T.fog_line) + '</div>';
@@ -1249,6 +1391,7 @@ document.addEventListener('DOMContentLoaded', function () {
             var all = document.querySelector('.pl-chip[data-filter="all"]');
             if (all) all.classList.add('on');
           }
+          paintGangDots();   // chips are fresh markup, the dots need painting again
           plRender();   // plShown stays: whoever clicked "more" keeps their list
         }
 
@@ -1262,6 +1405,8 @@ document.addEventListener('DOMContentLoaded', function () {
         // Map view/zoom stay untouched — we only redraw the layer.
         if (d.cells && !document.querySelector('.leaflet-popup')) {
           cells = d.cells;
+          rebuildTeamColors();   // gangs may have come or gone with this poll
+          paintGangDots();
           renderCells();
           if (mastsOn) renderMasts();   // tower counts ride on the same cells
           var mp = myPos();

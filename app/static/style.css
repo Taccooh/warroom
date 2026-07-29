@@ -691,6 +691,8 @@ body.wr-setloc .stage { grid-column: 1 / -1; }
   display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
   padding: 0.5rem 0.2rem; font-size: 0.8rem; color: var(--muted);
 }
+/* Explains a settings row that needs it — sits directly under its own row */
+.settings-hint { font-size: 0.72rem; margin: -0.15rem 0.2rem 0.7rem; }
 /* Logout in the Info tab: its own row, spaced away from the red delete below */
 .info-logout { margin: 1rem 0 0.4rem; }
 

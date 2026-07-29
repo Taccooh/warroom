@@ -246,6 +246,15 @@ STRINGS = {
     # Settings section in the Info tab
     "settings_head": {"en": "Settings", "de": "Einstellungen"},
     "lang_label": {"en": "Language", "de": "Sprache"},
+    "teamcol_label": {"en": "Team colours", "de": "Team-Farben"},
+    "teamcol_hint": {
+        "en": "Some gangs fly a gold close to ours, which makes their turf hard "
+              "to tell from yours. Those get a clearly different hue — switch to "
+              "originals for the untouched feed colours.",
+        "de": "Manche Gangs führen ein Gold nah an unserem, dann ist ihr Revier "
+              "kaum von deinem zu unterscheiden. Die bekommen einen deutlich "
+              "anderen Ton — auf Original stellen für die echten Farben.",
+    },
     # "Next move" rail toggle (server-rendered chip label)
     "nextmove": {"en": "Next move", "de": "Nächster Zug"},
     # Bottom sheet
@@ -413,6 +422,9 @@ JS = {
     # honest framing: air-distance proxy, not real road km — the score stays
     # internal, rows keep showing only real gap + distance
     "sort_worth": {"en": "Worth the drive", "de": "Lohnt die Fahrt"},
+    # Team-colour switch in the Info tab (button label carries the current state)
+    "teamcol_fixed": {"en": "Adjusted", "de": "Angepasst"},
+    "teamcol_raw": {"en": "Original", "de": "Original"},
     # Layers popover (◈ control) + coverage brush (all client-rendered)
     "layers_title": {"en": "Map layers", "de": "Kartenebenen"},
     "lyr_virgin": {"en": "Virgin land", "de": "Neuland"},
