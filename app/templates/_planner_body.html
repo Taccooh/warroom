@@ -9,9 +9,7 @@
     {% if n_virgin %}<button type="button" class="pl-chip" data-filter="virgin">{{ t('flt_virgin') }} <b data-count="virgin">{{ n_virgin }}</b></button>{% endif %}
     {% for g in gangs %}
     <button type="button" class="pl-chip" data-filter="gang" data-gang="{{ g.name | e }}">
-      {# Raw feed colour only — the client paints the dot, because gangs flying a
-         near-gold get nudged onto a readable hue unless the Info tab says no. #}
-      <span class="pl-dot"{% if g.color %} data-color="{{ g.color | e }}"{% endif %}></span>{{ g.name }} <b>{{ g.n }}</b>
+      <span class="pl-dot"{% if g.color %} style="background:{{ g.color | e }}"{% endif %}></span>{{ g.name }} <b>{{ g.n }}</b>
     </button>
     {% endfor %}
   </div>
