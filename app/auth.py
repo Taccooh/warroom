@@ -75,6 +75,17 @@ def session_user(conn, token: str | None) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def touch_seen(conn, user_id: int) -> None:
+    """Note that someone actually had the app in front of them. Throttled to
+    once every five minutes IN SQL — the crew poll fires every 12 s, and a write
+    per poll would be pure noise. A no-op UPDATE costs a read, nothing more."""
+    conn.execute(
+        "UPDATE users SET last_seen = datetime('now') WHERE id = ? "
+        "AND (last_seen IS NULL OR last_seen < datetime('now', '-5 minutes'))",
+        (user_id,),
+    )
+
+
 def delete_session(conn, token: str | None) -> None:
     if token:
         conn.execute("DELETE FROM sessions WHERE token = ?", (token,))

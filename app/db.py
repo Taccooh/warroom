@@ -23,7 +23,11 @@ CREATE TABLE IF NOT EXISTS users (
     watch_level   TEXT NOT NULL DEFAULT 'near',  -- own | turf | near
     -- 1 once wdgwars answered 401 for this key (rotated or revoked): the
     -- watcher is dead until a fresh key is pasted, and the user must be told.
-    key_bad       INTEGER NOT NULL DEFAULT 0
+    key_bad       INTEGER NOT NULL DEFAULT 0,
+    -- Last time the app was actually IN FRONT of someone. Not "last request":
+    -- the crew poll fires every 12 s whether or not anyone is looking, so a
+    -- phone in a pocket would read as permanently active.
+    last_seen     TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token      TEXT PRIMARY KEY,
@@ -161,6 +165,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     # its two-day life — it stays as a harmless always-0 vestige. `towers` is live.
     _add_col(conn, "territory", "towers", "INTEGER NOT NULL DEFAULT 0")
     _add_col(conn, "users", "key_bad", "INTEGER NOT NULL DEFAULT 0")
+    _add_col(conn, "users", "last_seen", "TEXT")
 
 
 def kv_get(conn, key: str, default=None):

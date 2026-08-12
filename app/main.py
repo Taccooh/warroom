@@ -100,7 +100,22 @@ def _poll_one_bg(user_id: int):
 
 
 def current_user(request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    return auth.session_user(conn, request.cookies.get(auth.COOKIE))
+    user = auth.session_user(conn, request.cookies.get(auth.COOKIE))
+    if user is not None and _in_front_of_someone(request):
+        auth.touch_seen(conn, user["id"])
+    return user
+
+
+def _in_front_of_someone(request: Request) -> bool:
+    """Does this request mean a human is looking at the app right now?
+
+    Background fetches all carry X-Requested-With: fetch and keep running while
+    the tab is hidden, so they prove nothing on their own — the crew poll adds
+    X-Seen: 1 only while the page is visible. Everything else (page loads, form
+    posts) is someone acting."""
+    if request.headers.get("X-Requested-With") != "fetch":
+        return True
+    return request.headers.get("X-Seen") == "1"
 
 
 # Brute-force brake for login/register: sliding window per IP, in-memory (single

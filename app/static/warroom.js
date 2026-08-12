@@ -1215,7 +1215,12 @@ document.addEventListener('DOMContentLoaded', function () {
   // ---- Crew: friends' live positions (12s poll) + own push while sharing ----
   var friendLayer = L.layerGroup().addTo(map);
   function loadFriends() {
-    fetch('/friends/positions.json', {headers: {'X-Requested-With': 'fetch'}})
+    // X-Seen says someone is actually looking. This poll keeps running while the
+    // tab is hidden, so without it a phone in a pocket would count as an active
+    // user forever.
+    var h = {'X-Requested-With': 'fetch'};
+    if (document.visibilityState === 'visible') h['X-Seen'] = '1';
+    fetch('/friends/positions.json', {headers: h})
       .then(function (r) { return r.ok ? r.json() : {friends: []}; })
       .then(function (d) {
         friendLayer.clearLayers();
