@@ -524,8 +524,8 @@ async def snap(request: Request, conn: sqlite3.Connection = Depends(get_db),
 @app.post("/api/route")
 async def api_route(request: Request, user=Depends(current_user)):
     """Ordered tour stops → real driving route (server-side OSRM proxy; the
-    strict CSP forbids client calls to third parties, and this way only
-    cell-derived stop points ever leave the house — never live GPS)."""
+    strict CSP forbids client calls to third parties). Point 0 is the user's own
+    position whenever one is set — see routing.py, and /about says so."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     try:

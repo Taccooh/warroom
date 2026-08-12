@@ -32,6 +32,9 @@
         alle 5 Minuten: dein Profil, deine APs, dein Team sowie die öffentliche
         Territoriums-Karte und das Leaderboard — dieselben Daten, die die API jedem
         Spieler zeigt.</li>
+        <li><b>Nimm dafür einen eigenen Key.</b> Leg im wdgwars-Profil einen
+        frischen an, nur für Warroom. Dann kannst du ihn hier zurückziehen, ohne
+        dass dir irgendetwas anderes kaputtgeht.</li>
         <li>Du behältst die Kontrolle: <b>rotierst du deinen Key</b> im
         wdgwars-Profil, ist der gespeicherte sofort wertlos.</li>
       </ul>
@@ -46,9 +49,15 @@
         <li>Besitzwechsel in deinem Revier (der Wächter-Feed) und deine
         Statistik-Verläufe (nackte Zahlen für die Charts).</li>
         <li>Nur wenn du es aktiv einschaltest: Crew-Verbindungen, deine
-        Live-Position (ein einziger, immer überschriebener Punkt — läuft nach 1 h /
-        4 h automatisch ab, es entsteht <b>kein Bewegungsprofil</b>) und das
-        Push-Abo deines Geräts.</li>
+        Live-Position (ein einziger, immer überschriebener Punkt — es entsteht
+        <b>kein Bewegungsprofil</b>) und das Push-Abo deines Geräts. Stoppst du
+        die Freigabe oder läuft sie ab, wird die Koordinate <b>gelöscht</b>, nicht
+        nur ausgeblendet.</li>
+        <li>Nur solange du mit dem <b>Abdeckungs-Pinsel</b> aufzeichnest: deine
+        eigene GPS-Spur (Punkt plus erwarteter Empfangsradius je Stempel). Sichtbar
+        nur für dich, jederzeit über ↺ im Ebenen-Menü löschbar und mit deinem
+        Account weg. Von allein läuft sie <b>nicht</b> ab — sie bleibt, bis du sie
+        löschst.</li>
       </ul>
 
       <h2>Was Warroom nicht tut</h2>
@@ -64,10 +73,25 @@
       14 Tagen. Dein wdgwars-Account bleibt davon komplett unberührt.</p>
 
       <h2>Beteiligte Dritte</h2>
-      <p>Cloudflare (TLS/CDN vor der Domain), OpenStreetMap Overpass (bekommt nur
-      Zell-Koordinaten — nicht wer du bist — um Tour-Wegpunkte auf Straßen zu legen)
-      und der Push-Dienst deines Browsers für Benachrichtigungen (Inhalte
-      verschlüsselt).</p>
+      <ul>
+        <li><b>OpenStreetMap-Kacheln</b> — die Karte lädt dein Browser direkt von
+        <code>tile.openstreetmap.org</code>. Dort ist damit sichtbar, welchen
+        Kartenausschnitt du ansiehst (im Folgen-Modus also ungefähr, wo du bist),
+        plus deine IP.</li>
+        <li><b>OpenStreetMap Overpass</b> — bekommt nur Zell-Koordinaten, nicht
+        wer du bist, um Tour-Wegpunkte auf Straßen zu legen. Fragt der Server,
+        nicht dein Browser.</li>
+        <li><b>OSRM-Routing</b> — bekommt die Tour-Stopps und, sobald du eine
+        Position gesetzt hast, <b>deine eigene Position als Startpunkt</b>. Bei
+        laufender Führung geht sie live erneut raus, wenn du von der Route
+        abkommst oder alle 10 Sekunden. Ohne das gibt es keine echte Fahrtroute.
+        Läuft über den Server, ohne deinen Namen.</li>
+        <li><b>Google Maps</b> — nur wenn du selbst „In Maps öffnen" oder Street
+        View antippst. Dann gehen die Stopp-Koordinaten an Google, wie bei jedem
+        Maps-Link.</li>
+        <li><b>Cloudflare</b> (TLS/CDN vor der Domain) und der <b>Push-Dienst
+        deines Browsers</b> für Benachrichtigungen (Inhalte verschlüsselt).</li>
+      </ul>
 
       <h2>Klartext zum Vertrauen</h2>
       <p>Wie bei <i>jedem</i> Dienst, dem du einen Key gibst, gilt: Wer den Server
@@ -95,6 +119,9 @@
         never changes anything on your wdgwars account. Every 5 minutes it fetches:
         your profile, your APs, your team, plus the public territory map and
         leaderboard — the same data the API shows every player.</li>
+        <li><b>Use a key of its own.</b> Mint a fresh one in your wdgwars profile
+        just for Warroom. Then you can pull it back here without breaking anything
+        else you run.</li>
         <li>You stay in control: <b>rotate your key</b> in your wdgwars profile and
         the stored one instantly becomes useless.</li>
       </ul>
@@ -109,12 +136,14 @@
         <li>Ownership changes on your turf (the watcher feed) and your stats history
         (bare numbers for the charts).</li>
         <li>Only if you actively turn it on: crew links, your live position (a
-        single, always-overwritten point that auto-expires after 1 h / 4 h — <b>no
-        movement history</b>) and your device's push subscription.</li>
+        single, always-overwritten point — <b>no movement history</b>) and your
+        device's push subscription. When you stop sharing, or the window runs out,
+        the coordinate is <b>erased</b>, not merely hidden.</li>
         <li>Only while you record with the <b>coverage brush</b>: your own GPS
         trail (map point + reception radius per stamp). It is visible to nobody
         but you, can be wiped any time (↺ in the layer menu) and is deleted with
-        your account.</li>
+        your account. It does <b>not</b> expire on its own — it stays until you
+        clear it.</li>
       </ul>
 
       <h2>What Warroom does not do</h2>
@@ -130,12 +159,25 @@
       most. Your wdgwars account is completely untouched by this.</p>
 
       <h2>Third parties involved</h2>
-      <p>Cloudflare (TLS/CDN in front of the domain), OpenStreetMap Overpass (gets
-      only cell coordinates — not who you are — to snap tour waypoints onto roads),
-      OSRM routing servers (get the road-snapped tour stops plus, when you use
-      the tour with a position set, your route start point — that is what
-      drawing your actual driving route requires), and your browser's
-      push service for notifications (payloads encrypted).</p>
+      <ul>
+        <li><b>OpenStreetMap tiles</b> — your browser loads the map itself
+        straight from <code>tile.openstreetmap.org</code>. That shows them which
+        part of the map you are looking at (in follow mode, roughly where you
+        are), plus your IP.</li>
+        <li><b>OpenStreetMap Overpass</b> — gets cell coordinates only, not who
+        you are, to snap tour waypoints onto roads. Asked by the server, not by
+        your browser.</li>
+        <li><b>OSRM routing</b> — gets the tour stops and, once you have a
+        position set, <b>your own position as the start point</b>. During in-app
+        guidance that goes out live again whenever you leave the route, or every
+        10 seconds. Without it there is no real driving route. Server-side, and
+        without your name.</li>
+        <li><b>Google Maps</b> — only when you tap "open in Maps" or Street View
+        yourself. Then the stop coordinates go to Google, like with any Maps
+        link.</li>
+        <li><b>Cloudflare</b> (TLS/CDN in front of the domain) and your
+        <b>browser's push service</b> for notifications (payloads encrypted).</li>
+      </ul>
 
       <h2>Straight talk about trust</h2>
       <p>As with <i>any</i> service you hand a key to: whoever runs the server could

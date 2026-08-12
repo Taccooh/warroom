@@ -4,9 +4,13 @@ The client draws the tour as straight dashed lines between road-snapped stops �
 useful, but not the road. This asks a public OSRM instance for the actual
 driving route across the ordered stops and hands the geometry back to the map.
 
-Deliberate privacy line: only the STOP points go out (cell-derived road points,
-same class of data Overpass already receives) — never the user's live GPS
-position. The me→first-stop leg stays a client-side straight line.
+What leaves the house, spelled out because it is easy to get wrong: the ordered
+STOP points (cell-derived road points, same class of data Overpass already
+receives) AND, whenever the user has a position set, that position as point 0 —
+routing a drive from where you actually stand is the point of the feature.
+During in-app guidance that is the live fix, resent on every reroute (off route,
+or every 10 s). This docstring used to promise the opposite while the client had
+long since been sending it; /about now says so too, in both languages.
 
 Failure is a feature here: if every instance is down the client keeps its
 straight-line fallback and marks the total as approximate. No route data is

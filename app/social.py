@@ -92,13 +92,29 @@ def set_sharing(conn, me: int, minutes: int) -> str | None:
         "INSERT INTO positions (user_id, sharing_until) VALUES (?, ?) "
         "ON CONFLICT(user_id) DO UPDATE SET sharing_until = excluded.sharing_until",
         (me, until))
+    if until is None:
+        _forget_position(conn, me)   # "Stop" has to mean gone, not merely hidden
     return until
 
 
+def _forget_position(conn, me: int) -> None:
+    """Drop the stored coordinate. Expiry used to only HIDE the point — it stayed
+    on disk and in every backup. Anyone reading "expires after an hour" takes
+    that to mean the location is gone, so it has to actually go."""
+    conn.execute(
+        "UPDATE positions SET lat = NULL, lng = NULL, updated_at = NULL "
+        "WHERE user_id = ? AND lat IS NOT NULL", (me,))
+
+
 def sharing_state(conn, me: int) -> dict:
-    row = conn.execute("SELECT sharing_until FROM positions WHERE user_id = ?", (me,)).fetchone()
+    row = conn.execute(
+        "SELECT sharing_until, lat FROM positions WHERE user_id = ?", (me,)).fetchone()
     until = _parse(row["sharing_until"]) if row else None
     active = bool(until and until > _now())
+    # Ran out in the meantime: erase on the next request that looks. There is no
+    # cron in this app, and a stale coordinate must not outlive its window.
+    if row is not None and not active and row["lat"] is not None:
+        _forget_position(conn, me)
     return {"active": active, "until": row["sharing_until"] if (row and active) else None}
 
 

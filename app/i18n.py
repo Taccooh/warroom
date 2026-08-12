@@ -284,8 +284,10 @@ STRINGS = {
     "auth_key": {"en": "wdgwars API key", "de": "wdgwars API-Key"},
     "auth_key_note": {"en": "(Profile → API Keys)", "de": "(Profil → API Keys)"},
     "auth_key_ph": {"en": "64-character hex key", "de": "64-stelliger Hex-Key"},
-    "auth_hint": {"en": "Your key is checked via <code>/api/me</code> and stored <b>encrypted</b>. Your wdgwars username automatically becomes your login.",
-                  "de": "Dein Key wird per <code>/api/me</code> geprüft und <b>verschlüsselt</b> gespeichert. Dein wdgwars-Username wird automatisch dein Login."},
+    # Says to mint a dedicated key: that way pulling it back here costs the user
+    # nothing else, which is the whole point of the advice.
+    "auth_hint": {"en": "Best make a <b>fresh key just for Warroom</b> — then you can pull it back without breaking anything else. It is checked via <code>/api/me</code> and stored <b>encrypted</b>. Your wdgwars username automatically becomes your login.",
+                  "de": "Nimm am besten einen <b>eigenen Key nur für Warroom</b> — den kannst du zurückziehen, ohne dass dir etwas anderes kaputtgeht. Er wird per <code>/api/me</code> geprüft und <b>verschlüsselt</b> gespeichert. Dein wdgwars-Username wird automatisch dein Login."},
     # Recovery: no email in this system, so a valid key resets the account
     "auth_recover": {"en": "Forgot your password? Enter a new one here with a valid wdgwars key — it resets your account and updates the stored key.",
                      "de": "Passwort vergessen? Hier ein neues eingeben plus gültigen wdgwars-Key — das setzt dein Konto zurück und aktualisiert den gespeicherten Key."},

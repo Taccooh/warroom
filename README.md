@@ -33,14 +33,28 @@ https://warroom.mechanics-toolbox.org/about
 
 ## Security model (the short version)
 
-Your wdgwars API key is the entry ticket. It is:
+Your wdgwars API key is the entry ticket. Mint a **fresh one just for warroom**
+in your wdgwars profile — then pulling it back later costs you nothing else.
+It is:
 
 - validated once at sign-up (`/api/me`), your wdgwars username becomes your login
 - stored **encrypted at rest** (Fernet/AES) — the master key lives in
   `data/master.key`, outside the database
-- used **read-only**: warroom never uploads in your name, never modifies your
-  wdgwars account — there is no code path that does
+- used **read-only**: every wdgwars call the running app makes is a `GET`
+  (`/api/me`, `/api/team/me`, `/api/territories`, `/api/member-territories`,
+  `/api/leaderboard`, `/api/me/cells`). It never uploads in your name and never
+  changes anything on your wdgwars account. The API client does carry an
+  `upload_csv` POST for the planned live uploader — nothing calls it today, and
+  if that ships it will be opt-in and said out loud here first
 - instantly dead the moment you rotate your key in your wdgwars profile
+
+Beyond wdgwars, this is what leaves the machine: **your browser** loads map
+tiles from `tile.openstreetmap.org` (they see your viewport and your IP). The
+**server** asks Overpass for road geometry per map cell, and OSRM for the
+driving route — that request carries the tour stops plus your own position as
+the start point, resent live while in-app guidance runs. Tapping the Google Maps
+or Street View export hands those stop coordinates to Google. No analytics, no
+trackers, no update check, no phone-home of any kind.
 
 Raw AP data (exact positions, BSSIDs, names) is aggregated into map cells on
 arrival and never stored. The coverage brush is the one deliberate exception:
