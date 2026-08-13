@@ -480,14 +480,26 @@ document.addEventListener('DOMContentLoaded', function () {
   // replaced by every applyLive planner swap.
   var PL_SORTS = ['dist', 'easy', 'aps', 'worth'];
   function sortLabel(s) { return T['sort_' + s] || s; }
+  function nextSort() { return PL_SORTS[(PL_SORTS.indexOf(plSort) + 1) % PL_SORTS.length]; }
+  // Label = the mode you are IN, data-next = what one more tap gives (the CSS
+  // draws it). A button carrying nothing but a mode name reads like a value
+  // somebody already chose: a user hunting for "nearest" tapped it, landed on
+  // "easiest", and then wondered why the planner offered cells 40 miles out.
+  // With four modes, how many taps lead back is not guessable either.
+  function paintSort(b) {
+    if (!b) return;
+    b.textContent = sortLabel(plSort);
+    b.dataset.next = sortLabel(nextSort());
+  }
   document.addEventListener('click', function (e) {
     var b = e.target.closest ? e.target.closest('#pl-sort') : null;
     if (!b) return;
-    plSort = PL_SORTS[(PL_SORTS.indexOf(plSort) + 1) % PL_SORTS.length];
-    b.textContent = sortLabel(plSort);
+    plSort = nextSort();
+    paintSort(b);
     plShown = PL_PAGE;
     plRender();
   });
+  paintSort(document.getElementById('pl-sort'));
 
   // ---- Bottom sheet: the panel snaps between peek/half/full (UI redesign step 4) ----
   // Tap-to-cycle only (drag physics deferred). The MAP tab lowers to peek; content
@@ -1275,9 +1287,9 @@ document.addEventListener('DOMContentLoaded', function () {
         var pb = document.getElementById('planner-body');
         if (pb && d.planner_html != null) {
           pb.innerHTML = d.planner_html;   // only chips + sort field
-          // Restore the user's filter/sorting after the swap (cycle-button label)
-          var sel = document.getElementById('pl-sort');
-          if (sel) sel.textContent = sortLabel(plSort);
+          // Restore the user's filter/sorting after the swap (cycle-button label
+          // AND the "next mode" hint — the element is fresh markup)
+          paintSort(document.getElementById('pl-sort'));
           var known = false;
           document.querySelectorAll('.pl-chip').forEach(function (c) {
             var same = c.dataset.filter === plFilter.mode &&
