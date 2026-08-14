@@ -1,7 +1,13 @@
 """Read helpers for the frontend — everything per user_id. Grid is global (kv)."""
+import logging
 import sqlite3
 
-from . import db, grid
+from . import config, db, grid
+
+log = logging.getLogger("warroom")
+# Whom we already warned, so a bound planner limit is said once per process
+# instead of on every request. A restart is a fine moment to say it again.
+_limit_warned: set[int] = set()
 
 
 def _grid(conn) -> tuple[float, float]:
@@ -55,7 +61,8 @@ def _gang(conn, uid: int) -> int | None:
     return row["gang_id"] if row else None
 
 
-def planer(conn, uid: int, limit: int = 2000) -> list[dict]:
+def planer(conn, uid: int, limit: int | None = None) -> list[dict]:
+    limit = config.PLANNER_LIMIT if limit is None else limit
     glat, glng = _grid(conn)
     gid = _gang(conn, uid)
     # Sort: fogged cells (count NULL) last, otherwise smallest AP deficit first, then
@@ -69,6 +76,14 @@ def planer(conn, uid: int, limit: int = 2000) -> list[dict]:
            ORDER BY (t.count IS NULL),
                     (COALESCE(t.count,0) - COALESCE(f.my_aps,0)) ASC, my_aps DESC
            LIMIT ?""", (uid, gid, limit)).fetchall()
+    # The cut runs by difficulty, so a bound limit does not merely shorten the
+    # list — it silently removes the HARD cells, including ones right next to
+    # the player, and no sort in the client can bring them back. Said here, in
+    # the log — a notice in the UI would be dead pixels until the day it isn't.
+    if len(rows) >= limit and uid not in _limit_warned:
+        _limit_warned.add(uid)
+        log.warning("planner limit %d reached for user %s — hard cells are being "
+                    "dropped; raise WARROOM_PLANNER_LIMIT", limit, uid)
     out = []
     for r in rows:
         gap = None if r["count"] is None else max(0, r["count"] - r["my_aps"] + 1)

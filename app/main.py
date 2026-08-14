@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from . import auth, config, coverage, crypto, db, i18n, poller, push, queries, roads, routing, social, web
 from .security import SecurityHeadersMiddleware
@@ -56,6 +57,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, title="Warroom")
 
 app.add_middleware(SecurityHeadersMiddleware)
+# The planner ships every target cell it knows, and a big turf is a few hundred
+# KB of very repetitive JSON — it compresses about 11:1. The hosted instance had
+# Cloudflare doing this; anyone self-hosting was paying the full weight, on a
+# phone, in a moving car. minimum_size skips the tiny JSON replies where the
+# framing would cost more than it saves.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 @app.middleware("http")

@@ -25,6 +25,12 @@ POLL_SECONDS = 300
 # simultaneous requests we send to the wdgwars API (be a good citizen).
 POLL_WORKERS = int(os.environ.get("WARROOM_POLL_WORKERS", "4"))
 REINFORCE_BUFFER = 3
+# How many enemy cells the planner may hand the client. It was 2000, and the cut
+# ran by DIFFICULTY — so "nearest first" only ever sorted the 2000 easiest, and a
+# hard cell right next door was invisible no matter which sort you picked. The
+# biggest turf in the wild sits near 6700; 10000 clears everyone with headroom,
+# and gzip carries the payload (~650 KB raw leaves as ~60 KB).
+PLANNER_LIMIT = int(os.environ.get("WARROOM_PLANNER_LIMIT", "10000"))
 # Turf = own AP cells + ring of TURF_RING cells around them (Chebyshev).
 # 4 cells ≈ 6–9 km at ~50°N (0.02° ≈ 2.2 km lat / ~1.4 km lng).
 TURF_RING = 4
