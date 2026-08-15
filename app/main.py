@@ -96,10 +96,12 @@ def get_db():
 
 
 def _poll_one_bg(user_id: int):
-    """First poll of a freshly registered user in its own thread + its own conn."""
+    """First poll of a freshly registered user in its own thread + its own conn.
+    Polls ONLY the new user — a full poll_all here ran all users in parallel
+    with the regular cycle and the two runs trampled each other's writes."""
     conn = db.connect()
     try:
-        poller.poll_all(conn)
+        poller.poll_all(conn, only_user_id=user_id)
     except Exception:
         log.exception("Erst-Poll (bg) für user %s fehlgeschlagen", user_id)
     finally:
@@ -244,9 +246,14 @@ def register(request: Request, password: str = Form(...), api_key: str = Form(..
     else:
         if _reg_full(conn):
             return render(request, "login.html", {"mode": "register", "full": True})
-        uid = auth.create_user(conn, username=username, wdg_user_id=me.get("user_id"),
-                               gang_id=me.get("gang_id"), gang=me.get("gang"),
-                               password=password, key_plain=key)
+        try:
+            uid = auth.create_user(conn, username=username, wdg_user_id=me.get("user_id"),
+                                   gang_id=me.get("gang_id"), gang=me.get("gang"),
+                                   password=password, key_plain=key)
+        except sqlite3.IntegrityError:
+            # Double-submit: the parallel request just created this account with
+            # the same form data — take its row instead of a 500.
+            uid = auth.get_user(conn, username)["id"]
     # First poll in the background (the download from PL takes ~30s) — registration
     # responds immediately, the page shows "loading your turf" in the meantime.
     threading.Thread(target=_poll_one_bg, args=(uid,), daemon=True).start()

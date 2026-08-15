@@ -271,8 +271,11 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
         if virgin:
             rows = [(user_id, grid.key_from_index(i, j), i, j,
                      *grid.center(i, j, glat, glng)) for (i, j) in virgin]
+            # OR IGNORE: the first poll right after registration can overlap the
+            # next regular cycle for this one user — both rewrite the same set,
+            # and in autocommit mode the delete+insert pair is not atomic.
             conn.executemany(
-                "INSERT INTO virgin_cells (user_id, cell_key, i, j, lat, lng) VALUES (?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO virgin_cells (user_id, cell_key, i, j, lat, lng) VALUES (?,?,?,?,?,?)",
                 rows)
 
     # remove cells that are no longer within the turf from territory
@@ -416,8 +419,15 @@ def _set_key_bad(conn, user_id: int, bad: int) -> None:
         log.exception("key_bad-Flag für user %s nicht setzbar", user_id)
 
 
-def poll_all(conn) -> dict:
+def poll_all(conn, only_user_id: int | None = None) -> dict:
+    """only_user_id: first poll of a freshly registered user. Restricting the run
+    to that one user keeps registration from racing the 5-minute cycle across
+    ALL users — two full runs in parallel interleaved diff_territory's
+    delete+insert per user and died on virgin_cells' UNIQUE constraint, plus a
+    burst of database-is-locked (seen 2026-08-15 during a signup wave)."""
     users = conn.execute("SELECT * FROM users").fetchall()
+    if only_user_id is not None:
+        users = [u for u in users if u["id"] == only_user_id]
     if not users:
         return {"users": 0}
     t0 = time.monotonic()
