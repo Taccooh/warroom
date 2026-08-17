@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .git/
 scripts/
+.env
