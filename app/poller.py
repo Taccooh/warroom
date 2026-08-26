@@ -3,6 +3,8 @@
   2. per user: /me (gang), footprint (own APs, refreshed hourly), owner diff → events,
      stats snapshot — all with THIS user's key (the rate limit is per key).
 The key is only briefly decrypted here and never persisted."""
+import contextlib
+import hashlib
 import logging
 import threading
 import time
@@ -21,6 +23,33 @@ _team_lock = threading.Lock()
 # Only one background road-snap drip at a time — a slow Overpass run (mirrors can
 # take 40 s+ per batch when they time out) must never stack up across cycles.
 _drip_lock = threading.Lock()
+
+# Every poll worker writes through this one lock. The connections run in
+# autocommit, so each statement was its own transaction: four workers rewriting
+# territory at once produced thousands of competing lock acquisitions, and on the
+# hourly cold cycle that outran even the 30 s busy_timeout — a user's entire diff
+# died with "database is locked" and lost its events (6 times in 24 h, 2026-08-26).
+# Batching a user's writes into ONE transaction and serialising those transactions
+# in-process removes the self-contention outright. The expensive part of a cycle is
+# the wdgwars round trip, and that stays fully parallel.
+_write_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _write_txn(conn):
+    """A user's write phase as one transaction, serialised across poll workers.
+
+    BEGIN IMMEDIATE takes the write lock up front instead of upgrading from a read
+    halfway through, which is the variant that deadlocks against another writer.
+    """
+    with _write_lock:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        conn.execute("COMMIT")
 
 
 def drip_snap(conn, budget: int) -> int:
@@ -116,12 +145,15 @@ def _num(x):
         return None
 
 
-def refresh_footprint(conn, client: Wdg, user_id: int, glat: float, glng: float) -> int:
+def refresh_footprint(conn, client: Wdg, user_id: int, glat: float, glng: float) -> bool:
     """Build the player's footprint from /api/me/cells: server-aggregated per-cell AP
     counts, uncapped, already the exact ownership-engine number (BLE and filtered
     scans excluded). lat/lng is the cell's SW corner on the same grid as
     member-territories, so cell keys line up for the planner join. The endpoint is
-    always complete → simple full replace, no 500k cap, no BLE filter, no merge."""
+    always complete → simple full replace, no 500k cap, no BLE filter, no merge.
+
+    Returns whether the footprint actually changed — the caller uses that to decide
+    whether the territory diff has anything to look at at all."""
     data = client.me_cells()
     new: dict[str, tuple] = {}
     for c in data.get("cells", []):
@@ -136,13 +168,14 @@ def refresh_footprint(conn, client: Wdg, user_id: int, glat: float, glng: float)
     cur = {r["cell_key"]: r["my_aps"] for r in conn.execute(
         "SELECT cell_key, my_aps FROM footprint_cells WHERE user_id = ?", (user_id,))}
     if len(cur) == len(new) and all(cur.get(k) == v[2] for k, v in new.items()):
-        return len(new)
-    conn.execute("DELETE FROM footprint_cells WHERE user_id = ?", (user_id,))
-    conn.executemany(
-        "INSERT INTO footprint_cells (user_id, cell_key, i, j, my_aps) VALUES (?,?,?,?,?)",
-        [(user_id, k, v[0], v[1], v[2]) for k, v in new.items()])
-    conn.execute("UPDATE users SET footprint_at = ? WHERE id = ?", (time.time(), user_id))
-    return len(new)
+        return False
+    with _write_txn(conn):
+        conn.execute("DELETE FROM footprint_cells WHERE user_id = ?", (user_id,))
+        conn.executemany(
+            "INSERT INTO footprint_cells (user_id, cell_key, i, j, my_aps) VALUES (?,?,?,?,?)",
+            [(user_id, k, v[0], v[1], v[2]) for k, v in new.items()])
+        conn.execute("UPDATE users SET footprint_at = ? WHERE id = ?", (time.time(), user_id))
+    return True
 
 
 def _classify(prev_gid, cur_gid, my_gid):
@@ -212,82 +245,85 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
     old = {row["cell_key"]: row for row in conn.execute(
         "SELECT * FROM territory WHERE user_id = ?", (user_id,))}
     events = 0
-    for k, n in new.items():
-        p = old.get(k)
-        # Only write when the cell is new or its owner data actually changed. In
-        # autocommit mode each cell is its own commit, so rewriting an unchanged turf
-        # (tens of thousands of cells for big players) every cycle was the dominant
-        # cost — in steady state almost nothing changes, so almost nothing is written.
-        # p["towers"] is absent on rows written before the migration → treat as 0
-        p_towers = (p["towers"] if p is not None and "towers" in p.keys() else 0)
-        if p is None or (_num(p["gang_id"]) != n["gid"] or p["count"] != n["count"]
-                         or p["color"] != n["color"] or _num(p["owner_user_id"]) != n["uid"]
-                         or p_towers != n["towers"]):
-            conn.execute(
-                """INSERT INTO territory (user_id, cell_key, i, j, lat, lng, gang_id, gang,
-                         owner_user_id, count, color, towers, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
-                   ON CONFLICT(user_id, cell_key) DO UPDATE SET
-                     gang_id=excluded.gang_id, gang=excluded.gang,
-                     owner_user_id=excluded.owner_user_id, count=excluded.count,
-                     color=excluded.color, towers=excluded.towers,
-                     updated_at=excluded.updated_at""",
-                (user_id, k, n["i"], n["j"], n["lat"], n["lng"], n["gid"], n["gang"],
-                 n["uid"], n["count"], n["color"], n["towers"]),
-            )
-        if initialized and p:
-            prev_gid, cur_gid = _num(p["gang_id"]), n["gid"]
-            kind = _classify(prev_gid, cur_gid, my_gid)
-            if kind:
-                # Proximity: own AP cell > own gang involved > merely in the vicinity
-                if foot.get(k, 0) > 0:
-                    prox = "mine"
-                elif prev_gid == my_gid or cur_gid == my_gid:
-                    prox = "gang"
-                else:
-                    prox = "near"
-                emit = (watch_level == "near"
-                        or (watch_level == "turf" and prox in ("mine", "gang"))
-                        or (watch_level == "own" and prox == "mine"))
-                if emit:
-                    conn.execute(
-                        """INSERT INTO events (user_id, cell_key, i, j, lat, lng, kind,
-                                 old_gang_id, old_gang, new_gang_id, new_gang, my_aps, proximity)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (user_id, k, n["i"], n["j"], n["lat"], n["lng"], kind,
-                         prev_gid, p["gang"], cur_gid, n["gang"], foot.get(k, 0), prox),
-                    )
-                    events += 1
-    # Virgin ground: within the ring but in NO feed — nobody has ever been there.
-    # (new contains all occupied cells of the ring + my own footprint cells.)
-    virgin = [(i, j) for (i, j) in turf if grid.key_from_index(i, j) not in new]
-    # Only rewrite when the virgin set changed (rare) — a read is cheap under WAL,
-    # a full delete+reinsert of thousands of rows every cycle is not.
-    new_vkeys = {grid.key_from_index(i, j) for (i, j) in virgin}
-    cur_vkeys = {r["cell_key"] for r in conn.execute(
-        "SELECT cell_key FROM virgin_cells WHERE user_id = ?", (user_id,))}
-    if new_vkeys != cur_vkeys:
-        conn.execute("DELETE FROM virgin_cells WHERE user_id = ?", (user_id,))
-        if virgin:
-            rows = [(user_id, grid.key_from_index(i, j), i, j,
-                     *grid.center(i, j, glat, glng)) for (i, j) in virgin]
-            # OR IGNORE: the first poll right after registration can overlap the
-            # next regular cycle for this one user — both rewrite the same set,
-            # and in autocommit mode the delete+insert pair is not atomic.
-            conn.executemany(
-                "INSERT OR IGNORE INTO virgin_cells (user_id, cell_key, i, j, lat, lng) VALUES (?,?,?,?,?,?)",
-                rows)
+    # Everything below writes. One transaction for the whole phase, serialised
+    # against the other poll workers — see _write_txn. Reads inside it (the virgin
+    # set) see this transaction's own writes, which is what we want.
+    with _write_txn(conn):
+        for k, n in new.items():
+            p = old.get(k)
+            # Only write when the cell is new or its owner data actually changed —
+            # in steady state almost nothing changes, so almost nothing is written,
+            # and rewriting an unchanged turf (tens of thousands of cells for big
+            # players) every cycle used to be the dominant cost of a poll.
+            # p["towers"] is absent on rows written before the migration → treat as 0
+            p_towers = (p["towers"] if p is not None and "towers" in p.keys() else 0)
+            if p is None or (_num(p["gang_id"]) != n["gid"] or p["count"] != n["count"]
+                             or p["color"] != n["color"] or _num(p["owner_user_id"]) != n["uid"]
+                             or p_towers != n["towers"]):
+                conn.execute(
+                    """INSERT INTO territory (user_id, cell_key, i, j, lat, lng, gang_id, gang,
+                             owner_user_id, count, color, towers, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                       ON CONFLICT(user_id, cell_key) DO UPDATE SET
+                         gang_id=excluded.gang_id, gang=excluded.gang,
+                         owner_user_id=excluded.owner_user_id, count=excluded.count,
+                         color=excluded.color, towers=excluded.towers,
+                         updated_at=excluded.updated_at""",
+                    (user_id, k, n["i"], n["j"], n["lat"], n["lng"], n["gid"], n["gang"],
+                     n["uid"], n["count"], n["color"], n["towers"]),
+                )
+            if initialized and p:
+                prev_gid, cur_gid = _num(p["gang_id"]), n["gid"]
+                kind = _classify(prev_gid, cur_gid, my_gid)
+                if kind:
+                    # Proximity: own AP cell > own gang involved > merely in the vicinity
+                    if foot.get(k, 0) > 0:
+                        prox = "mine"
+                    elif prev_gid == my_gid or cur_gid == my_gid:
+                        prox = "gang"
+                    else:
+                        prox = "near"
+                    emit = (watch_level == "near"
+                            or (watch_level == "turf" and prox in ("mine", "gang"))
+                            or (watch_level == "own" and prox == "mine"))
+                    if emit:
+                        conn.execute(
+                            """INSERT INTO events (user_id, cell_key, i, j, lat, lng, kind,
+                                     old_gang_id, old_gang, new_gang_id, new_gang, my_aps, proximity)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            (user_id, k, n["i"], n["j"], n["lat"], n["lng"], kind,
+                             prev_gid, p["gang"], cur_gid, n["gang"], foot.get(k, 0), prox),
+                        )
+                        events += 1
+        # Virgin ground: within the ring but in NO feed — nobody has ever been there.
+        # (new contains all occupied cells of the ring + my own footprint cells.)
+        virgin = [(i, j) for (i, j) in turf if grid.key_from_index(i, j) not in new]
+        # Only rewrite when the virgin set changed (rare) — a read is cheap under WAL,
+        # a full delete+reinsert of thousands of rows every cycle is not.
+        new_vkeys = {grid.key_from_index(i, j) for (i, j) in virgin}
+        cur_vkeys = {r["cell_key"] for r in conn.execute(
+            "SELECT cell_key FROM virgin_cells WHERE user_id = ?", (user_id,))}
+        if new_vkeys != cur_vkeys:
+            conn.execute("DELETE FROM virgin_cells WHERE user_id = ?", (user_id,))
+            if virgin:
+                rows = [(user_id, grid.key_from_index(i, j), i, j,
+                         *grid.center(i, j, glat, glng)) for (i, j) in virgin]
+                # OR IGNORE: the first poll right after registration can overlap the
+                # next regular cycle for this one user — both rewrite the same set.
+                conn.executemany(
+                    "INSERT OR IGNORE INTO virgin_cells (user_id, cell_key, i, j, lat, lng) VALUES (?,?,?,?,?,?)",
+                    rows)
 
-    # remove cells that are no longer within the turf from territory
-    stale = [k for k in old if k not in new]
-    if stale:
-        conn.executemany("DELETE FROM territory WHERE user_id = ? AND cell_key = ?",
-                         [(user_id, k) for k in stale])
-    # cap the event log per user at the latest 200 (noisier scopes → more events)
-    conn.execute(
-        """DELETE FROM events WHERE user_id = ? AND id NOT IN
-           (SELECT id FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 200)""",
-        (user_id, user_id))
+        # remove cells that are no longer within the turf from territory
+        stale = [k for k in old if k not in new]
+        if stale:
+            conn.executemany("DELETE FROM territory WHERE user_id = ? AND cell_key = ?",
+                             [(user_id, k) for k in stale])
+        # cap the event log per user at the latest 200 (noisier scopes → more events)
+        conn.execute(
+            """DELETE FROM events WHERE user_id = ? AND id NOT IN
+               (SELECT id FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 200)""",
+            (user_id, user_id))
     return events
 
 
@@ -342,7 +378,8 @@ def snapshot_stats(conn, client: Wdg, user_id: int, me: dict,
     )
 
 
-def run_user(conn, user_row, lookup, glat, glng, gctx, team_cache) -> dict:
+def run_user(conn, user_row, lookup, glat, glng, gctx, team_cache,
+             feed_changed: bool = True) -> dict:
     client = Wdg(auth.user_key(user_row))
     uid = user_row["id"]
     me = client.me()
@@ -359,15 +396,28 @@ def run_user(conn, user_row, lookup, glat, glng, gctx, team_cache) -> dict:
     # freeze the whole user's poll (it did once, on 2026-07-21, when me/cells 404'd all
     # day and every user's last_poll stuck). me() above stays the real reachability gate.
     try:
-        refresh_footprint(conn, client, uid, glat, glng)
+        foot_changed = refresh_footprint(conn, client, uid, glat, glng)
     except WdgError as e:
         log.warning("footprint für %s uebersprungen (me/cells): %s",
                     user_row["wdg_username"], e)
+        foot_changed = False
 
     initialized = bool(user_row["terr_init"])
     wl = user_row["watch_level"] if "watch_level" in user_row.keys() else "near"
-    n_events = diff_territory(conn, lookup, glat, glng, uid, my_gid, initialized,
-                              config.TURF_RING, wl)
+    # diff_territory reads exactly two things: the global ownership feed and this
+    # player's footprint. If neither moved, the whole diff is provably a no-op —
+    # events can only come from the feed, territory and virgin cells only from the
+    # feed or the footprint. wdgwars refreshes member-territories roughly once an
+    # hour (the feed is byte-identical in between), so this skips about 11 of every
+    # 12 cycles for a player who is standing still. A user whose territory was never
+    # built yet is never skipped.
+    if initialized and not feed_changed and not foot_changed:
+        n_events = 0
+        skipped = True
+    else:
+        n_events = diff_territory(conn, lookup, glat, glng, uid, my_gid, initialized,
+                                  config.TURF_RING, wl)
+        skipped = False
     if not initialized:
         conn.execute("UPDATE users SET terr_init = 1 WHERE id = ?", (uid,))
     if n_events:
@@ -380,7 +430,7 @@ def run_user(conn, user_row, lookup, glat, glng, gctx, team_cache) -> dict:
         except Exception:
             log.exception("push für %s fehlgeschlagen", user_row["wdg_username"])
     snapshot_stats(conn, client, uid, me, gctx, team_cache)
-    return {"user": user_row["wdg_username"], "events": n_events}
+    return {"user": user_row["wdg_username"], "events": n_events, "skipped": skipped}
 
 
 def _fetch_global(conn, users) -> tuple[list, float, float, dict]:
@@ -434,12 +484,22 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
     cells, glat, glng, gctx = _fetch_global(conn, users)
     if not cells:
         return {"users": len(users), "error": "no global data"}
+    # Fingerprint of everything diff_territory can react to, folded into the pass
+    # that builds the lookup anyway (no extra iteration over 190k cells). TURF_RING
+    # goes in as well: change the ring in a deploy and every turf must be rebuilt,
+    # even though the feed itself did not move.
+    sig = hashlib.sha256(f"ring={config.TURF_RING}\n".encode())
     lookup = {}
     for c in cells:
         la, lo = c.get("lat"), c.get("lng")
         if la is not None and lo is not None:
             lookup[grid.cell_key(la, lo, glat, glng)] = c
+            sig.update(f"{la},{lo},{c.get('gang_id')},{c.get('user_id')},"
+                       f"{c.get('count')},{c.get('color')},{c.get('towers')}\n".encode())
+    feed_sig = sig.hexdigest()
+    feed_changed = feed_sig != db.kv_get(conn, "feed_sig")
     total_events = 0
+    total_skipped = 0
     team_cache: dict = {}
 
     def _one(user_row):
@@ -447,7 +507,8 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
         across threads mid-flight; WAL + busy_timeout serialize the writes)."""
         wconn = db.connect()
         try:
-            return run_user(wconn, user_row, lookup, glat, glng, gctx, team_cache)
+            return run_user(wconn, user_row, lookup, glat, glng, gctx, team_cache,
+                            feed_changed)
         finally:
             wconn.close()
 
@@ -458,7 +519,9 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
         futures = {pool.submit(_one, u): u for u in users}
         for fut, u in futures.items():
             try:
-                total_events += fut.result()["events"]
+                res = fut.result()
+                total_events += res["events"]
+                total_skipped += 1 if res.get("skipped") else 0
                 _set_key_bad(conn, u["id"], 0)   # a key that answers is a good key
             except WdgError as e:
                 # Expected operational failure: a revoked/rotated API key (401) or
@@ -474,8 +537,12 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
             except Exception:
                 log.exception("poll für %s fehlgeschlagen", u["wdg_username"])
     db.kv_set(conn, "last_poll", time.time())
+    db.kv_set(conn, "feed_sig", feed_sig)
     # Kick the background road classification AFTER the cycle's data is in —
     # it runs detached and never delays the next poll.
     drip_snap_async()
+    # feed/skipped are in the log on purpose: they make it visible how often the
+    # upstream feed actually moves, so a silent change in that rhythm is noticed.
     return {"users": len(users), "global_cells": len(cells), "events": total_events,
+            "feed": "neu" if feed_changed else "unveraendert", "diff_skipped": total_skipped,
             "workers": workers, "secs": round(time.monotonic() - t0, 1)}
