@@ -22,10 +22,28 @@ from . import config, db, grid
 
 log = logging.getLogger("warroom.roads")
 
-# Public Overpass instances. The main instance likes to throw 504 under load —
-# then simply ask the next one. If everything fails, we stick with the centre point
-# and do NOT cache it (retried on the next attempt).
+# Public Overpass instances. If everything fails we keep the centre point and do
+# NOT cache it (retried on the next attempt).
+#
+# Two things decide whether an instance may go on this list:
+#   * It must serve the WHOLE planet. A regional extract answers 200 with zero
+#     ways for everything outside its window, and this module cannot tell that
+#     apart from "there really is no road here" — it would cache the lie forever.
+#     overpass.osm.ch is exactly that trap: reachable, fast, and empty outside
+#     Switzerland. Verify coverage against a known-good instance before adding one.
+#   * It must be reachable over IPv4. overpass-api.de resolves to two IPv4
+#     addresses that refuse/time out and is healthy only over IPv6, which the
+#     container does not have — so every request to it ended in "Network is
+#     unreachable": 5784 of them in 24 h, measured 2026-08-26.
+#
+# MIRRORS are rotated per request to spread the load over the healthy ones,
+# FALLBACK is tried afterwards in fixed order — that way a sick instance costs at
+# most one timeout instead of leading every third batch.
 OVERPASS_MIRRORS = (
+    "https://overpass.openstreetmap.fr/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+)
+OVERPASS_FALLBACK = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
@@ -75,10 +93,12 @@ def _query(bboxes: list[tuple[float, float, float, float]],
     ql = f"[out:json][timeout:{TIMEOUT}];({parts});out geom;"
     data = urllib.parse.urlencode({"data": ql}).encode()
     last = None
-    # shift rotates the mirror order so parallel drip workers each lead with a
-    # different instance instead of all hammering the same one.
+    # shift rotates the primary order so parallel drip workers each lead with a
+    # different instance instead of all hammering the same one. The fallbacks keep
+    # their fixed order behind them.
     n_mirrors = len(OVERPASS_MIRRORS)
     mirrors = [OVERPASS_MIRRORS[(shift + x) % n_mirrors] for x in range(n_mirrors)]
+    mirrors += list(OVERPASS_FALLBACK)
     for url in mirrors:
         req = urllib.request.Request(
             url, data=data,
@@ -151,6 +171,16 @@ def snap_cells(conn, cells: list[tuple[int, int]], shift: int = 0,
             # ONE query for drivable roads AND track — the preference between them
             # is decided locally, so no second round trip per chunk.
             ways = _query(boxes, f"{DRIVABLE}|{FALLBACK}", shift=shift)
+            # A whole multi-cell batch coming back empty is what an instance
+            # serving a regional extract — or a truncated response — looks like,
+            # and it is indistinguishable from a genuinely roadless batch. Real
+            # roadless batches are rare, so ask a DIFFERENT instance once before
+            # writing "no road" onto every cell of the chunk. Only when both agree
+            # is it a finding. Same rule as the outage case below: one instance
+            # saying nothing is not evidence of nothing being there.
+            if not ways and len(chunk) > 1:
+                log.info("Overpass: leere Antwort für %d Zellen — Gegenprobe", len(chunk))
+                ways = _query(boxes, f"{DRIVABLE}|{FALLBACK}", shift=shift + 1)
             log.info("Overpass: %d Zellen, %d Wege, %.1f s",
                      len(chunk), len(ways), time.monotonic() - t0)
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as ex:
