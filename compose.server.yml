@@ -11,11 +11,16 @@ services:
       - caddy
     expose:
       - "8000"
-    # Operational knobs, read from a .env file next to this one. Keep them THERE, not in
-    # here: a deploy overwrites this file, .env is never part of the upload and survives.
+    # Operational knobs, read from a .env file next to this one. Keep the VALUES there,
+    # not in here: a deploy overwrites this file, .env is never part of the upload and
+    # survives. But a knob only reaches the container if it is also NAMED here —
+    # compose passes through exactly this list, so .env alone silently does nothing.
     environment:
       WARROOM_MAX_USERS: ${WARROOM_MAX_USERS:-30}
       WARROOM_POLL_WORKERS: ${WARROOM_POLL_WORKERS:-4}
+      WARROOM_PLANNER_LIMIT: ${WARROOM_PLANNER_LIMIT:-25000}
+      WARROOM_ROAD_DRIP: ${WARROOM_ROAD_DRIP:-600}
+      WARROOM_DRIP_WORKERS: ${WARROOM_DRIP_WORKERS:-3}
       WARROOM_TZ: ${WARROOM_TZ:-Europe/Berlin}
     volumes:
       - ./data:/app/data

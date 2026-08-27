@@ -13,3 +13,9 @@ services:
       - ./data:/app/data
     environment:
       - WARROOM_VAPID_SUB=mailto:you@example.com
+      # Cap on enemy cells handed to the planner. The default covers the largest
+      # turf we know of; raise it if the log says "planner limit ... reached",
+      # because the cut runs by difficulty and drops the HARDEST cells first.
+      # - WARROOM_PLANNER_LIMIT=25000
+      # - WARROOM_MAX_USERS=30
+      # - WARROOM_TZ=Europe/Berlin

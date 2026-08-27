@@ -27,10 +27,18 @@ POLL_WORKERS = int(os.environ.get("WARROOM_POLL_WORKERS", "4"))
 REINFORCE_BUFFER = 3
 # How many enemy cells the planner may hand the client. It was 2000, and the cut
 # ran by DIFFICULTY — so "nearest first" only ever sorted the 2000 easiest, and a
-# hard cell right next door was invisible no matter which sort you picked. The
-# biggest turf in the wild sits near 6700; 10000 clears everyone with headroom,
-# and gzip carries the payload (~650 KB raw leaves as ~60 KB).
-PLANNER_LIMIT = int(os.environ.get("WARROOM_PLANNER_LIMIT", "10000"))
+# hard cell right next door was invisible no matter which sort you picked.
+#
+# 10000 was set against the biggest turf we had then (~6700 cells) and lasted
+# thirteen days: the top-ranked player registered with 5387 footprint cells and
+# 13833 enemy cells in his turf, and the limit cut the hardest 3833 of them.
+# 25000 is sized for that account with room to grow, and the cost is only paid
+# by whoever actually has the cells — measured on his turf, the extra 3833 rows
+# add 52 KB gzipped (109 -> 161 KB) and 0.02 s to the query.
+#
+# If the log line below ever fires, raise this rather than wonder why the
+# planner looks short.
+PLANNER_LIMIT = int(os.environ.get("WARROOM_PLANNER_LIMIT", "25000"))
 # Turf = own AP cells + ring of TURF_RING cells around them (Chebyshev).
 # 4 cells ≈ 6–9 km at ~50°N (0.02° ≈ 2.2 km lat / ~1.4 km lng).
 TURF_RING = 4
