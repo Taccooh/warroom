@@ -154,6 +154,11 @@ toolchain.
 | `WARROOM_TZ`          | `Europe/Berlin` | IANA timezone for displayed timestamps (DB stores UTC) |
 | `WARROOM_POLL_WORKERS`| `4`     | Concurrent per-user poll workers (caps simultaneous wdgwars API requests) |
 | `WARROOM_VAPID_SUB`   | *(contact)* | `mailto:` contact sent to push services (set your own when self-hosting) |
+| `WARROOM_PLANNER_LIMIT` | `25000` | Max enemy cells handed to the planner (raise if the log says the cap fired) |
+| `WARROOM_ROAD_DRIP`   | `600`   | Cells per cycle checked against Overpass for a drivable road point |
+| `WARROOM_DRIP_WORKERS`| `3`     | Parallel road-snap workers, each leading with a different Overpass mirror |
+| `WARROOM_ARCHIVE_HOURS` | `1`   | Hours between history samples; `0` disables the archive ([HTTP API](#http-api)) |
+| `WARROOM_ARCHIVE_KEEP_DAYS` | `0` | Retention for the archive in days; `0` keeps everything |
 
 ### Backups — read this once
 
@@ -161,6 +166,58 @@ toolchain.
 database), `master.key` (Fernet master key) and `vapid.pem` (push keys). **A
 database backup without `master.key` is worthless** — the stored API keys can
 never be decrypted again. Back up the whole `data/` directory.
+
+## HTTP API
+
+People build their own tooling on top of warroom. These four endpoints are the
+supported surface for that, and their response shape is meant to stay stable.
+
+**Do not build on `/api/live`.** It is the frontend's private channel and ships
+pre-rendered HTML fragments alongside the data — it changes whenever a template
+does. Everything a script needs is below.
+
+All endpoints require a logged-in session cookie and answer `401` without one:
+
+```bash
+curl -c jar -X POST https://your-instance/login \
+     -d 'username=YOURNAME' -d 'password=YOURPASSWORD'
+curl -b jar 'https://your-instance/api/state'
+```
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /api/state` | Where you stand now: `meta`, `counts`, `cells` (every cell in your turf with owning gang, strength and your own APs), `planer`, `events` |
+| `GET /api/stats` | Your own measured history, one row per poll: APs, credits, gang rank and points |
+| `GET /api/players` | Standings from the latest sample; with `?id=` the history of one player |
+| `GET /api/gangs` | Leaderboard from the latest sample; with `?name=` the history of one gang |
+
+`since=YYYY-MM-DD HH:MM:SS` (UTC) and `limit=` work on all history endpoints.
+`limit` is clamped to 5000.
+
+### The history archive
+
+The wdgwars feed is a snapshot that overwrites itself — it tells you who holds a
+cell right now, never how that changed. Since the poller fetches the **global**
+feed every cycle anyway (every player's cells, with owner and AP count), warroom
+samples it every `WARROOM_ARCHIVE_HOURS` into `player_snap` and `gang_snap`.
+That turns "is this rival gaining on me?" into a query.
+
+Two things worth knowing:
+
+- `player_id` is the **wdgwars** user id from the feed, not a warroom account.
+  Every player in the game appears here, whether or not they use warroom.
+- The archive cannot be backfilled. Whatever is not sampled while the feed is in
+  memory is gone; history starts the day you switch it on.
+
+```bash
+# Rivals by ground held, right now
+curl -b jar 'https://your-instance/api/players?limit=20'
+# How player 1364 developed over the last week
+curl -b jar 'https://your-instance/api/players?id=1364&since=2026-08-21 00:00:00'
+```
+
+Note that `rank`/`points` come from wdgwars while `cells`/`aps`/`players` are
+counted from the feed. They measure different things and may disagree.
 
 ## License
 

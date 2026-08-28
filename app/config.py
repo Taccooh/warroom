@@ -52,3 +52,19 @@ ROAD_DRIP = int(os.environ.get("WARROOM_ROAD_DRIP", "600"))
 # Parallel drip workers; each leads with a different Overpass mirror so the load
 # spreads instead of all requests queueing behind one flaky instance.
 DRIP_WORKERS = int(os.environ.get("WARROOM_DRIP_WORKERS", "3"))
+
+# --- History archive -------------------------------------------------------
+# The global feed carries EVERY player's cells (191k cells, ~1450 players, each
+# with user_id and AP count) on every cycle — and we threw all of it away except
+# the turf slices. Sampling it periodically turns warroom into something the
+# feed alone cannot answer: how a player or gang DEVELOPS over time. Costs no
+# extra upstream request; the feed is already in memory.
+#
+# Hours between samples. 1 = hourly (~35k rows/day at today's player count),
+# 24 = daily (~1.5k rows/day), 0 = archive off. Not every cycle: at 5-minute
+# ticks that would be 415k rows a day for a curve nobody reads that closely.
+ARCHIVE_HOURS = float(os.environ.get("WARROOM_ARCHIVE_HOURS", "1"))
+# Optional retention for the archive, in days. 0 = keep everything (the default,
+# consistent with the rest of the app — see /about, nothing here expires on its
+# own). Set it if disk matters more than long-range history.
+ARCHIVE_KEEP_DAYS = int(os.environ.get("WARROOM_ARCHIVE_KEEP_DAYS", "0"))

@@ -611,6 +611,9 @@ def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
 
 @app.get("/api/state")
 def state(conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    """Current position: own cells, planner, counters, recent events. This is the
+    documented read endpoint for scripts (see README) — /api/live is the frontend's
+    own channel and ships rendered HTML fragments that would only be in the way."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     uid = user["id"]
@@ -619,3 +622,56 @@ def state(conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)
         "cells": queries.revier_cells(conn, uid), "planer": queries.planer(conn, uid),
         "events": [dict(e) for e in queries.recent_events(conn, uid)],
     })
+
+
+# --- History ---------------------------------------------------------------
+# /api/state answers "where do I stand right now". These answer "how did we get
+# here" — the part the app collected all along but never handed out.
+
+def _limit(n: int, cap: int = 5000) -> int:
+    """One shared clamp: a caller asking for a million rows gets the cap, not an
+    error and not the million."""
+    try:
+        return max(1, min(int(n), cap))
+    except (TypeError, ValueError):
+        return cap
+
+
+@app.get("/api/stats")
+def api_stats(since: str | None = None, limit: int = 500,
+              conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    """The caller's own history, one row per poll: APs, credits, gang rank/points."""
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    return JSONResponse({"stats": queries.own_stats(conn, user["id"], since, _limit(limit))})
+
+
+@app.get("/api/players")
+def api_players(id: int | None = None, since: str | None = None, limit: int = 200,
+                conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    """Without `id`: the standings from the latest sample. With `id`: that player's
+    curve. `player_id` is the wdgwars user id from the global feed — every player
+    in the game, not just registered warroom users."""
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    n = _limit(limit)
+    if id is not None:
+        return JSONResponse({"player_id": id,
+                             "history": queries.player_history(conn, id, since, n)})
+    return JSONResponse({"sample": queries.latest_sample(conn),
+                         "players": queries.players_now(conn, n)})
+
+
+@app.get("/api/gangs")
+def api_gangs(name: str | None = None, since: str | None = None, limit: int = 200,
+              conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    """Without `name`: leaderboard as of the latest sample. With `name`: that gang
+    over time. rank/points come from wdgwars, cells/aps/players are counted from
+    the feed — they answer different questions and can disagree."""
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    n = _limit(limit)
+    if name:
+        return JSONResponse({"gang": name,
+                             "history": queries.gang_history(conn, name, since, n)})
+    return JSONResponse({"gangs": queries.gangs_now(conn, n)})

@@ -122,6 +122,35 @@ CREATE INDEX IF NOT EXISTS idx_coverage_user ON coverage_pts(user_id, id);
 -- same (lat,lng,ts client capture time), so INSERT OR IGNORE against this unique key
 -- drops the duplicate instead of piling identical discs on the same spot.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_coverage_dedup ON coverage_pts(user_id, lat, lng, ts);
+-- History archive. NOT tied to a user_id: these are samples of the global feed,
+-- which lists every player's cells whether or not they ever heard of warroom.
+-- The feed itself is a snapshot that overwrites itself — territory only ever holds
+-- "right now", so "is this rival gaining on me?" was unanswerable. Sampling every
+-- ARCHIVE_HOURS makes the curve, and it cannot be backfilled: whatever is not
+-- written while the feed is in memory is gone for good.
+CREATE TABLE IF NOT EXISTS player_snap (
+    ts        TEXT NOT NULL,
+    player_id INTEGER NOT NULL,      -- wdgwars user_id from the feed, NOT users.id
+    gang_id   INTEGER, gang TEXT,
+    cells     INTEGER NOT NULL,      -- cells this player holds
+    aps       INTEGER NOT NULL,      -- summed AP strength across them
+    PRIMARY KEY (ts, player_id)
+);
+CREATE INDEX IF NOT EXISTS idx_player_snap ON player_snap(player_id, ts DESC);
+-- Gang-level sample. rank/points come from the leaderboard the poller already
+-- fetches once per cycle and used to discard for everyone but the caller's own
+-- gang; cells/aps/players are counted from the same feed pass.
+CREATE TABLE IF NOT EXISTS gang_snap (
+    ts      TEXT NOT NULL,
+    gang_id INTEGER,
+    gang    TEXT NOT NULL,
+    rank    INTEGER, points INTEGER,
+    cells   INTEGER NOT NULL,
+    aps     INTEGER NOT NULL,
+    players INTEGER NOT NULL,
+    PRIMARY KEY (ts, gang)
+);
+CREATE INDEX IF NOT EXISTS idx_gang_snap ON gang_snap(gang, ts DESC);
 -- Web push: one row per device (endpoint). lang = language of the device at subscribe time.
 CREATE TABLE IF NOT EXISTS push_subs (
     endpoint   TEXT PRIMARY KEY,

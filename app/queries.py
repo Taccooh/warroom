@@ -253,6 +253,76 @@ def fronts(conn, uid: int, days: int = 7, top: int = 3) -> list[dict]:
     return out
 
 
+# --- History archive -------------------------------------------------------
+# Read side of player_snap/gang_snap (see poller._write_archive). Everything here
+# is global game data, not per-user: the feed lists every player regardless of
+# whether they use warroom. `since` is an ISO timestamp, compared as text — the
+# archive stores 'YYYY-MM-DD HH:MM:SS' UTC, which sorts lexicographically.
+
+def own_stats(conn, uid: int, since: str | None, limit: int) -> list[dict]:
+    """The caller's own measured history: APs, credits, gang rank and points every
+    poll since 2026-07-13. Already collected, never exposed over HTTP until now."""
+    sql = ("SELECT ts, wifi, ble, total, recent_today, recent_7d, credits, gang_rank, "
+           "gang_points, team_total, team_captured, team_lost, team_reinforced "
+           "FROM stats WHERE user_id = ?")
+    args: list = [uid]
+    if since:
+        sql += " AND ts >= ?"
+        args.append(since)
+    sql += " ORDER BY ts DESC LIMIT ?"
+    args.append(limit)
+    return [dict(r) for r in conn.execute(sql, args)]
+
+
+def latest_sample(conn) -> str | None:
+    row = conn.execute("SELECT MAX(ts) t FROM player_snap").fetchone()
+    return row["t"] if row else None
+
+
+def players_now(conn, limit: int) -> list[dict]:
+    """Standings as of the most recent sample — who holds how much ground."""
+    ts = latest_sample(conn)
+    if not ts:
+        return []
+    return [dict(r) for r in conn.execute(
+        "SELECT player_id, gang_id, gang, cells, aps FROM player_snap "
+        "WHERE ts = ? ORDER BY cells DESC, aps DESC LIMIT ?", (ts, limit))]
+
+
+def player_history(conn, player_id: int, since: str | None, limit: int) -> list[dict]:
+    sql = "SELECT ts, gang_id, gang, cells, aps FROM player_snap WHERE player_id = ?"
+    args: list = [player_id]
+    if since:
+        sql += " AND ts >= ?"
+        args.append(since)
+    sql += " ORDER BY ts DESC LIMIT ?"
+    args.append(limit)
+    return [dict(r) for r in conn.execute(sql, args)]
+
+
+def gangs_now(conn, limit: int) -> list[dict]:
+    ts = conn.execute("SELECT MAX(ts) t FROM gang_snap").fetchone()
+    ts = ts["t"] if ts else None
+    if not ts:
+        return []
+    # Unranked gangs (not on the leaderboard) sort last instead of first, which is
+    # what a NULL would do in a plain ORDER BY rank.
+    return [dict(r) for r in conn.execute(
+        "SELECT gang_id, gang, rank, points, cells, aps, players FROM gang_snap "
+        "WHERE ts = ? ORDER BY (rank IS NULL), rank, cells DESC LIMIT ?", (ts, limit))]
+
+
+def gang_history(conn, gang: str, since: str | None, limit: int) -> list[dict]:
+    sql = "SELECT ts, gang_id, rank, points, cells, aps, players FROM gang_snap WHERE gang = ?"
+    args: list = [gang]
+    if since:
+        sql += " AND ts >= ?"
+        args.append(since)
+    sql += " ORDER BY ts DESC LIMIT ?"
+    args.append(limit)
+    return [dict(r) for r in conn.execute(sql, args)]
+
+
 def theatres(conn, uid: int) -> list[dict]:
     glat, glng = _grid(conn)
     pts = [grid.center(r["i"], r["j"], glat, glng) for r in conn.execute(

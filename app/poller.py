@@ -469,6 +469,92 @@ def _set_key_bad(conn, user_id: int, bad: int) -> None:
         log.exception("key_bad-Flag für user %s nicht setzbar", user_id)
 
 
+def _archive_due(conn) -> bool:
+    """Is a history sample due? Cheap kv timestamp check, evaluated BEFORE the
+    feed pass so the tally can ride along in the loop that runs anyway."""
+    if config.ARCHIVE_HOURS <= 0:
+        return False
+    last = db.kv_get(conn, "archive_at")
+    if not last:
+        return True
+    try:
+        return (time.time() - float(last)) >= config.ARCHIVE_HOURS * 3600
+    except (TypeError, ValueError):
+        return True
+
+
+def _tally(cell: dict, players: dict, gangs: dict) -> None:
+    """Fold one feed cell into the per-player and per-gang totals. `count` can be
+    None while wdgwars fogs enemy strength during an event — count the cell, add
+    no strength, rather than dropping the player from the sample entirely."""
+    aps = _num(cell.get("count")) or 0
+    pid = _num(cell.get("user_id"))
+    gid = _num(cell.get("gang_id"))
+    gang = cell.get("gang")
+    if pid is not None:
+        p = players.get(pid)
+        if p is None:
+            p = players[pid] = {"cells": 0, "aps": 0, "gang_id": gid, "gang": gang}
+        p["cells"] += 1
+        p["aps"] += aps
+        # Last seen wins: a player who switched gangs mid-sample is recorded
+        # where the feed puts them now.
+        if gang:
+            p["gang_id"], p["gang"] = gid, gang
+    if gang:
+        g = gangs.get(gang)
+        if g is None:
+            g = gangs[gang] = {"cells": 0, "aps": 0, "gang_id": gid, "members": set()}
+        g["cells"] += 1
+        g["aps"] += aps
+        if pid is not None:
+            g["members"].add(pid)
+
+
+def _write_archive(conn, players: dict, gangs: dict, gctx: dict) -> None:
+    """Persist one sample. Every row of a sample shares ONE timestamp — that is
+    what makes a sample groupable later; per-row datetime('now') would smear a
+    190k-cell pass across seconds and break every GROUP BY ts."""
+    # Same clock as every other table (stats, events all use datetime('now') = UTC),
+    # so a sample can be lined up against them without timezone guesswork.
+    ts = conn.execute("SELECT datetime('now')").fetchone()[0]
+    # The leaderboard is fetched every cycle anyway and was, until now, mined for
+    # exactly one number (the caller's own gang rank) and thrown away.
+    ranks, points = {}, {}
+    try:
+        for idx, g in enumerate(gctx.get("leaderboard", {}).get("gangs", []), 1):
+            if g.get("name"):
+                ranks[g["name"]] = idx
+    except Exception:
+        log.exception("Leaderboard-Raenge nicht lesbar")
+    try:
+        for t in gctx.get("territories", []) or []:
+            if t.get("name"):
+                points[t["name"]] = _num(t.get("points"))
+    except Exception:
+        log.exception("Territories-Punkte nicht lesbar")
+
+    conn.executemany(
+        "INSERT OR REPLACE INTO player_snap (ts, player_id, gang_id, gang, cells, aps) "
+        "VALUES (?,?,?,?,?,?)",
+        [(ts, pid, p["gang_id"], p["gang"], p["cells"], p["aps"])
+         for pid, p in players.items()],
+    )
+    conn.executemany(
+        "INSERT OR REPLACE INTO gang_snap (ts, gang_id, gang, rank, points, cells, aps, players) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        [(ts, g["gang_id"], name, ranks.get(name), points.get(name),
+          g["cells"], g["aps"], len(g["members"]))
+         for name, g in gangs.items()],
+    )
+    db.kv_set(conn, "archive_at", time.time())
+    if config.ARCHIVE_KEEP_DAYS > 0:
+        cutoff = f"-{config.ARCHIVE_KEEP_DAYS} days"
+        conn.execute("DELETE FROM player_snap WHERE ts < datetime('now', ?)", (cutoff,))
+        conn.execute("DELETE FROM gang_snap   WHERE ts < datetime('now', ?)", (cutoff,))
+    log.info("Archiv: %d Spieler, %d Gangs (ts %s)", len(players), len(gangs), ts)
+
+
 def poll_all(conn, only_user_id: int | None = None) -> dict:
     """only_user_id: first poll of a freshly registered user. Restricting the run
     to that one user keeps registration from racing the 5-minute cycle across
@@ -488,6 +574,11 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
     # that builds the lookup anyway (no extra iteration over 190k cells). TURF_RING
     # goes in as well: change the ring in a deploy and every turf must be rebuilt,
     # even though the feed itself did not move.
+    # Decided before the loop so the history tally can ride along in the pass that
+    # happens anyway — sampling must not cost a second walk over 190k cells.
+    archive_due = _archive_due(conn)
+    players: dict = {}
+    gangs: dict = {}
     sig = hashlib.sha256(f"ring={config.TURF_RING}\n".encode())
     lookup = {}
     for c in cells:
@@ -496,6 +587,15 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
             lookup[grid.cell_key(la, lo, glat, glng)] = c
             sig.update(f"{la},{lo},{c.get('gang_id')},{c.get('user_id')},"
                        f"{c.get('count')},{c.get('color')},{c.get('towers')}\n".encode())
+            if archive_due:
+                _tally(c, players, gangs)
+    # Written before the user phase: the sample describes the feed we just read and
+    # must not depend on whether some user's key answers.
+    if archive_due:
+        try:
+            _write_archive(conn, players, gangs, gctx)
+        except Exception:
+            log.exception("Archiv-Sample nicht geschrieben")
     feed_sig = sig.hexdigest()
     feed_changed = feed_sig != db.kv_get(conn, "feed_sig")
     total_events = 0
