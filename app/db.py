@@ -128,18 +128,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_coverage_dedup ON coverage_pts(user_id, la
 -- "right now", so "is this rival gaining on me?" was unanswerable. Sampling every
 -- ARCHIVE_HOURS makes the curve, and it cannot be backfilled: whatever is not
 -- written while the feed is in memory is gone for good.
+-- Two limits of the source that the numbers here cannot show on their own:
+--   * The feed names ONE owner per cell. `cells` is therefore what a player
+--     CONTROLS, not every cell they hold APs in — the game's own cell ranking
+--     counts the latter and runs 2-4x higher (wesmagyar: 17885 there, 4276 here).
+--     Both are valid; they answer different questions. Do not mix them.
+--   * The feed carries gang territory only — every cell in it has a gang_id.
+--     Players in no gang are absent entirely (Farlen226, 3131 cells, invisible).
 CREATE TABLE IF NOT EXISTS player_snap (
     ts        TEXT NOT NULL,
     player_id INTEGER NOT NULL,      -- wdgwars user_id from the feed, NOT users.id
     gang_id   INTEGER, gang TEXT,
-    cells     INTEGER NOT NULL,      -- cells this player holds
+    cells     INTEGER NOT NULL,      -- cells this player CONTROLS (see above)
     aps       INTEGER NOT NULL,      -- summed AP strength across them
     PRIMARY KEY (ts, player_id)
 );
 CREATE INDEX IF NOT EXISTS idx_player_snap ON player_snap(player_id, ts DESC);
--- Gang-level sample. rank/points come from the leaderboard the poller already
--- fetches once per cycle and used to discard for everyone but the caller's own
--- gang; cells/aps/players are counted from the same feed pass.
+-- Gang-level sample. rank/points come from `territories` (which the poller already
+-- fetches and used to mine for the caller's own gang alone); cells/aps/players are
+-- counted from the feed pass. Note that `territories` lists one row per contiguous
+-- AREA, so a gang appears several times: rank repeats, points must be summed.
 CREATE TABLE IF NOT EXISTS gang_snap (
     ts      TEXT NOT NULL,
     gang_id INTEGER,

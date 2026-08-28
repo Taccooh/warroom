@@ -518,21 +518,27 @@ def _write_archive(conn, players: dict, gangs: dict, gctx: dict) -> None:
     # Same clock as every other table (stats, events all use datetime('now') = UTC),
     # so a sample can be lined up against them without timezone guesswork.
     ts = conn.execute("SELECT datetime('now')").fetchone()[0]
-    # The leaderboard is fetched every cycle anyway and was, until now, mined for
-    # exactly one number (the caller's own gang rank) and thrown away.
+    # Rank and points both come from `territories`, and both are easy to get wrong:
+    #
+    # - The leaderboard's ORDER is not the rank. It sorts by AP count, so its first
+    #   entry was Biscuits while the game ranks Black Wire Militia first. Using the
+    #   list index put every gang on the wrong step.
+    # - `territories` lists TERRITORIES, not gangs: one gang appears once per
+    #   contiguous area (Black Wire 5+ times), each with the points of THAT area.
+    #   Taking the first match reported 658 points for a gang holding 761058.
+    #   Rank is per gang and identical across its rows; points must be summed.
     ranks, points = {}, {}
     try:
-        for idx, g in enumerate(gctx.get("leaderboard", {}).get("gangs", []), 1):
-            if g.get("name"):
-                ranks[g["name"]] = idx
-    except Exception:
-        log.exception("Leaderboard-Raenge nicht lesbar")
-    try:
         for t in gctx.get("territories", []) or []:
-            if t.get("name"):
-                points[t["name"]] = _num(t.get("points"))
+            name = t.get("name")
+            if not name:
+                continue
+            r = _num(t.get("rank"))
+            if r is not None:
+                ranks[name] = r
+            points[name] = (points.get(name) or 0) + (_num(t.get("points")) or 0)
     except Exception:
-        log.exception("Territories-Punkte nicht lesbar")
+        log.exception("Territories nicht lesbar")
 
     conn.executemany(
         "INSERT OR REPLACE INTO player_snap (ts, player_id, gang_id, gang, cells, aps) "

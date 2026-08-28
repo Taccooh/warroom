@@ -202,10 +202,16 @@ feed every cycle anyway (every player's cells, with owner and AP count), warroom
 samples it every `WARROOM_ARCHIVE_HOURS` into `player_snap` and `gang_snap`.
 That turns "is this rival gaining on me?" into a query.
 
-Two things worth knowing:
+Four things worth knowing, because the numbers are easy to misread:
 
 - `player_id` is the **wdgwars** user id from the feed, not a warroom account.
-  Every player in the game appears here, whether or not they use warroom.
+- `cells` is what a player **controls**. The feed names one owner per cell, so a
+  player holding APs in a cell someone else controls is not counted there. The
+  game's own cell ranking counts every cell a player has APs in and runs 2–4×
+  higher. Both are valid measures of different things — don't compare them.
+- **Players without a gang are missing entirely.** The feed carries gang
+  territory only; every cell in it has a `gang_id`. A strong solo player can be
+  completely invisible here.
 - The archive cannot be backfilled. Whatever is not sampled while the feed is in
   memory is gone; history starts the day you switch it on.
 
@@ -216,8 +222,9 @@ curl -b jar 'https://your-instance/api/players?limit=20'
 curl -b jar 'https://your-instance/api/players?id=1364&since=2026-08-21 00:00:00'
 ```
 
-Note that `rank`/`points` come from wdgwars while `cells`/`aps`/`players` are
-counted from the feed. They measure different things and may disagree.
+`rank` and `points` come from wdgwars, `cells`/`aps`/`players` are counted from
+the feed — they measure different things and will disagree. A gang can rank high
+on points while controlling fewer cells than the one below it.
 
 ## License
 
