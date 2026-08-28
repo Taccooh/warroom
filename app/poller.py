@@ -580,6 +580,16 @@ def _write_archive(conn, players: dict, gangs: dict, gctx: dict) -> None:
             points[name] = (points.get(name) or 0) + (_num(t.get("points")) or 0)
     except Exception:
         log.exception("Territories nicht lesbar")
+    # Official gang totals — only for the top 50, the rest keeps NULL. Worth having
+    # because our own aps/players count what the FEED shows (controlled cells and
+    # owners seen), which is systematically lower than what a gang really holds.
+    official: dict = {}
+    try:
+        for g in gctx.get("leaderboard", {}).get("gangs", []) or []:
+            if g.get("name"):
+                official[g["name"]] = (_num(g.get("ap_count")), _num(g.get("member_count")))
+    except Exception:
+        log.exception("Gang-Summen nicht lesbar")
 
     conn.executemany(
         "INSERT OR REPLACE INTO player_snap (ts, player_id, gang_id, gang, cells, aps) "
@@ -588,10 +598,11 @@ def _write_archive(conn, players: dict, gangs: dict, gctx: dict) -> None:
          for pid, p in players.items()],
     )
     conn.executemany(
-        "INSERT OR REPLACE INTO gang_snap (ts, gang_id, gang, rank, points, cells, aps, players) "
-        "VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO gang_snap (ts, gang_id, gang, rank, points, cells, aps, "
+        "players, ap_count, member_count) VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(ts, g["gang_id"], name, ranks.get(name), points.get(name),
-          g["cells"], g["aps"], len(g["members"]))
+          g["cells"], g["aps"], len(g["members"]),
+          official.get(name, (None, None))[0], official.get(name, (None, None))[1])
          for name, g in gangs.items()],
     )
     n_names = 0

@@ -247,6 +247,11 @@ curl -b jar 'https://your-instance/api/boards?board=cells&id=1364'
 the feed — they measure different things and will disagree. A gang can rank high
 on points while controlling fewer cells than the one below it.
 
+`/api/gangs` also carries the gang's official `ap_count` and `member_count`. Those
+are the real totals; `aps` and `players` beside them only cover what the feed
+shows (controlled cells, owners seen) and are systematically lower. Both are
+`null` outside the top 50 — that leaderboard is capped, the feed is not.
+
 ## License
 
 [AGPL-3.0-or-later](LICENSE) — © 2026 St4bleground <st4bleground@proton.me>

@@ -148,6 +148,11 @@ CREATE INDEX IF NOT EXISTS idx_player_snap ON player_snap(player_id, ts DESC);
 -- fetches and used to mine for the caller's own gang alone); cells/aps/players are
 -- counted from the feed pass. Note that `territories` lists one row per contiguous
 -- AREA, so a gang appears several times: rank repeats, points must be summed.
+-- ap_count/member_count are the gang's OFFICIAL totals from leaderboard.gangs and
+-- are NULL for everyone outside the top 50 — that list is capped, the feed is not.
+-- They are not the same measure as aps/players next to them: aps sums only the
+-- cells the gang controls, players counts the owners seen in the feed. Official
+-- totals are always the larger and the more complete number.
 CREATE TABLE IF NOT EXISTS gang_snap (
     ts      TEXT NOT NULL,
     gang_id INTEGER,
@@ -156,6 +161,8 @@ CREATE TABLE IF NOT EXISTS gang_snap (
     cells   INTEGER NOT NULL,
     aps     INTEGER NOT NULL,
     players INTEGER NOT NULL,
+    ap_count     INTEGER,
+    member_count INTEGER,
     PRIMARY KEY (ts, gang)
 );
 CREATE INDEX IF NOT EXISTS idx_gang_snap ON gang_snap(gang, ts DESC);
@@ -226,6 +233,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     _add_col(conn, "territory", "towers", "INTEGER NOT NULL DEFAULT 0")
     _add_col(conn, "users", "key_bad", "INTEGER NOT NULL DEFAULT 0")
     _add_col(conn, "users", "last_seen", "TEXT")
+    _add_col(conn, "gang_snap", "ap_count", "INTEGER")
+    _add_col(conn, "gang_snap", "member_count", "INTEGER")
 
 
 def kv_get(conn, key: str, default=None):

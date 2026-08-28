@@ -345,12 +345,14 @@ def gangs_now(conn, limit: int) -> list[dict]:
     # Unranked gangs (not on the leaderboard) sort last instead of first, which is
     # what a NULL would do in a plain ORDER BY rank.
     return [dict(r) for r in conn.execute(
-        "SELECT gang_id, gang, rank, points, cells, aps, players FROM gang_snap "
+        "SELECT gang_id, gang, rank, points, cells, aps, players, ap_count, member_count "
+        "FROM gang_snap "
         "WHERE ts = ? ORDER BY (rank IS NULL), rank, cells DESC LIMIT ?", (ts, limit))]
 
 
 def gang_history(conn, gang: str, since: str | None, limit: int) -> list[dict]:
-    sql = "SELECT ts, gang_id, rank, points, cells, aps, players FROM gang_snap WHERE gang = ?"
+    sql = ("SELECT ts, gang_id, rank, points, cells, aps, players, ap_count, member_count "
+           "FROM gang_snap WHERE gang = ?")
     args: list = [gang]
     if since:
         sql += " AND ts >= ?"
