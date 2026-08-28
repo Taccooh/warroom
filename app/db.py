@@ -159,6 +159,29 @@ CREATE TABLE IF NOT EXISTS gang_snap (
     PRIMARY KEY (ts, gang)
 );
 CREATE INDEX IF NOT EXISTS idx_gang_snap ON gang_snap(gang, ts DESC);
+-- Names for the bare numeric ids the feed hands out. The feed itself never names
+-- anyone; the leaderboard does, across all its lists. Kept as a growing cache
+-- rather than per sample: a name is a fact about a player, not about a moment.
+CREATE TABLE IF NOT EXISTS player_names (
+    player_id INTEGER PRIMARY KEY,
+    username  TEXT NOT NULL,
+    seen_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- The game's own top-50 boards, sampled like everything else. Worth keeping apart
+-- from player_snap for two reasons: they rank by measures the feed does not carry
+-- (raw AP totals, hunts, arcade), and they include players with NO GANG — who are
+-- absent from member-territories entirely. For those, this is the only trace.
+-- `value` is whatever the board ranks by; wifi/ble only exist on the all_time board.
+CREATE TABLE IF NOT EXISTS board_snap (
+    ts        TEXT NOT NULL,
+    board     TEXT NOT NULL,      -- today | week | all_time | cells | hunters | flock | arcade
+    rank      INTEGER NOT NULL,   -- position within that board
+    player_id INTEGER NOT NULL,
+    value     INTEGER,
+    wifi      INTEGER, ble INTEGER,
+    PRIMARY KEY (ts, board, rank)
+);
+CREATE INDEX IF NOT EXISTS idx_board_snap ON board_snap(board, player_id, ts DESC);
 -- Web push: one row per device (endpoint). lang = language of the device at subscribe time.
 CREATE TABLE IF NOT EXISTS push_subs (
     endpoint   TEXT PRIMARY KEY,

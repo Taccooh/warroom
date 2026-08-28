@@ -650,13 +650,18 @@ def api_stats(since: str | None = None, limit: int = 500,
 def api_players(id: int | None = None, since: str | None = None, limit: int = 200,
                 conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
     """Without `id`: the standings from the latest sample. With `id`: that player's
-    curve. `player_id` is the wdgwars user id from the global feed — every player
-    in the game, not just registered warroom users."""
+    curve. `player_id` is the wdgwars user id from the global feed. `username` is
+    filled in where a leaderboard has ever named that id, and is null otherwise —
+    the territory feed carries no names at all.
+
+    Covers players who hold cells IN A GANG. Gang-less players are absent from the
+    feed entirely; the only place they surface is /api/boards."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     n = _limit(limit)
     if id is not None:
         return JSONResponse({"player_id": id,
+                             "username": queries.player_name(conn, id),
                              "history": queries.player_history(conn, id, since, n)})
     return JSONResponse({"sample": queries.latest_sample(conn),
                          "players": queries.players_now(conn, n)})
@@ -675,3 +680,26 @@ def api_gangs(name: str | None = None, since: str | None = None, limit: int = 20
         return JSONResponse({"gang": name,
                              "history": queries.gang_history(conn, name, since, n)})
     return JSONResponse({"gangs": queries.gangs_now(conn, n)})
+
+
+@app.get("/api/boards")
+def api_boards(board: str = "all_time", id: int | None = None,
+               since: str | None = None, limit: int = 50,
+               conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    """The game's own top-50 lists, sampled over time: `today`, `week`, `all_time`,
+    `cells`, `hunters`, `flock`, `arcade`. With `id`, one player's movement on that
+    board — a gap means they left the top 50 at that sample, not that they stopped.
+
+    These carry names, and unlike /api/players they include players with no gang."""
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    if board not in poller.BOARD_VALUE:
+        return JSONResponse({"error": "unknown board",
+                             "known": sorted(poller.BOARD_VALUE)}, status_code=400)
+    n = _limit(limit)
+    if id is not None:
+        return JSONResponse({"board": board, "player_id": id,
+                             "username": queries.player_name(conn, id),
+                             "history": queries.board_history(conn, board, id, since, n)})
+    return JSONResponse({"board": board, "ranks_by": poller.BOARD_VALUE[board],
+                         "entries": queries.boards_now(conn, board, n)})

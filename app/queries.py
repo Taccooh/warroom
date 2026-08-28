@@ -280,18 +280,55 @@ def latest_sample(conn) -> str | None:
 
 
 def players_now(conn, limit: int) -> list[dict]:
-    """Standings as of the most recent sample — who holds how much ground."""
+    """Standings as of the most recent sample — who holds how much ground.
+    `username` is NULL for anyone who never appeared on a leaderboard: the feed
+    hands out bare ids, only the boards carry names."""
     ts = latest_sample(conn)
     if not ts:
         return []
     return [dict(r) for r in conn.execute(
-        "SELECT player_id, gang_id, gang, cells, aps FROM player_snap "
-        "WHERE ts = ? ORDER BY cells DESC, aps DESC LIMIT ?", (ts, limit))]
+        "SELECT p.player_id, n.username, p.gang_id, p.gang, p.cells, p.aps "
+        "FROM player_snap p LEFT JOIN player_names n ON n.player_id = p.player_id "
+        "WHERE p.ts = ? ORDER BY p.cells DESC, p.aps DESC LIMIT ?", (ts, limit))]
 
 
 def player_history(conn, player_id: int, since: str | None, limit: int) -> list[dict]:
     sql = "SELECT ts, gang_id, gang, cells, aps FROM player_snap WHERE player_id = ?"
     args: list = [player_id]
+    if since:
+        sql += " AND ts >= ?"
+        args.append(since)
+    sql += " ORDER BY ts DESC LIMIT ?"
+    args.append(limit)
+    return [dict(r) for r in conn.execute(sql, args)]
+
+
+def player_name(conn, player_id: int) -> str | None:
+    r = conn.execute("SELECT username FROM player_names WHERE player_id = ?",
+                     (player_id,)).fetchone()
+    return r["username"] if r else None
+
+
+def boards_now(conn, board: str, limit: int) -> list[dict]:
+    """One of the game's top-50 lists as of the latest sample, names resolved."""
+    ts = conn.execute("SELECT MAX(ts) t FROM board_snap WHERE board = ?",
+                      (board,)).fetchone()
+    ts = ts["t"] if ts else None
+    if not ts:
+        return []
+    return [dict(r) for r in conn.execute(
+        "SELECT b.rank, b.player_id, n.username, b.value, b.wifi, b.ble "
+        "FROM board_snap b LEFT JOIN player_names n ON n.player_id = b.player_id "
+        "WHERE b.board = ? AND b.ts = ? ORDER BY b.rank LIMIT ?", (board, ts, limit))]
+
+
+def board_history(conn, board: str, player_id: int, since: str | None,
+                  limit: int) -> list[dict]:
+    """How one player moved on one board. Gaps mean they dropped out of the top 50
+    at that sample — not that they stopped playing."""
+    sql = ("SELECT ts, rank, value, wifi, ble FROM board_snap "
+           "WHERE board = ? AND player_id = ?")
+    args: list = [board, player_id]
     if since:
         sql += " AND ts >= ?"
         args.append(since)

@@ -190,6 +190,7 @@ curl -b jar 'https://your-instance/api/state'
 | `GET /api/stats` | Your own measured history, one row per poll: APs, credits, gang rank and points |
 | `GET /api/players` | Standings from the latest sample; with `?id=` the history of one player |
 | `GET /api/gangs` | Leaderboard from the latest sample; with `?name=` the history of one gang |
+| `GET /api/boards` | The game's own top-50 lists over time; `?board=` selects one, `?id=` follows one player on it |
 
 `since=YYYY-MM-DD HH:MM:SS` (UTC) and `limit=` work on all history endpoints.
 `limit` is clamped to 5000.
@@ -220,6 +221,26 @@ Four things worth knowing, because the numbers are easy to misread:
 curl -b jar 'https://your-instance/api/players?limit=20'
 # How player 1364 developed over the last week
 curl -b jar 'https://your-instance/api/players?id=1364&since=2026-08-21 00:00:00'
+```
+
+### Leaderboards and names
+
+The territory feed hands out numeric ids and no names. The game's leaderboards do
+both, so warroom samples them alongside and keeps a growing `player_id → username`
+table. Names then appear in `/api/players` and `/api/boards`; they are `null` for
+anyone who has never placed on a board.
+
+Sampling the boards also covers the blind spot above: **they are the only place a
+gang-less player appears at all.** Seven boards are kept — `today`, `week`,
+`all_time`, `cells`, `hunters`, `flock`, `arcade` — each with the position and the
+figure it ranks by (`ranks_by` in the response says which). `all_time` additionally
+carries `wifi` and `ble` split out.
+
+```bash
+# Who leads all-time, with names
+curl -b jar 'https://your-instance/api/boards?board=all_time'
+# One player's climb; gaps mean they were outside the top 50 that hour
+curl -b jar 'https://your-instance/api/boards?board=cells&id=1364'
 ```
 
 `rank` and `points` come from wdgwars, `cells`/`aps`/`players` are counted from

@@ -511,6 +511,47 @@ def _tally(cell: dict, players: dict, gangs: dict) -> None:
             g["members"].add(pid)
 
 
+# Which figure each leaderboard ranks by. The lists carry different measures, so
+# one generic `value` column plus this map beats seven near-empty columns.
+BOARD_VALUE = {
+    "today": "total", "week": "total", "all_time": "total", "cells": "cells",
+    "hunters": "earned", "flock": "spotted", "arcade": "total_signals",
+}
+
+
+def _write_boards(conn, ts: str, lb: dict) -> int:
+    """Sample the game's own top-50 lists and harvest the names that come with them.
+
+    Two things make this worth its own table. The boards rank by measures the
+    territory feed does not carry at all (raw AP totals, hunts, arcade), and they
+    are the ONLY place a gang-less player shows up — member-territories is gang
+    territory exclusively, so a strong solo player is otherwise invisible."""
+    rows, names = [], {}
+    for board, field in BOARD_VALUE.items():
+        for rank, e in enumerate(lb.get(board, []) or [], 1):
+            pid = _num(e.get("user_id"))
+            if pid is None:
+                continue
+            rows.append((ts, board, rank, pid, _num(e.get(field)),
+                         _num(e.get("wifi")), _num(e.get("ble"))))
+            if e.get("username"):
+                names[pid] = e["username"]
+    if rows:
+        conn.executemany(
+            "INSERT OR REPLACE INTO board_snap (ts, board, rank, player_id, value, wifi, ble) "
+            "VALUES (?,?,?,?,?,?,?)", rows)
+    if names:
+        # A rename should win, so overwrite — but only touch the row when the name
+        # actually changed, to keep pointless writes out of the WAL every hour.
+        conn.executemany(
+            "INSERT INTO player_names (player_id, username, seen_at) "
+            "VALUES (?,?,datetime('now')) "
+            "ON CONFLICT(player_id) DO UPDATE SET username = excluded.username, "
+            "seen_at = excluded.seen_at WHERE username != excluded.username",
+            list(names.items()))
+    return len(names)
+
+
 def _write_archive(conn, players: dict, gangs: dict, gctx: dict) -> None:
     """Persist one sample. Every row of a sample shares ONE timestamp — that is
     what makes a sample groupable later; per-row datetime('now') would smear a
@@ -553,12 +594,21 @@ def _write_archive(conn, players: dict, gangs: dict, gctx: dict) -> None:
           g["cells"], g["aps"], len(g["members"]))
          for name, g in gangs.items()],
     )
+    n_names = 0
+    try:
+        n_names = _write_boards(conn, ts, gctx.get("leaderboard", {}) or {})
+    except Exception:
+        log.exception("Ranglisten nicht geschrieben")
     db.kv_set(conn, "archive_at", time.time())
     if config.ARCHIVE_KEEP_DAYS > 0:
         cutoff = f"-{config.ARCHIVE_KEEP_DAYS} days"
         conn.execute("DELETE FROM player_snap WHERE ts < datetime('now', ?)", (cutoff,))
         conn.execute("DELETE FROM gang_snap   WHERE ts < datetime('now', ?)", (cutoff,))
-    log.info("Archiv: %d Spieler, %d Gangs (ts %s)", len(players), len(gangs), ts)
+        conn.execute("DELETE FROM board_snap  WHERE ts < datetime('now', ?)", (cutoff,))
+        # player_names is deliberately NOT pruned: it is a lookup table, and losing
+        # a name turns every historical row back into a bare id.
+    log.info("Archiv: %d Spieler, %d Gangs, %d Namen (ts %s)",
+             len(players), len(gangs), n_names, ts)
 
 
 def poll_all(conn, only_user_id: int | None = None) -> dict:
