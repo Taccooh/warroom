@@ -20,9 +20,9 @@ https://warroom.mechanics-toolbox.org/about
   near), front detection and web push ("raven post")
 - **Planner** — easiest flips first: enemy cells with the smallest AP gap, free
   cells, and *virgin land* (cells nobody ever scanned), sorted by real GPS distance
-- **Loot tour** — pick cells, get an auto-optimized route with waypoints snapped
-  to actual roads (OpenStreetMap) and the real driving route drawn in-app
-  (OSRM), in-app guidance, or export: Google Maps hand-off (10 stops), or a
+- **Loot tour** — pick cells, get an auto-optimized route by car, bike or on foot
+  (each with its own routing profile), waypoints snapped to actual ways
+  (OpenStreetMap) and the real route drawn in-app (OSRM), in-app guidance, or export: Google Maps hand-off (10 stops), or a
   GPX/KML file with every stop plus the routed road line, for OsmAnd, Locus,
   Garmin, Komoot and Google Earth
 - **Coverage brush** — opt-in GPS recording of the ground you actually covered
@@ -50,8 +50,9 @@ It is:
 
 Beyond wdgwars, this is what leaves the machine: **your browser** loads map
 tiles from `tile.openstreetmap.org` (they see your viewport and your IP). The
-**server** asks Overpass for road geometry per map cell, and OSRM for the
-driving route — that request carries the tour stops plus your own position as
+**server** asks Overpass for way geometry per map cell, and OSRM for the route
+in your chosen travel mode (car, bike or foot — separate engines at the same
+provider) — that request carries the tour stops plus your own position as
 the start point, resent live while in-app guidance runs. Tapping the Google Maps
 or Street View export hands those stop coordinates to Google. No analytics, no
 trackers, no update check, no phone-home of any kind.
@@ -218,7 +219,7 @@ AUTH="Authorization: Bearer wr_xxxxxxxx"
 | `GET /api/players` | Standings from the latest sample; with `?id=` the history of one player |
 | `GET /api/gangs` | Leaderboard from the latest sample; with `?name=` the history of one gang |
 | `GET /api/boards` | The game's own top-50 lists over time; `?board=` selects one, `?id=` follows one player on it |
-| `GET /api/virgin` | Never-scanned cells in your turf, with a drivable road point each — raw material for route planning |
+| `GET /api/virgin` | Never-scanned cells in your turf with a reachable point each; `?mode=car\|bike\|foot` — raw material for route planning |
 
 `since=YYYY-MM-DD HH:MM:SS` (UTC) and `limit=` work on all history endpoints.
 `limit` is clamped to 5000.
@@ -227,8 +228,16 @@ AUTH="Authorization: Bearer wr_xxxxxxxx"
 
 `/api/virgin` lists the cells in your turf nobody has ever scanned — what a route
 planner needs. Narrow it with `bbox=lat_min,lat_max,lng_min,lng_max`; by default
-only cells with a known drivable road come back (`roads_only=false` also returns
+only cells you can actually reach come back (`roads_only=false` also returns
 unclassified ones).
+
+**Not everyone wardrives.** `mode=car` (default), `bike` or `foot` decides what
+counts as reachable: a car needs a road, a walker also takes footpaths, steps and
+bridleways, a cyclist the subset they may ride. Cells a car cannot reach used to
+vanish from every list — for a war-walker they are perfectly good targets. Without
+`mode=` the account's own setting applies (planner tab → *Getting around*), so a
+script sees the same world as the app. The tour is routed on the matching OSRM
+profile too.
 
 ```bash
 curl -H "$AUTH" '…/api/virgin?bbox=42.3691,42.3979,-71.2205,-71.1381'
@@ -242,9 +251,11 @@ curl -H "$AUTH" '…/api/virgin?bbox=42.3691,42.3979,-71.2205,-71.1381'
 
 **Route to `rlat`/`rlng`, not `lat`/`lng`.** The latter is the cell centre, which
 lands in a field, a forest or a lake often enough to ruin a drive — that is the
-whole reason the road points exist. `road` is `1` when a drivable point is known,
-`0` when the cell has none (water, woods), `null` when the background snapper has
-not reached it yet.
+whole reason the snapped points exist. `road` is `1` when a drivable point is
+known, `0` when the cell has none (water, woods), `null` when the background
+snapper has not reached it yet; `path` then carries the OSM way type
+(`path`, `footway`, `bridleway`, `cycleway`, `steps`) for cells only a walker or
+cyclist can reach.
 
 ### The history archive
 

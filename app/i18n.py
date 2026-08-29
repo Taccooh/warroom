@@ -156,6 +156,11 @@ STRINGS = {
     "info_turf": {"en": "Turf", "de": "Revier"},
     "cells_word": {"en": "cells", "de": "Zellen"},
     "info_last_poll": {"en": "Last poll", "de": "Zuletzt gepollt"},
+    # Travel mode: not everyone wardrives
+    "travel_setting": {"en": "Getting around", "de": "Unterwegs mit"},
+    "travel_car": {"en": "By car", "de": "Auto"},
+    "travel_bike": {"en": "By bike", "de": "Fahrrad"},
+    "travel_foot": {"en": "On foot", "de": "zu Fuß"},
     # Read-only API tokens
     "tok_head": {"en": "API tokens", "de": "API-Schlüssel"},
     "tok_lead": {"en": "For scripts that only need to read your data. A token cannot "

@@ -70,7 +70,7 @@ def session_user(conn, token: str | None) -> sqlite3.Row | None:
     return conn.execute(
         """SELECT u.id, u.wdg_username, u.wdg_user_id, u.gang_id, u.gang,
                   u.password_hash, u.created_at, u.last_poll, u.footprint_at,
-                  u.terr_init, u.watch_level, u.key_bad
+                  u.terr_init, u.watch_level, u.key_bad, u.travel_mode
            FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token = ? AND s.created_at > datetime('now', '-60 days')""", (token,)
     ).fetchone()
@@ -117,7 +117,7 @@ def token_user(conn, token: str | None) -> sqlite3.Row | None:
     row = conn.execute(
         """SELECT u.id, u.wdg_username, u.wdg_user_id, u.gang_id, u.gang,
                   u.password_hash, u.created_at, u.last_poll, u.footprint_at,
-                  u.terr_init, u.watch_level, u.key_bad, t.id AS token_id
+                  u.terr_init, u.watch_level, u.key_bad, u.travel_mode, t.id AS token_id
            FROM api_tokens t JOIN users u ON u.id = t.user_id
            WHERE t.token_hash = ?""", (_token_hash(token),)).fetchone()
     if row:

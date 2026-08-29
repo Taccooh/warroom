@@ -150,18 +150,19 @@ def _theatre_centers(conn, uid: int) -> list[tuple[float, float]]:
     return [(sum(p[0] for p in g) / len(g), sum(p[1] for p in g) / len(g)) for g in groups]
 
 
-def virgin_cells(conn, uid: int, limit: int | None = None) -> list[int]:
+def virgin_cells(conn, uid: int, limit: int | None = None,
+                 mode: str | None = None) -> list[int]:
     """Never-scanned ground within the ring — as FLAT cell indices [i,j,i,j,…].
     There can be thousands of these; lat/lng are computable from the grid, so they
     don't need to go over the wire (saves ~80 % payload for a large turf).
     Sorted by proximity to the nearest own theatre."""
-    # Exclude cells already known to have no drivable road (found=0 in the road cache)
-    # — those sit in water/forest (the Lake Erie problem) and are pointless to raid.
-    # Unknown cells (not yet snapped) stay in until the client snaps them.
+    # Exclude cells nothing can reach in this mode — for a car that is found=0
+    # (water/forest, the Lake Erie problem), while a walker or cyclist still gets
+    # the ones served only by a path. Unclassified cells stay in until snapped.
     rows = conn.execute(
-        """SELECT v.i, v.j, v.lat, v.lng FROM virgin_cells v
-           LEFT JOIN cell_roads r ON r.cell_key = v.cell_key
-           WHERE v.user_id = ? AND (r.found IS NULL OR r.found = 1)""", (uid,)).fetchall()
+        f"""SELECT v.i, v.j, v.lat, v.lng FROM virgin_cells v
+            LEFT JOIN cell_roads r ON r.cell_key = v.cell_key
+            WHERE v.user_id = ? AND {mode_where(mode)}""", (uid,)).fetchall()
     cells = [(r["i"], r["j"], r["lat"], r["lng"]) for r in rows]
     centers = _theatre_centers(conn, uid)
     if centers:
@@ -309,8 +310,29 @@ def player_name(conn, player_id: int) -> str | None:
     return r["username"] if r else None
 
 
+# How "reachable" is decided per travel mode. A car needs a road; a walker also
+# accepts any path; a bike accepts the subset it may legally ride (mirrors
+# roads.BIKE_OK, spelled out here so the SQL stays readable).
+MODE_REACH = {
+    "car":  "r.found = 1",
+    "foot": "(r.found = 1 OR (r.path_kind IS NOT NULL AND r.path_kind != ''))",
+    "bike": "(r.found = 1 OR r.path_kind IN ('path','cycleway','bridleway','track'))",
+}
+
+
+def mode_reach(mode: str | None) -> str:
+    """Strictly reachable: only cells we have positively classified."""
+    return MODE_REACH.get((mode or "").lower(), MODE_REACH["car"])
+
+
+def mode_where(mode: str | None) -> str:
+    """Reachable OR not yet classified — unknown is not a finding, so an
+    unchecked cell stays visible until the drip has had its say."""
+    return f"(r.found IS NULL OR {mode_reach(mode)})"
+
+
 def virgin_targets(conn, uid: int, bbox: tuple | None, roads_only: bool,
-                   limit: int) -> list[dict]:
+                   limit: int, mode: str | None = None) -> list[dict]:
     """Never-scanned cells as full records — for route planners.
 
     Unlike virgin_cells() (flat indices, payload-trimmed for our own map) this
@@ -322,18 +344,24 @@ def virgin_targets(conn, uid: int, bbox: tuple | None, roads_only: bool,
 
     road: 1 = drivable point known, 0 = none in this cell (water/woods),
     null = not classified by the background snapper yet."""
+    # rlat/rlng: the car road point when there is one, otherwise the path point.
+    # A cell with a road is reachable on foot too, so the road point stays the
+    # better target; only where a car cannot go does the path take over.
     sql = ["""SELECT v.cell_key, v.i, v.j, v.lat, v.lng,
-                     r.lat AS rlat, r.lng AS rlng, r.found AS road
+                     COALESCE(r.lat, r.path_lat) AS rlat,
+                     COALESCE(r.lng, r.path_lng) AS rlng,
+                     r.found AS road, r.path_kind AS path
               FROM virgin_cells v
               LEFT JOIN cell_roads r ON r.cell_key = v.cell_key
               WHERE v.user_id = ?"""]
     args: list = [uid]
     if roads_only:
-        sql.append("AND r.found = 1")
+        # "Only where I can actually get to" — judged per mode, not per car.
+        sql.append("AND " + mode_reach(mode))
     else:
-        # Cells known to hold no road are useless for a drive either way; unknown
-        # ones stay in so a caller can snap them or take the chance.
-        sql.append("AND (r.found IS NULL OR r.found = 1)")
+        # Cells with nothing reachable are useless either way; unclassified ones
+        # stay in so a caller can snap them or take the chance.
+        sql.append("AND " + mode_where(mode))
     if bbox:
         sql.append("AND v.lat BETWEEN ? AND ? AND v.lng BETWEEN ? AND ?")
         args += [bbox[0], bbox[1], bbox[2], bbox[3]]

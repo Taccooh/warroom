@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS users (
     footprint_at  REAL NOT NULL DEFAULT 0,
     terr_init     INTEGER NOT NULL DEFAULT 0,
     watch_level   TEXT NOT NULL DEFAULT 'near',  -- own | turf | near
+    -- How this player gets around. Decides which cells count as reachable and
+    -- which OSRM profile routes the tour: not everyone wardrives.
+    travel_mode   TEXT NOT NULL DEFAULT 'car',    -- car | bike | foot
     -- 1 once wdgwars answered 401 for this key (rotated or revoked): the
     -- watcher is dead until a fresh key is pasted, and the user must be told.
     key_bad       INTEGER NOT NULL DEFAULT 0,
@@ -115,11 +118,21 @@ CREATE TABLE IF NOT EXISTS virgin_cells (
 );
 -- Road point per cell (global, not per user): the cell centre often lies in
 -- woods/fields/rivers → routes to nowhere. found=0 means "there is none in this cell".
+-- path_* is the same idea for people who do not drive. found=0 means "no road for
+-- a CAR", which used to remove the cell from every list — but a war-walker or a
+-- war-biker can reach a cell served by a footpath just fine. Only cells with
+-- found=0 are re-checked against path types, so the backfill is thousands of
+-- cells rather than the whole cache.
+-- path_kind keeps the OSM highway value (path/footway/bridleway/cycleway/steps/
+-- track) instead of a yes-no flag: suitability differs per mode, and deciding it
+-- at read time means a changed rule needs no new Overpass run. NULL = not checked
+-- yet, '' = checked and nothing there.
 CREATE TABLE IF NOT EXISTS cell_roads (
     cell_key TEXT PRIMARY KEY,
     lat REAL, lng REAL,
     found INTEGER NOT NULL DEFAULT 0,
-    ts   TEXT NOT NULL DEFAULT (datetime('now'))
+    ts   TEXT NOT NULL DEFAULT (datetime('now')),
+    path_lat REAL, path_lng REAL, path_kind TEXT
 );
 -- Coverage brush: GPS breadcrumbs logged while wardriving. Each point carries the
 -- operator's expected reception radius, so the union of the discs is the ground truly
@@ -252,6 +265,10 @@ def init_db(conn: sqlite3.Connection) -> None:
     _add_col(conn, "users", "last_seen", "TEXT")
     _add_col(conn, "gang_snap", "ap_count", "INTEGER")
     _add_col(conn, "gang_snap", "member_count", "INTEGER")
+    _add_col(conn, "cell_roads", "path_lat", "REAL")
+    _add_col(conn, "cell_roads", "path_lng", "REAL")
+    _add_col(conn, "cell_roads", "path_kind", "TEXT")
+    _add_col(conn, "users", "travel_mode", "TEXT NOT NULL DEFAULT 'car'")
 
 
 def kv_get(conn, key: str, default=None):

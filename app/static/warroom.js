@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   var watchSelect = document.getElementById('watch-level-select');
   if (watchSelect) watchSelect.addEventListener('change', function () { this.form.submit(); });
+  var travelSelect = document.getElementById('travel-mode-select');
+  if (travelSelect) travelSelect.addEventListener('change', function () { this.form.submit(); });
 
   // Per-request data, handed over as a JSON island (not executable — exempt
   // from script-src) so this file can stay static instead of Jinja-templated.
@@ -32,6 +34,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var HISTORY = DATA.history;
   var initTab = DATA.initTab;
   var POLL_EPOCH = DATA.pollEpoch;
+  var TRAVEL = DATA.travelMode || 'car';
   // Data-freshness clock (step 7): reset whenever fresh poll data lands (page render
   // or an applyLive). The here-banner shows "live" / "Nm" from it — a glanceable
   // "is my data still updating?" that goes stale if the poller ever stalls.
@@ -1570,7 +1573,7 @@ document.addEventListener('DOMContentLoaded', function () {
       var fromPos = !!start;
       var seq = ++routeSeq;
       fetch('/api/route', {method: 'POST', headers: {'Content-Type': 'application/json',
-        'X-Requested-With': 'fetch'}, body: JSON.stringify({pts: pts})})
+        'X-Requested-With': 'fetch'}, body: JSON.stringify({pts: pts, mode: TRAVEL})})
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           if (seq !== routeSeq) return;   // a newer tour superseded this request
@@ -1624,7 +1627,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (pts.length < 2) return;
     var seq = ++routeSeq;
     fetch('/api/route', {method: 'POST', headers: {'Content-Type': 'application/json',
-      'X-Requested-With': 'fetch'}, body: JSON.stringify({pts: pts})})
+      'X-Requested-With': 'fetch'}, body: JSON.stringify({pts: pts, mode: TRAVEL})})
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (seq !== routeSeq) return;
@@ -1748,9 +1751,10 @@ document.addEventListener('DOMContentLoaded', function () {
       map.dragging.enable();
       if (!moved) return;   // a plain tap moves nothing
       var raw = m.getLatLng();
-      // magnet: snap onto the nearest drivable road; raw point stands on failure
+      // magnet: snap onto the nearest point routable in the current travel
+      // mode; raw point stands on failure
       fetch('/api/nearest', {method: 'POST', headers: {'Content-Type': 'application/json',
-        'X-Requested-With': 'fetch'}, body: JSON.stringify({lat: raw.lat, lng: raw.lng})})
+        'X-Requested-With': 'fetch'}, body: JSON.stringify({lat: raw.lat, lng: raw.lng, mode: TRAVEL})})
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) { commit((d && d.ok && d.pt) ? {lat: d.pt[0], lng: d.pt[1]} : raw); })
         .catch(function () { commit(raw); });

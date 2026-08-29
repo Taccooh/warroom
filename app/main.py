@@ -336,6 +336,19 @@ def set_watch(level: str = Form(...), conn: sqlite3.Connection = Depends(get_db)
     return RedirectResponse("/?tab=waechter", status_code=303)
 
 
+@app.post("/travel")
+def set_travel(mode: str = Form(...), conn: sqlite3.Connection = Depends(get_db),
+               user=Depends(current_user)):
+    """How the player gets around. Changes both which cells count as reachable
+    and which OSRM profile routes the tour — a walker on a car route is sent
+    around the block instead of down the footpath."""
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    if mode in ("car", "bike", "foot"):
+        conn.execute("UPDATE users SET travel_mode = ? WHERE id = ?", (mode, user["id"]))
+    return RedirectResponse("/?tab=planer", status_code=303)
+
+
 # ---- Web push ----
 @app.get("/push/pubkey")
 def push_pubkey(user=Depends(current_user)):
@@ -531,9 +544,10 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
     if not user:
         return RedirectResponse("/login", status_code=303)
     uid = user["id"]
+    tmode = user["travel_mode"] if "travel_mode" in user.keys() else "car"
     st = queries.latest_stats(conn, uid)
     _pl = queries.planer(conn, uid)
-    _vg = queries.virgin_cells(conn, uid)
+    _vg = queries.virgin_cells(conn, uid, mode=tmode)
     _tg = queries.targets(conn, uid)
     ctx = {
         "meta": queries.meta(conn, user), "stats": st,
@@ -551,6 +565,7 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
         "friends": social.overview(conn, uid), "sharing": social.sharing_state(conn, uid),
         "history": queries.stats_history(conn, uid),
         "watch_level": user["watch_level"] if "watch_level" in user.keys() else "near",
+        "travel_mode": tmode,
         "user_count": conn.execute("SELECT COUNT(*) FROM users").fetchone()[0],
         "tab": request.query_params.get("tab"), "pw": request.query_params.get("pw"),
         "del_state": request.query_params.get("del"),
@@ -585,32 +600,36 @@ async def snap(request: Request, conn: sqlite3.Connection = Depends(get_db),
 
 @app.post("/api/route")
 async def api_route(request: Request, user=Depends(current_user)):
-    """Ordered tour stops → real driving route (server-side OSRM proxy; the
-    strict CSP forbids client calls to third parties). Point 0 is the user's own
-    position whenever one is set — see routing.py, and /about says so."""
+    """Ordered tour stops → the real route for the chosen travel mode (server-side
+    OSRM proxy; the strict CSP forbids client calls to third parties). Point 0 is
+    the user's own position whenever one is set — see routing.py, and /about says
+    so. `mode` is car (default), bike or foot; an unknown one falls back to car."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     try:
         body = await request.json()
         pts = body.get("pts") or []
+        mode = body.get("mode")
     except (ValueError, TypeError):
         return JSONResponse({"error": "bad request"}, status_code=400)
-    r = await asyncio.to_thread(routing.route, pts)
+    r = await asyncio.to_thread(routing.route, pts, mode)
     return JSONResponse({"ok": bool(r), "route": r})
 
 
 @app.post("/api/nearest")
 async def api_nearest(request: Request, user=Depends(current_user)):
-    """Exact point → nearest drivable road (OSRM /nearest proxy). Snaps a
-    hand-dropped stop marker onto the street."""
+    """Exact point → nearest routable point for the travel mode (OSRM /nearest
+    proxy). Snaps a hand-dropped stop marker onto something you can travel on —
+    on foot that may be a path no car engine knows."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     try:
         body = await request.json()
         lat, lng = body.get("lat"), body.get("lng")
+        mode = body.get("mode")
     except (ValueError, TypeError):
         return JSONResponse({"error": "bad request"}, status_code=400)
-    pt = await asyncio.to_thread(routing.nearest, lat, lng)
+    pt = await asyncio.to_thread(routing.nearest, lat, lng, mode)
     return JSONResponse({"ok": bool(pt), "pt": pt})
 
 
@@ -625,7 +644,8 @@ def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
     uid = user["id"]
     lang = web.lang_of(request)
     pl = queries.planer(conn, uid)
-    _virgin = queries.virgin_cells(conn, uid)
+    _virgin = queries.virgin_cells(
+        conn, uid, mode=user["travel_mode"] if "travel_mode" in user.keys() else "car")
     _targets = queries.targets(conn, uid)
     ctx = {
         "t": lambda key, **kw: i18n.t(lang, key, **kw),
@@ -732,6 +752,7 @@ def api_gangs(name: str | None = None, since: str | None = None, limit: int = 20
 
 @app.get("/api/virgin")
 def api_virgin(bbox: str | None = None, roads_only: bool = True, limit: int = 500,
+               mode: str | None = None,
                conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     """Never-scanned cells in your turf — the raw material for a wardrive route.
 
@@ -756,8 +777,12 @@ def api_virgin(bbox: str | None = None, roads_only: bool = True, limit: int = 50
         except ValueError:
             return JSONResponse(
                 {"error": "bbox must be lat_min,lat_max,lng_min,lng_max"}, status_code=400)
-    cells = queries.virgin_targets(conn, user["id"], box, roads_only, _limit(limit))
-    return JSONResponse({"count": len(cells), "navigate_with": "rlat,rlng", "cells": cells})
+    # Default: whatever the account is set to, so a script sees the same world as
+    # the app. ?mode= overrides it per call.
+    m = mode or (user["travel_mode"] if "travel_mode" in user.keys() else "car")
+    cells = queries.virgin_targets(conn, user["id"], box, roads_only, _limit(limit), m)
+    return JSONResponse({"count": len(cells), "mode": m,
+                         "navigate_with": "rlat,rlng", "cells": cells})
 
 
 @app.get("/api/boards")

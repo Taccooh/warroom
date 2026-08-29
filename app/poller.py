@@ -116,6 +116,68 @@ def drip_snap(conn, budget: int) -> int:
     return done
 
 
+def drip_paths(conn, budget: int) -> int:
+    """Re-check car-roadless cells for footpaths, so walkers and cyclists get the
+    targets a car cannot reach.
+
+    Only cells cached as found=0 with path_kind still NULL — a few thousand rather
+    than the whole road cache, because a cell with a road is reachable on foot
+    anyway. Nearest-to-turf first, round-robin across users, exactly like
+    drip_snap. Runs on the leftover budget: roads stay the priority."""
+    if budget <= 0:
+        return 0
+    per_user: list[list[tuple[int, int]]] = []
+    for u in conn.execute("SELECT DISTINCT user_id FROM virgin_cells").fetchall():
+        uid = u["user_id"]
+        rows = conn.execute(
+            """SELECT v.i, v.j, v.lat, v.lng FROM virgin_cells v
+               JOIN cell_roads r ON r.cell_key = v.cell_key
+               WHERE v.user_id = ? AND r.found = 0 AND r.path_kind IS NULL""",
+            (uid,)).fetchall()
+        cells = [(r["i"], r["j"], r["lat"], r["lng"]) for r in rows]
+        centers = queries._theatre_centers(conn, uid)
+        if centers:
+            cells.sort(key=lambda c: min((c[2] - a) ** 2 + (c[3] - b) ** 2
+                                         for a, b in centers))
+        per_user.append([(c[0], c[1]) for c in cells])
+    batch: list[tuple[int, int]] = []
+    seen: set[str] = set()
+    while len(batch) < budget and any(per_user):
+        for lst in per_user:
+            if not lst:
+                continue
+            i, j = lst.pop(0)
+            k = grid.key_from_index(i, j)
+            if k not in seen:
+                seen.add(k)
+                batch.append((i, j))
+                if len(batch) >= budget:
+                    break
+    if not batch:
+        return 0
+    chunks = [batch[x:x + roads.DRIP_BATCH]
+              for x in range(0, len(batch), roads.DRIP_BATCH)]
+
+    def _work(ci: int, chunk: list) -> int:
+        wconn = db.connect()
+        try:
+            return roads.snap_paths(wconn, chunk, shift=ci, batch=roads.DRIP_BATCH)
+        finally:
+            wconn.close()
+
+    workers = max(1, min(config.DRIP_WORKERS, len(chunks)))
+    if workers == 1:
+        return sum(_work(ci, c) for ci, c in enumerate(chunks))
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for fut in [pool.submit(_work, ci, c) for ci, c in enumerate(chunks)]:
+            try:
+                done += fut.result()
+            except Exception:
+                log.exception("Path-Drip-Worker fehlgeschlagen")
+    return done
+
+
 def drip_snap_async() -> None:
     """Fire the drip on its own daemon thread; skip if the previous one still runs."""
     if not _drip_lock.acquire(blocking=False):
@@ -128,6 +190,12 @@ def drip_snap_async() -> None:
                 n = drip_snap(conn, config.ROAD_DRIP)
                 if n:
                     log.info("Road-Drip: %d Zellen klassifiziert", n)
+                # Whatever the road backlog left unused goes to the path backlog.
+                # Once roads are caught up (the normal state) the full budget lands
+                # here until the path backfill is through, then both idle.
+                p = drip_paths(conn, config.ROAD_DRIP - n)
+                if p:
+                    log.info("Path-Drip: %d Zellen auf Wege geprueft", p)
             finally:
                 conn.close()
         except Exception:

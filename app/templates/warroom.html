@@ -118,6 +118,18 @@
         <button type="button" class="rb-jump stop" id="tour-clear">{{ t('tour_clear') }}</button>
       </div>
     </div>
+    {# Travel mode. Sits in the planner because it changes this very list: on foot
+       or by bike, cells that no road reaches come back in — and the tour is routed
+       on the matching OSRM profile instead of sending a walker around the block. #}
+    <form method="post" action="/travel" class="watch-setting travel-setting">
+      <label>{{ t('travel_setting') }}
+        <select name="mode" id="travel-mode-select">
+          <option value="car" {% if travel_mode == 'car' %}selected{% endif %}>{{ t('travel_car') }}</option>
+          <option value="bike" {% if travel_mode == 'bike' %}selected{% endif %}>{{ t('travel_bike') }}</option>
+          <option value="foot" {% if travel_mode == 'foot' %}selected{% endif %}>{{ t('travel_foot') }}</option>
+        </select>
+      </label>
+    </form>
     {# The planner/tour how-to used to sit here as two permanent paragraphs; it is
        now a one-time coach toast (warroom.js maybeCoach, gated by wr_hints_seen),
        so the target list gets those ~2 rows back. #}
@@ -368,6 +380,7 @@
   "sharing": {{ sharing.active | tojson }},
   "history": {{ history | tojson }},
   "initTab": {{ (tab or 'planer') | tojson }},
+  "travelMode": {{ travel_mode | tojson }},
   "pollEpoch": {{ poll_epoch | tojson }}
 }
 </script>

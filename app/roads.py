@@ -67,6 +67,15 @@ DRIVABLE = ("motorway|trunk|primary|secondary|tertiary|unclassified|residential"
 # PREFERS proper roads; track only decides that the cell is not roadless.
 FALLBACK = "track"
 _DRIV_SET = frozenset(DRIVABLE.split("|"))
+# Ways for people who are not in a car. Only ever queried for cells already
+# cached as found=0 ("no road for a car"), which is what used to erase them from
+# every list — a war-walker or war-biker reaches a cell on a footpath just fine.
+# track is absent on purpose: it already makes a cell found=1 above.
+PATHS = "footway|path|pedestrian|steps|bridleway|cycleway"
+# Which of those a bike can use. Steps obviously not; a footway is usually
+# no-cycling, so it is left out rather than promising a ride that is not allowed.
+# On foot everything in PATHS counts, so there is no FOOT_OK set.
+BIKE_OK = frozenset(("path", "cycleway", "bridleway", "track"))
 
 
 def _grid(conn) -> tuple[float, float]:
@@ -113,14 +122,18 @@ def _query(bboxes: list[tuple[float, float, float, float]],
 
 
 def _nearest_in_cell(ways: list[dict], s, w, n, e, clat, clng,
-                     types: frozenset | None = None):
+                     types: frozenset | None = None, want_kind: bool = False):
     """Nearest road vertex to the cell centre — but only points INSIDE the cell.
-    With `types`, only ways whose highway tag is in the set are considered."""
+    With `types`, only ways whose highway tag is in the set are considered.
+    With `want_kind`, returns (lat, lng, highway) — the path search needs to know
+    WHICH kind of way it found, because a cycleway and a flight of steps mean
+    very different things depending on how you travel."""
     best = None
     best_d = float("inf")
     coslat = math.cos(math.radians(clat))
     for el in ways:
-        if types is not None and (el.get("tags") or {}).get("highway") not in types:
+        hw = (el.get("tags") or {}).get("highway")
+        if types is not None and hw not in types:
             continue
         for p in el.get("geometry") or []:
             la, lo = p.get("lat"), p.get("lon")
@@ -133,8 +146,53 @@ def _nearest_in_cell(ways: list[dict], s, w, n, e, clat, clng,
             d = dy * dy + dx * dx
             if d < best_d:
                 best_d = d
-                best = (la, lo)
+                best = (la, lo, hw) if want_kind else (la, lo)
     return best
+
+
+def snap_paths(conn, cells: list[tuple[int, int]], shift: int = 0,
+               batch: int = BATCH) -> int:
+    """Re-check car-roadless cells for footpaths and cycleways. Returns how many
+    cells were classified.
+
+    Same rules as snap_cells: a failed query writes NOTHING, because an Overpass
+    outage is not a finding — those cells stay NULL and come back next round. The
+    difference is the outcome: a cell with a path keeps its kind, one genuinely
+    without gets path_kind='' so it is never asked about again. NULL and '' must
+    stay distinguishable, otherwise every retry re-queries all the empty ones."""
+    glat, glng = _grid(conn)
+    done = 0
+    for start in range(0, len(cells), batch):
+        chunk = cells[start:start + batch]
+        boxes = []
+        for (i, j) in chunk:
+            (s, w), (n, e) = grid.bounds(i, j, glat, glng)
+            boxes.append((s, w, n, e))
+        t0 = time.monotonic()
+        try:
+            ways = _query(boxes, PATHS, shift=shift)
+            # Same counter-check as for roads: one instance returning nothing for a
+            # whole batch looks exactly like a regional extract or a truncated reply.
+            if not ways and len(chunk) > 1:
+                ways = _query(boxes, PATHS, shift=shift + 1)
+            log.info("Overpass (Wege): %d Zellen, %d Wege, %.1f s",
+                     len(chunk), len(ways), time.monotonic() - t0)
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError) as ex:
+            log.warning("Overpass (Wege) nicht erreichbar (%s) — %d Zellen bleiben offen",
+                        ex, len(chunk))
+            continue
+        for idx, (i, j) in enumerate(chunk):
+            s, w, n, e = boxes[idx]
+            clat, clng = grid.center(i, j, glat, glng)
+            hit = _nearest_in_cell(ways, s, w, n, e, clat, clng, want_kind=True)
+            k = grid.key_from_index(i, j)
+            if hit:
+                conn.execute("UPDATE cell_roads SET path_lat=?, path_lng=?, path_kind=? "
+                             "WHERE cell_key=?", (hit[0], hit[1], hit[2] or "path", k))
+            else:
+                conn.execute("UPDATE cell_roads SET path_kind='' WHERE cell_key=?", (k,))
+            done += 1
+    return done
 
 
 def snap_cells(conn, cells: list[tuple[int, int]], shift: int = 0,
