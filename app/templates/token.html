@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Warroom — {{ t('tok_new_title') }}{% endblock %}
+{# body.doc: the app body is globally overflow:hidden (the map never scrolls), so
+   any document-style page is unreachable below the fold without it. #}
+{% block bodyclass %}doc{% endblock %}
+{% block content %}
+<div class="auth-wrap about-wrap">
+  <div class="auth-card about-card">
+    <div class="brand"><svg class="sigil" viewBox="0 0 24 28" aria-hidden="true"><path d="M12 1 22 5v9c0 7-4.6 11.4-10 13C6.6 25.4 2 21 2 14V5Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 6.5 16.5 14 12 21.5 7.5 14Z" fill="currentColor"/></svg><span class="brand-name">WARROOM</span></div>
+    <p class="auth-sub">{{ t('tok_new_title') }}{% if name %} · {{ name }}{% endif %}</p>
+
+    <div class="about-body">
+      <p class="tok-value"><code id="tok">{{ token }}</code></p>
+      <p><b>{{ t('tok_once') }}</b></p>
+
+      <h2>{{ t('tok_how') }}</h2>
+      <pre class="tok-pre">curl -H "Authorization: Bearer {{ token }}" \
+     {{ base_url }}/api/state</pre>
+
+      <p>{{ t('tok_can') }}</p>
+      <p class="tok-warn">{{ t('tok_reload') }}</p>
+    </div>
+
+    <p class="auth-alt"><a href="/?tab=info">{{ t('tok_back') }}</a></p>
+  </div>
+</div>
+{% endblock %}

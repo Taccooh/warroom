@@ -1229,3 +1229,29 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
   padding: 0.22rem 0.6rem; font-weight: 700; cursor: pointer; margin-top: 0.25rem;
   font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase;
 }
+
+/* --- API tokens ------------------------------------------------------------
+   The plaintext token is shown exactly once, so it has to be impossible to
+   miss and easy to select in one go. break-all because it is one long
+   unbreakable string that would otherwise push the card wide on a phone. */
+.tok-value { margin: 0.6rem 0; }
+.tok-value code {
+  display: block; padding: 0.7rem 0.8rem; border-radius: 6px;
+  background: #0d1219; border: 1px solid var(--gold, #e8b64c);
+  color: var(--gold, #e8b64c); font-size: 0.95rem; line-height: 1.4;
+  word-break: break-all; user-select: all;
+}
+.tok-pre {
+  margin: 0.4rem 0; padding: 0.7rem 0.8rem; border-radius: 6px;
+  background: #0d1219; border: 1px solid #26303c; color: var(--text);
+  font-size: 0.8rem; line-height: 1.5; overflow-x: auto; white-space: pre;
+}
+.tok-warn { color: var(--muted, #8b97a6); font-size: 0.85rem; }
+.tok-list { list-style: none; margin: 0.5rem 0; padding: 0; }
+.tok-list li {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.45rem 0; border-bottom: 1px solid #1b2029;
+}
+.tok-list .tok-nm { font-weight: 600; }
+.tok-list .tok-meta { color: var(--muted, #8b97a6); font-size: 0.8rem; }
+.tok-list form { margin-left: auto; }

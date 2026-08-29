@@ -115,6 +115,21 @@ def current_user(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     return user
 
 
+def read_user(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """Auth for the READ-ONLY endpoints: a bearer token, or the ordinary session.
+
+    Two rules that matter:
+    * A present-but-invalid token is a hard no — we do NOT quietly fall back to a
+      cookie, or a script with a revoked token would keep working in a browser
+      context and nobody would notice the revocation failed.
+    * A token never marks the user as 'seen'. last_seen means a human had the app
+      in front of them; a cron job polling every minute must not look like one."""
+    hdr = request.headers.get("Authorization", "")
+    if hdr.startswith("Bearer "):
+        return auth.token_user(conn, hdr[7:].strip())
+    return current_user(request, conn)
+
+
 def _in_front_of_someone(request: Request) -> bool:
     """Does this request mean a human is looking at the app right now?
 
@@ -461,6 +476,37 @@ def change_key(request: Request, api_key: str = Form(...),
     return RedirectResponse("/?tab=info&key=ok", status_code=303)
 
 
+@app.post("/account/tokens")
+def create_token(request: Request, name: str = Form(""),
+                 conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    """Mint a read-only token. Rendered directly instead of redirecting: the
+    plaintext exists only in this response, and a redirect would have to carry it
+    in the URL — straight into the access log, the Referer header and the
+    browser's history. Reloading this page re-submits the form and mints a second
+    token, which is the lesser evil and is stated on the page."""
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    if _rate_limited(request, "token", limit=10):
+        return RedirectResponse("/?tab=info&token=rate", status_code=303)
+    if len(auth.list_tokens(conn, user["id"])) >= 10:
+        return RedirectResponse("/?tab=info&token=max", status_code=303)
+    token = auth.create_token(conn, user["id"], name)
+    # Own base URL for a copy-paste-ready example — correct behind the proxy
+    # because uvicorn runs with --proxy-headers (X-Forwarded-Proto/Host).
+    return render(request, "token.html",
+                  {"token": token, "name": name.strip()[:40],
+                   "base_url": str(request.base_url).rstrip("/")})
+
+
+@app.post("/account/tokens/revoke")
+def revoke_token(token_id: int = Form(...),
+                 conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    auth.delete_token(conn, user["id"], token_id)
+    return RedirectResponse("/?tab=info&token=gone", status_code=303)
+
+
 @app.post("/account/delete")
 def delete_account(request: Request, password: str = Form(...),
                    conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
@@ -512,6 +558,8 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
         # replaced. The page opens a dialog about it instead of staying quiet.
         "key_bad": bool(user["key_bad"]) if "key_bad" in user.keys() else False,
         "key_state": request.query_params.get("key"),
+        "tokens": auth.list_tokens(conn, uid),
+        "token_state": request.query_params.get("token"),
         "poll_epoch": db.kv_get(conn, "last_poll", "0"),
     }
     return render(request, "warroom.html", ctx)
@@ -610,7 +658,7 @@ def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
 
 
 @app.get("/api/state")
-def state(conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+def state(conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     """Current position: own cells, planner, counters, recent events. This is the
     documented read endpoint for scripts (see README) — /api/live is the frontend's
     own channel and ships rendered HTML fragments that would only be in the way."""
@@ -639,7 +687,7 @@ def _limit(n: int, cap: int = 5000) -> int:
 
 @app.get("/api/stats")
 def api_stats(since: str | None = None, limit: int = 500,
-              conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+              conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     """The caller's own history, one row per poll: APs, credits, gang rank/points."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
@@ -648,7 +696,7 @@ def api_stats(since: str | None = None, limit: int = 500,
 
 @app.get("/api/players")
 def api_players(id: int | None = None, since: str | None = None, limit: int = 200,
-                conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+                conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     """Without `id`: the standings from the latest sample. With `id`: that player's
     curve. `player_id` is the wdgwars user id from the global feed. `username` is
     filled in where a leaderboard has ever named that id, and is null otherwise —
@@ -669,7 +717,7 @@ def api_players(id: int | None = None, since: str | None = None, limit: int = 20
 
 @app.get("/api/gangs")
 def api_gangs(name: str | None = None, since: str | None = None, limit: int = 200,
-              conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+              conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     """Without `name`: leaderboard as of the latest sample. With `name`: that gang
     over time. rank/points come from wdgwars, cells/aps/players are counted from
     the feed — they answer different questions and can disagree."""
@@ -684,7 +732,7 @@ def api_gangs(name: str | None = None, since: str | None = None, limit: int = 20
 
 @app.get("/api/virgin")
 def api_virgin(bbox: str | None = None, roads_only: bool = True, limit: int = 500,
-               conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+               conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     """Never-scanned cells in your turf — the raw material for a wardrive route.
 
     `bbox=lat_min,lat_max,lng_min,lng_max` narrows it to one area. `roads_only`
@@ -715,7 +763,7 @@ def api_virgin(bbox: str | None = None, roads_only: bool = True, limit: int = 50
 @app.get("/api/boards")
 def api_boards(board: str = "all_time", id: int | None = None,
                since: str | None = None, limit: int = 50,
-               conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+               conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     """The game's own top-50 lists, sampled over time: `today`, `week`, `all_time`,
     `cells`, `hunters`, `flock`, `arcade`. With `id`, one player's movement on that
     board — a gap means they left the top 50 at that sample, not that they stopped.

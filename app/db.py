@@ -34,6 +34,23 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Read-only keys for scripts. A session cookie is full access — it can set your
+-- position, edit your crew, wipe your coverage trail — and lives 60 days, so
+-- pasting one into a cron job or a config file hands all of that to whoever reads
+-- the file. A token may only GET the read endpoints, is revocable on its own, and
+-- is stored as a SHA-256 hash: a database leak yields no usable keys, and the
+-- plaintext exists exactly once, on screen, at creation.
+-- (SHA-256, not bcrypt: the token is 256 bits of entropy rather than a guessable
+-- password, and it is verified on every single API request.)
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id, id);
 CREATE TABLE IF NOT EXISTS footprint_cells (
     user_id  INTEGER NOT NULL,
     cell_key TEXT NOT NULL,

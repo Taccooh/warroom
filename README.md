@@ -176,12 +176,39 @@ supported surface for that, and their response shape is meant to stay stable.
 pre-rendered HTML fragments alongside the data — it changes whenever a template
 does. Everything a script needs is below.
 
-All endpoints require a logged-in session cookie and answer `401` without one:
+### Authentication
+
+Create a **read-only API token** in the app (info tab → API tokens) and send it as
+a bearer token:
+
+```bash
+curl -H "Authorization: Bearer wr_xxxxxxxx" 'https://your-instance/api/state'
+```
+
+This is the right way to authenticate a script. A token may read the endpoints
+below and nothing else — it cannot change your account, your position or your
+crew — it is revocable on its own, and only its SHA-256 hash is stored, so the
+plaintext exists once, on screen, at creation.
+
+A normal session cookie works too, which is handy for a quick manual call:
 
 ```bash
 curl -c jar -X POST https://your-instance/login \
      -d 'username=YOURNAME' -d 'password=YOURPASSWORD'
 curl -b jar 'https://your-instance/api/state'
+```
+
+**Do not put a session cookie in a script.** It is full access and lives 60 days,
+so a cron file or a committed config hands your whole account to whoever reads it.
+Note also that a failed login returns `200` with the login page, not `401` — check
+that a `wr_session` cookie was actually set.
+
+Either way, all endpoints answer `401` without valid credentials.
+
+The examples below use a shell variable for the header:
+
+```bash
+AUTH="Authorization: Bearer wr_xxxxxxxx"
 ```
 
 | Endpoint | Returns |
@@ -204,7 +231,7 @@ only cells with a known drivable road come back (`roads_only=false` also returns
 unclassified ones).
 
 ```bash
-curl -b jar '…/api/virgin?bbox=42.3691,42.3979,-71.2205,-71.1381'
+curl -H "$AUTH" '…/api/virgin?bbox=42.3691,42.3979,-71.2205,-71.1381'
 ```
 
 ```json
@@ -242,9 +269,9 @@ Four things worth knowing, because the numbers are easy to misread:
 
 ```bash
 # Rivals by ground held, right now
-curl -b jar 'https://your-instance/api/players?limit=20'
+curl -H "$AUTH" 'https://your-instance/api/players?limit=20'
 # How player 1364 developed over the last week
-curl -b jar 'https://your-instance/api/players?id=1364&since=2026-08-21 00:00:00'
+curl -H "$AUTH" 'https://your-instance/api/players?id=1364&since=2026-08-21 00:00:00'
 ```
 
 ### Leaderboards and names
@@ -262,9 +289,9 @@ carries `wifi` and `ble` split out.
 
 ```bash
 # Who leads all-time, with names
-curl -b jar 'https://your-instance/api/boards?board=all_time'
+curl -H "$AUTH" 'https://your-instance/api/boards?board=all_time'
 # One player's climb; gaps mean they were outside the top 50 that hour
-curl -b jar 'https://your-instance/api/boards?board=cells&id=1364'
+curl -H "$AUTH" 'https://your-instance/api/boards?board=cells&id=1364'
 ```
 
 `rank` and `points` come from wdgwars, `cells`/`aps`/`players` are counted from

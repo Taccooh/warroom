@@ -156,6 +156,39 @@ STRINGS = {
     "info_turf": {"en": "Turf", "de": "Revier"},
     "cells_word": {"en": "cells", "de": "Zellen"},
     "info_last_poll": {"en": "Last poll", "de": "Zuletzt gepollt"},
+    # Read-only API tokens
+    "tok_head": {"en": "API tokens", "de": "API-Schlüssel"},
+    "tok_lead": {"en": "For scripts that only need to read your data. A token cannot "
+                       "change anything — unlike your login, which can.",
+                 "de": "Für Skripte, die deine Daten nur lesen sollen. Ein Schlüssel kann "
+                       "nichts verändern — Ihr Login dagegen schon."},
+    "tok_name": {"en": "What is it for?", "de": "Wofür ist er?"},
+    "tok_create": {"en": "Create token", "de": "Schlüssel erstellen"},
+    "tok_none": {"en": "No tokens yet.", "de": "Noch keine Schlüssel."},
+    "tok_created": {"en": "created", "de": "erstellt"},
+    "tok_used": {"en": "last used", "de": "zuletzt genutzt"},
+    "tok_never": {"en": "never", "de": "nie"},
+    "tok_revoke": {"en": "Revoke", "de": "Widerrufen"},
+    "tok_max": {"en": "Ten tokens is the limit. Revoke one first.",
+                "de": "Zehn Schlüssel sind das Maximum. Widerrufen Sie zuerst einen."},
+    "tok_rate": {"en": "Too many tokens created just now. Try again later.",
+                 "de": "Gerade zu viele Schlüssel erstellt. Später nochmal versuchen."},
+    "tok_gone": {"en": "Token revoked.", "de": "Schlüssel widerrufen."},
+    "tok_new_title": {"en": "Your new API token", "de": "Ihr neuer API-Schlüssel"},
+    "tok_once": {"en": "Copy it now. It is stored only as a hash and will never be "
+                       "shown again — if you lose it, revoke it and create a new one.",
+                 "de": "Kopieren Sie ihn jetzt. Gespeichert wird nur ein Hash, angezeigt "
+                       "wird er nie wieder — bei Verlust widerrufen und einen neuen erstellen."},
+    "tok_how": {"en": "Use it as a bearer token:", "de": "So wird er benutzt:"},
+    "tok_can": {"en": "It may read the API endpoints and nothing else. It cannot change "
+                      "your account, your position or your crew, and you can revoke it "
+                      "at any time in the info tab.",
+                "de": "Er darf die API-Endpunkte lesen, sonst nichts. Er kann weder Ihren "
+                      "Account noch Ihre Position oder Crew ändern, und Sie können ihn im "
+                      "Info-Tab jederzeit widerrufen."},
+    "tok_reload": {"en": "Reloading this page creates another token.",
+                   "de": "Ein Neuladen dieser Seite erzeugt einen weiteren Schlüssel."},
+    "tok_back": {"en": "Back to warroom", "de": "Zurück zum Warroom"},
     "info_note": {"en": "Numbers grow into a time series with every poll — charts coming in the dashboard build.",
                   "de": "Zahlen wachsen mit jedem Poll zur Zeitreihe — Charts kommen im Dashboard-Ausbau."},
 

@@ -258,6 +258,31 @@
     </form>
     <p class="hint">{{ t('info_note') }}</p>
 
+    <h3 class="pl-sub">{{ t('tok_head') }}</h3>
+    {% if token_state == 'gone' %}<div class="ok-msg">{{ t('tok_gone') }}</div>
+    {% elif token_state == 'max' %}<div class="auth-err">{{ t('tok_max') }}</div>
+    {% elif token_state == 'rate' %}<div class="auth-err">{{ t('tok_rate') }}</div>{% endif %}
+    <p class="hint">{{ t('tok_lead') }}</p>
+    {% if tokens %}
+    <ul class="tok-list">
+      {% for tk in tokens %}
+      <li>
+        <span class="tok-nm">{{ tk['name'] }}</span>
+        <span class="tok-meta">{{ t('tok_created') }} {{ tk['created_at'] | localtime }} ·
+          {{ t('tok_used') }} {% if tk['last_used'] %}{{ tk['last_used'] | localtime }}{% else %}{{ t('tok_never') }}{% endif %}</span>
+        <form method="post" action="/account/tokens/revoke">
+          <input type="hidden" name="token_id" value="{{ tk['id'] }}">
+          <button class="rb-jump stop" type="submit">{{ t('tok_revoke') }}</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="hint">{{ t('tok_none') }}</p>{% endif %}
+    <form method="post" action="/account/tokens" class="pw-form">
+      <input type="text" name="name" maxlength="40" placeholder="{{ t('tok_name') }}">
+      <button class="rb-jump" type="submit">{{ t('tok_create') }}</button>
+    </form>
+
     {# Logout: its own row, separated from the red delete below so neither is a mis-tap. #}
     <form method="post" action="/logout" class="logout-form info-logout">
       <button class="rb-jump" type="submit">⏻ {{ t('logout') }}</button>
