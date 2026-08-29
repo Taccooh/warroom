@@ -309,6 +309,42 @@ def player_name(conn, player_id: int) -> str | None:
     return r["username"] if r else None
 
 
+def virgin_targets(conn, uid: int, bbox: tuple | None, roads_only: bool,
+                   limit: int) -> list[dict]:
+    """Never-scanned cells as full records — for route planners.
+
+    Unlike virgin_cells() (flat indices, payload-trimmed for our own map) this
+    returns what a router actually needs, above all `rlat`/`rlng`: the drivable
+    road point INSIDE the cell. A cell centre routinely sits in a field, a forest
+    or a lake, so navigating to it leads nowhere — which is why cell_roads exists
+    at all. A planner using lat/lng instead inherits that bug, so both are
+    returned and the difference stays visible instead of hidden.
+
+    road: 1 = drivable point known, 0 = none in this cell (water/woods),
+    null = not classified by the background snapper yet."""
+    sql = ["""SELECT v.cell_key, v.i, v.j, v.lat, v.lng,
+                     r.lat AS rlat, r.lng AS rlng, r.found AS road
+              FROM virgin_cells v
+              LEFT JOIN cell_roads r ON r.cell_key = v.cell_key
+              WHERE v.user_id = ?"""]
+    args: list = [uid]
+    if roads_only:
+        sql.append("AND r.found = 1")
+    else:
+        # Cells known to hold no road are useless for a drive either way; unknown
+        # ones stay in so a caller can snap them or take the chance.
+        sql.append("AND (r.found IS NULL OR r.found = 1)")
+    if bbox:
+        sql.append("AND v.lat BETWEEN ? AND ? AND v.lng BETWEEN ? AND ?")
+        args += [bbox[0], bbox[1], bbox[2], bbox[3]]
+    rows = [dict(r) for r in conn.execute(" ".join(sql), args)]
+    centers = _theatre_centers(conn, uid)
+    if centers:
+        rows.sort(key=lambda c: min((c["lat"] - a) ** 2 + (c["lng"] - b) ** 2
+                                    for a, b in centers))
+    return rows[:limit]
+
+
 def boards_now(conn, board: str, limit: int) -> list[dict]:
     """One of the game's top-50 lists as of the latest sample, names resolved."""
     ts = conn.execute("SELECT MAX(ts) t FROM board_snap WHERE board = ?",

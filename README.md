@@ -191,9 +191,33 @@ curl -b jar 'https://your-instance/api/state'
 | `GET /api/players` | Standings from the latest sample; with `?id=` the history of one player |
 | `GET /api/gangs` | Leaderboard from the latest sample; with `?name=` the history of one gang |
 | `GET /api/boards` | The game's own top-50 lists over time; `?board=` selects one, `?id=` follows one player on it |
+| `GET /api/virgin` | Never-scanned cells in your turf, with a drivable road point each — raw material for route planning |
 
 `since=YYYY-MM-DD HH:MM:SS` (UTC) and `limit=` work on all history endpoints.
 `limit` is clamped to 5000.
+
+### Planning a drive
+
+`/api/virgin` lists the cells in your turf nobody has ever scanned — what a route
+planner needs. Narrow it with `bbox=lat_min,lat_max,lng_min,lng_max`; by default
+only cells with a known drivable road come back (`roads_only=false` also returns
+unclassified ones).
+
+```bash
+curl -b jar '…/api/virgin?bbox=42.3691,42.3979,-71.2205,-71.1381'
+```
+
+```json
+{"count": 1, "navigate_with": "rlat,rlng", "cells": [
+  {"cell_key":"2119_-3561","i":2119,"j":-3561,
+   "lat":42.38,"lng":-71.20, "rlat":42.381,"rlng":-71.201, "road":1}]}
+```
+
+**Route to `rlat`/`rlng`, not `lat`/`lng`.** The latter is the cell centre, which
+lands in a field, a forest or a lake often enough to ruin a drive — that is the
+whole reason the road points exist. `road` is `1` when a drivable point is known,
+`0` when the cell has none (water, woods), `null` when the background snapper has
+not reached it yet.
 
 ### The history archive
 

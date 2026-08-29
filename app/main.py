@@ -682,6 +682,36 @@ def api_gangs(name: str | None = None, since: str | None = None, limit: int = 20
     return JSONResponse({"gangs": queries.gangs_now(conn, n)})
 
 
+@app.get("/api/virgin")
+def api_virgin(bbox: str | None = None, roads_only: bool = True, limit: int = 500,
+               conn: sqlite3.Connection = Depends(get_db), user=Depends(current_user)):
+    """Never-scanned cells in your turf — the raw material for a wardrive route.
+
+    `bbox=lat_min,lat_max,lng_min,lng_max` narrows it to one area. `roads_only`
+    (default) keeps only cells with a known drivable road point.
+
+    Navigate to **rlat/rlng**, not lat/lng: the latter is the cell centre, which
+    lands in fields, forests and lakes often enough to ruin a route. rlat/rlng is
+    a real road inside the same cell."""
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    box = None
+    if bbox:
+        try:
+            parts = [float(x) for x in bbox.split(",")]
+            if len(parts) != 4:
+                raise ValueError
+            # Accept either order per axis; a swapped pair would silently return
+            # nothing at all, which looks like "no virgin ground here".
+            box = (min(parts[0], parts[1]), max(parts[0], parts[1]),
+                   min(parts[2], parts[3]), max(parts[2], parts[3]))
+        except ValueError:
+            return JSONResponse(
+                {"error": "bbox must be lat_min,lat_max,lng_min,lng_max"}, status_code=400)
+    cells = queries.virgin_targets(conn, user["id"], box, roads_only, _limit(limit))
+    return JSONResponse({"count": len(cells), "navigate_with": "rlat,rlng", "cells": cells})
+
+
 @app.get("/api/boards")
 def api_boards(board: str = "all_time", id: int | None = None,
                since: str | None = None, limit: int = 50,
