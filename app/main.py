@@ -583,18 +583,26 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
 @app.post("/api/snap")
 async def snap(request: Request, conn: sqlite3.Connection = Depends(get_db),
                user=Depends(current_user)):
-    """Cell indices → point on a road within that cell (or null).
-    The result is forever the same per cell and is cached globally."""
+    """Cell indices → a point within that cell to travel to (or null), for the
+    caller's travel mode. Cached globally per cell and way class.
+
+    This is what a tour stop snaps onto, and it covers OCCUPIED cells too — those
+    are the attack targets. Without the mode a walker was handed the car road
+    point, or nothing at all where no car can go, and the tour then fell back to
+    the cell centre: a route into a field."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     try:
         body = await request.json()
         cells = [(int(c[0]), int(c[1])) for c in (body.get("cells") or [])][:40]
+        mode = body.get("mode")
     except (ValueError, TypeError, KeyError, IndexError):
         return JSONResponse({"error": "bad request"}, status_code=400)
     if not cells:
         return JSONResponse({"points": {}})
-    pts = await asyncio.to_thread(roads.snap_cells, conn, cells)
+    if not mode:
+        mode = user["travel_mode"] if "travel_mode" in user.keys() else "car"
+    pts = await asyncio.to_thread(roads.snap_cells, conn, cells, 0, roads.BATCH, mode)
     return JSONResponse({"points": pts})
 
 

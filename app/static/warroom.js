@@ -272,7 +272,7 @@ document.addEventListener('DOMContentLoaded', function () {
     (function run(bi) {
       if (bi >= batches.length) return;
       fetch('/api/snap', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({cells: batches[bi].map(function (v) { return [v.i, v.j]; })})})
+        body: JSON.stringify({mode: TRAVEL, cells: batches[bi].map(function (v) { return [v.i, v.j]; })})})
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           if (d && d.points) {
@@ -1417,7 +1417,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var need = tour.filter(function (s) { return s.rlat === undefined; });
     if (!need.length) return;
     fetch('/api/snap', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({cells: need.map(cellOf)})})
+      body: JSON.stringify({mode: TRAVEL, cells: need.map(cellOf)})})
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (d && d.points) {

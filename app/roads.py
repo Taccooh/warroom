@@ -2,7 +2,8 @@
 
 The geometric centre of a cell tends to sit in a forest, on farmland or in a
 river — Google Maps turns that into undrivable routes. So we use Overpass
-(OpenStreetMap) to find the nearest drivable road INSIDE the cell.
+(OpenStreetMap) to find the nearest drivable road INSIDE the cell, and for
+walkers and cyclists the nearest usable path where no road exists.
 
 Two things matter:
   * The point must stay inside the cell — otherwise the auto-advance of the
@@ -150,6 +151,47 @@ def _nearest_in_cell(ways: list[dict], s, w, n, e, clat, clng,
     return best
 
 
+def usable(kind: str | None, mode: str | None) -> bool:
+    """Is a way of this kind usable in this travel mode? '' means checked and
+    nothing there, None means not checked yet — neither is usable."""
+    if not kind:
+        return False
+    return kind in BIKE_OK if (mode or "").lower() == "bike" else True
+
+
+def _fill_paths(conn, cells: list[tuple[int, int]], out: dict,
+                mode: str, shift: int, batch: int) -> None:
+    """Hand a path point to the cells where no car road was found.
+
+    Without this the tour of a walker falls back to the cell CENTRE for exactly
+    those cells — the routing-to-nowhere problem, reintroduced through the back
+    door. Cells never checked for paths are looked up on the spot: this runs when
+    someone puts a cell in a tour, and waiting for the background drip to reach it
+    could take hours."""
+    need: list[tuple[int, int]] = []
+    for (i, j) in cells:
+        k = grid.key_from_index(i, j)
+        if out.get(k) is not None:
+            continue                      # a road was found — good for walkers too
+        row = conn.execute(
+            "SELECT path_lat, path_lng, path_kind FROM cell_roads WHERE cell_key = ?",
+            (k,)).fetchone()
+        if row is None or row["path_kind"] is None:
+            need.append((i, j))           # not classified yet
+        elif usable(row["path_kind"], mode) and row["path_lat"] is not None:
+            out[k] = [row["path_lat"], row["path_lng"]]
+    if not need:
+        return
+    snap_paths(conn, need, shift=shift, batch=batch)
+    for (i, j) in need:
+        k = grid.key_from_index(i, j)
+        row = conn.execute(
+            "SELECT path_lat, path_lng, path_kind FROM cell_roads WHERE cell_key = ?",
+            (k,)).fetchone()
+        if row and usable(row["path_kind"], mode) and row["path_lat"] is not None:
+            out[k] = [row["path_lat"], row["path_lng"]]
+
+
 def snap_paths(conn, cells: list[tuple[int, int]], shift: int = 0,
                batch: int = BATCH) -> int:
     """Re-check car-roadless cells for footpaths and cycleways. Returns how many
@@ -196,11 +238,16 @@ def snap_paths(conn, cells: list[tuple[int, int]], shift: int = 0,
 
 
 def snap_cells(conn, cells: list[tuple[int, int]], shift: int = 0,
-               batch: int = BATCH) -> dict[str, list | None]:
-    """cell_key → [lat, lng] on the road, or None if there verifiably is none there.
+               batch: int = BATCH, mode: str | None = None) -> dict[str, list | None]:
+    """cell_key → [lat, lng] to travel to, or None if there verifiably is nothing.
 
     Cells whose query failed are MISSING from the result — the caller must ask
     for them again later. A network outage is not a finding.
+
+    With mode foot/bike, cells without a car road fall back to their path point
+    (looked up on the spot when unknown). Occupied enemy cells go through here as
+    well — they are the actual attack targets, and a walker must not be sent to
+    the cell centre just because no car can get there.
     """
     glat, glng = _grid(conn)
     _ensure_grid(conn, glat, glng)
@@ -269,4 +316,6 @@ def snap_cells(conn, cells: list[tuple[int, int]], shift: int = 0,
                     "VALUES (?,NULL,NULL,0)", (k,))
                 out[k] = None
                 log.info("keine Straße in Zelle %s", k)
+    if (mode or "").lower() in ("foot", "bike"):
+        _fill_paths(conn, cells, out, mode, shift, batch)
     return out
