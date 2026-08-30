@@ -270,8 +270,14 @@ Three questions that look alike and are not:
   barely half.
 
 `owner` carries the holder's wdgwars id (also in the planner as `o`), so you can
-see *who* to beat, not just which gang. Resolve it to a name via `/api/players`.
-`meta.wdg_user_id` is your own id in the same space, if you want to compare yourself.
+see *who* to beat, not just which gang. `meta.wdg_user_id` is your own id in the
+same space, if you want to compare yourself.
+
+Names for those ids come with the response as **`names`**, a `{id: username}`
+lookup table covering everyone appearing in `cells` and `planer`. It is one table
+rather than a name per row on purpose: a turf of 12,000 cells has only a few
+hundred distinct holders. Ids missing from it have no known name — show the number
+instead. `/api/live` carries the same table, since holders change when cells flip.
 
 **`gap`** is how many more APs you need to take an enemy cell:
 
