@@ -652,14 +652,16 @@ def my_movement(conn, uid: int, hours: int = 24) -> dict | None:
     if not r:
         return None
     d = dict(r)
-    better = conn.execute(
-        """SELECT COUNT(*) n FROM player_snap p0
+    # Rank and field size must be counted over the SAME population: players
+    # present at BOTH ends. Counting the field from the newer snapshot alone
+    # puts players into the denominator who cannot appear in the numerator -
+    # a rank out of more players than were ever compared.
+    better, total = conn.execute(
+        """SELECT SUM((p1.cells - p0.cells) > ?) AS better, COUNT(*) AS total
+           FROM player_snap p0
            JOIN player_snap p1 ON p1.player_id = p0.player_id AND p1.ts = ?
-           WHERE p0.ts = ? AND (p1.cells - p0.cells) > ?""",
-        (b, a, d["delta"])).fetchone()["n"]
-    total = conn.execute("SELECT COUNT(*) n FROM player_snap WHERE ts = ?",
-                         (b,)).fetchone()["n"]
-    d["rank_by_delta"] = better + 1
+           WHERE p0.ts = ?""", (d["delta"], b, a)).fetchone()
+    d["rank_by_delta"] = (better or 0) + 1
     d["of_players"] = total
     return d
 
