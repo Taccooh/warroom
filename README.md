@@ -216,7 +216,7 @@ AUTH="Authorization: Bearer wr_xxxxxxxx"
 |----------|---------|
 | `GET /api/state` | Where you stand now: `meta`, `counts`, `cells` (every cell in your turf with its holder, strength and your own APs), `planer`, `events` |
 | `GET /api/stats` | Your own measured history, one row per poll: APs, credits, gang rank and points |
-| `GET /api/players` | Standings from the latest sample; with `?id=` the history of one player |
+| `GET /api/players` | Standings from the latest sample; `?q=` searches by name, `?id=` gives one player's current state and history |
 | `GET /api/gangs` | Leaderboard from the latest sample; with `?name=` the history of one gang |
 | `GET /api/boards` | The game's own top-50 lists over time; `?board=` selects one, `?id=` follows one player on it |
 | `GET /api/virgin` | Never-scanned cells in your turf with a reachable point each; `?mode=car\|bike\|foot` — raw material for route planning |
@@ -285,6 +285,29 @@ it is impossible. **`gap: null` means unknown, never zero:** either it is not an
 enemy cell, or wdgwars is hiding enemy strength (it did for all team cells during
 the Lone Silverback event). Do not fall back to 0 there, or every fogged cell looks
 like a free win.
+
+### Looking a player up
+
+`?q=` searches names, anywhere in the string, case-insensitively, and answers the
+question the territory feed cannot: **which gang is this player in.**
+
+```bash
+curl -H "$AUTH" '…/api/players?q=wesm'
+```
+
+```json
+{"query":"wesm","players":[{"player_id":1364,"username":"wesmagyar",
+  "gang":"Black Wire Militia","gang_id":20,"cells":4233,"aps":327700}]}
+```
+
+`?id=` adds a `current` block (gang, cells, APs as of the latest sample) next to
+the history.
+
+Names come from two places: the gang member lists (every player in a gang any user
+belongs to) and the leaderboards (their top 50). A player nobody has ever shared a
+gang or a top-50 slot with stays a bare id — **an empty result means "not known
+here", not "does not exist"**. Someone known by name but absent from the snapshots
+is still returned, just without figures.
 
 ### The history archive
 

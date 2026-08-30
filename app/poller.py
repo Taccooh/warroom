@@ -395,6 +395,29 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
     return events
 
 
+def _learn_names(conn, team: dict) -> int:
+    """Harvest player_id → username from a gang's member list.
+
+    Writes only where the name actually changed, so the usual case is a read and
+    nothing else — this runs once per gang per cycle and would otherwise churn
+    hundreds of identical rows through the WAL every five minutes."""
+    try:
+        rows = [(_num(m.get("user_id")), m.get("username"))
+                for m in (team.get("members") or [])]
+        rows = [(pid, nm) for pid, nm in rows if pid is not None and nm]
+        if not rows:
+            return 0
+        conn.executemany(
+            "INSERT INTO player_names (player_id, username, seen_at) "
+            "VALUES (?,?,datetime('now')) "
+            "ON CONFLICT(player_id) DO UPDATE SET username = excluded.username, "
+            "seen_at = excluded.seen_at WHERE username != excluded.username", rows)
+        return len(rows)
+    except Exception:
+        log.exception("Mitgliedsnamen nicht lesbar")
+        return 0
+
+
 def snapshot_stats(conn, client: Wdg, user_id: int, me: dict,
                    gctx: dict, team_cache: dict) -> None:
     """Leaderboard/territories arrive ONCE per cycle (gctx), team/me ONCE per
@@ -413,6 +436,11 @@ def snapshot_stats(conn, client: Wdg, user_id: int, me: dict,
             except Exception:
                 team = {}
             team_cache[my_gid] = team
+            # Only on a real fetch, so this runs once per gang per cycle: the member
+            # list names every player in it. The territory feed hands out bare ids
+            # and the leaderboards only ever name their top 50, so this is by far
+            # the biggest source of names we have — and it was being thrown away.
+            _learn_names(conn, team)
     rank = points = None
     try:
         for idx, g in enumerate(gctx.get("leaderboard", {}).get("gangs", []), 1):

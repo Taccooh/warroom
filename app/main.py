@@ -723,7 +723,8 @@ def api_stats(since: str | None = None, limit: int = 500,
 
 
 @app.get("/api/players")
-def api_players(id: int | None = None, since: str | None = None, limit: int = 200,
+def api_players(id: int | None = None, q: str | None = None,
+                since: str | None = None, limit: int = 200,
                 conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     """Without `id`: the standings from the latest sample. With `id`: that player's
     curve. `player_id` is the wdgwars user id from the global feed. `username` is
@@ -735,9 +736,15 @@ def api_players(id: int | None = None, since: str | None = None, limit: int = 20
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     n = _limit(limit)
+    if q:
+        # Name search. Names come from the gang member lists and the leaderboards;
+        # a player nobody has ever shared a gang or a top-50 slot with stays a bare
+        # id, so an empty result is "not known here", not "does not exist".
+        return JSONResponse({"query": q, "players": queries.find_players(conn, q, n)})
     if id is not None:
         return JSONResponse({"player_id": id,
                              "username": queries.player_name(conn, id),
+                             "current": queries.player_current(conn, id),
                              "history": queries.player_history(conn, id, since, n)})
     return JSONResponse({"sample": queries.latest_sample(conn),
                          "players": queries.players_now(conn, n)})

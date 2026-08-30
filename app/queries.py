@@ -315,6 +315,34 @@ def players_now(conn, limit: int) -> list[dict]:
         "WHERE p.ts = ? ORDER BY p.cells DESC, p.aps DESC LIMIT ?", (ts, limit))]
 
 
+def find_players(conn, q: str, limit: int) -> list[dict]:
+    """Look a player up by name — which gang are they in, how much do they hold.
+
+    Matches anywhere in the name, case-insensitively. Joined against the latest
+    sample, so gang and size are current rather than from whenever the name was
+    learnt. Someone known by name but absent from the snapshots (no cells, or none
+    inside any user's turf) is still found, just without figures — names and
+    snapshots are separate sources."""
+    like = "%" + q.strip().replace("%", r"\%").replace("_", r"\_") + "%"
+    ts = latest_sample(conn)
+    return [dict(r) for r in conn.execute(
+        """SELECT n.player_id, n.username, p.gang_id, p.gang, p.cells, p.aps, p.ts
+           FROM player_names n
+           LEFT JOIN player_snap p ON p.player_id = n.player_id AND p.ts = ?
+           WHERE n.username LIKE ? ESCAPE '\\'
+           ORDER BY (p.cells IS NULL), p.cells DESC, n.username
+           LIMIT ?""", (ts, like, limit))]
+
+
+def player_current(conn, player_id: int) -> dict | None:
+    """Latest known state of one player: gang, cells, APs."""
+    r = conn.execute(
+        """SELECT p.player_id, n.username, p.gang_id, p.gang, p.cells, p.aps, p.ts
+           FROM player_snap p LEFT JOIN player_names n ON n.player_id = p.player_id
+           WHERE p.player_id = ? ORDER BY p.ts DESC LIMIT 1""", (player_id,)).fetchone()
+    return dict(r) if r else None
+
+
 def player_history(conn, player_id: int, since: str | None, limit: int) -> list[dict]:
     sql = "SELECT ts, gang_id, gang, cells, aps FROM player_snap WHERE player_id = ?"
     args: list = [player_id]
