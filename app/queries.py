@@ -26,6 +26,9 @@ def meta(conn, user: sqlite3.Row) -> dict:
         (user["id"],)).fetchone()
     return {
         "username": user["wdg_username"], "gang": user["gang"], "gang_id": user["gang_id"],
+        # Own wdgwars id: same id space as territory.owner_user_id / player_snap,
+        # so a client can tell "my gang holds this" from "I hold this".
+        "wdg_user_id": user["wdg_user_id"] if "wdg_user_id" in user.keys() else None,
         "last_poll": user["last_poll"], "footprint_cells": fp["n"], "my_aps_total": fp["a"],
         "terr_init": bool(user["terr_init"]),
     }
@@ -34,8 +37,10 @@ def meta(conn, user: sqlite3.Row) -> dict:
 def revier_cells(conn, uid: int) -> list[dict]:
     glat, glng = _grid(conn)
     gid = _gang(conn, uid)
+    me = _wdg_id(conn, uid)
     rows = conn.execute(
         """SELECT t.i, t.j, t.gang_id, t.gang, t.count, t.color, t.towers,
+                  t.owner_user_id,
                   COALESCE(f.my_aps, 0) AS my_aps
            FROM territory t
            LEFT JOIN footprint_cells f ON f.user_id = t.user_id AND f.cell_key = t.cell_key
@@ -49,16 +54,29 @@ def revier_cells(conn, uid: int) -> list[dict]:
             gap = max(0, r["count"] - r["my_aps"] + 1)
         else:
             gap = None
+        # status distinguishes gangs, owner/held distinguish PEOPLE: more than half
+        # of a player's "mine" cells are actually held by gang mates (measured
+        # 16260 of 31687). my_aps stays the separate question of presence — APs of
+        # mine in a cell someone else holds.
         out.append({"i": r["i"], "j": r["j"], "b": grid.bounds(r["i"], r["j"], glat, glng),
                     "status": status, "gang": r["gang"], "count": r["count"],
                     "my_aps": r["my_aps"], "gap": gap, "color": r["color"],
-                    "towers": r["towers"]})
+                    "towers": r["towers"], "owner": r["owner_user_id"],
+                    "held": bool(me is not None and r["owner_user_id"] == me)})
     return out
 
 
 def _gang(conn, uid: int) -> int | None:
     row = conn.execute("SELECT gang_id FROM users WHERE id = ?", (uid,)).fetchone()
     return row["gang_id"] if row else None
+
+
+def _wdg_id(conn, uid: int) -> int | None:
+    """The player's own wdgwars user id — the same id space as
+    territory.owner_user_id, which is what makes "do I hold this cell MYSELF"
+    answerable at all. status='mine' only ever meant "my gang"."""
+    row = conn.execute("SELECT wdg_user_id FROM users WHERE id = ?", (uid,)).fetchone()
+    return row["wdg_user_id"] if row else None
 
 
 def planer(conn, uid: int, limit: int | None = None) -> list[dict]:
@@ -69,7 +87,8 @@ def planer(conn, uid: int, limit: int | None = None) -> list[dict]:
     # by how many of my APs are already there. gap itself is computed in Python so a
     # hidden count stays None instead of collapsing to 0 via COALESCE.
     rows = conn.execute(
-        """SELECT t.i, t.j, t.gang, t.count, t.color, COALESCE(f.my_aps, 0) AS my_aps
+        """SELECT t.i, t.j, t.gang, t.count, t.color, t.owner_user_id,
+                  COALESCE(f.my_aps, 0) AS my_aps
            FROM territory t
            LEFT JOIN footprint_cells f ON f.user_id = t.user_id AND f.cell_key = t.cell_key
            WHERE t.user_id = ? AND t.gang_id IS NOT NULL AND t.gang_id != ?
@@ -90,7 +109,7 @@ def planer(conn, uid: int, limit: int | None = None) -> list[dict]:
         out.append({"lat": grid.center(r["i"], r["j"], glat, glng)[0],
                     "lng": grid.center(r["i"], r["j"], glat, glng)[1],
                     "gang": r["gang"], "count": r["count"], "my_aps": r["my_aps"], "gap": gap,
-                    "color": r["color"]})
+                    "color": r["color"], "owner": r["owner_user_id"]})
     return out
 
 
@@ -102,8 +121,11 @@ def targets(conn, uid: int) -> list[dict]:
     for p in planer(conn, uid):
         # cnt/gap stay None when the feed fogs enemy strength — the client renders
         # "strength hidden" instead of a bogus 0.
+        # "o" = the individual holder, not just the gang. One integer per row, and
+        # it answers a question the gang name cannot: WHO do I have to beat here.
+        # Resolve to a name via /api/players if you need one.
         out.append({"t": "enemy", "g": p["gang"], "c": p["color"], "gap": p["gap"],
-                    "my": p["my_aps"], "cnt": p["count"],
+                    "my": p["my_aps"], "cnt": p["count"], "o": p["owner"],
                     "lat": p["lat"], "lng": p["lng"]})
     for f in free_cells(conn, uid):
         out.append({"t": "free", "my": f["my_aps"], "lat": f["lat"], "lng": f["lng"]})

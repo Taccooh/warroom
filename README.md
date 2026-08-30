@@ -214,7 +214,7 @@ AUTH="Authorization: Bearer wr_xxxxxxxx"
 
 | Endpoint | Returns |
 |----------|---------|
-| `GET /api/state` | Where you stand now: `meta`, `counts`, `cells` (every cell in your turf with owning gang, strength and your own APs), `planer`, `events` |
+| `GET /api/state` | Where you stand now: `meta`, `counts`, `cells` (every cell in your turf with its holder, strength and your own APs), `planer`, `events` |
 | `GET /api/stats` | Your own measured history, one row per poll: APs, credits, gang rank and points |
 | `GET /api/players` | Standings from the latest sample; with `?id=` the history of one player |
 | `GET /api/gangs` | Leaderboard from the latest sample; with `?name=` the history of one gang |
@@ -256,6 +256,35 @@ known, `0` when the cell has none (water, woods), `null` when the background
 snapper has not reached it yet; `path` then carries the OSM way type
 (`path`, `footway`, `bridleway`, `cycleway`, `steps`) for cells only a walker or
 cyclist can reach.
+
+### Reading a cell
+
+Three questions that look alike and are not:
+
+- **`my_aps`** — how many APs *you* have in that cell. Presence. You can have APs
+  in a cell somebody else holds.
+- **`held`** — `true` only when *you personally* hold the cell. This is the one
+  `status` cannot answer.
+- **`status: "mine"`** — your **gang** holds it, which usually is not you. Measured
+  on the hosted instance: of 31,687 gang cells, players held 16,260 themselves —
+  barely half.
+
+`owner` carries the holder's wdgwars id (also in the planner as `o`), so you can
+see *who* to beat, not just which gang. Resolve it to a name via `/api/players`.
+`meta.wdg_user_id` is your own id in the same space, if you want to compare yourself.
+
+**`gap`** is how many more APs you need to take an enemy cell:
+
+```
+gap = max(0, count - my_aps + 1)
+```
+
+`count` is the holder's AP total there, the `+1` because you need *more* than they
+have. `gap: 0` therefore means you are already ahead and it should flip — not that
+it is impossible. **`gap: null` means unknown, never zero:** either it is not an
+enemy cell, or wdgwars is hiding enemy strength (it did for all team cells during
+the Lone Silverback event). Do not fall back to 0 there, or every fogged cell looks
+like a free win.
 
 ### The history archive
 
