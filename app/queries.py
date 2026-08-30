@@ -341,7 +341,11 @@ def names_for(conn, ids) -> dict:
     holders, so repeating the name per cell would multiply the payload roughly
     thirtyfold for nothing. Ids with no known name are simply absent — the caller
     falls back to showing the number, which is still better than nothing.
-    Coverage is about 78 % of holders; see /api/players?q= for where names come from."""
+    Coverage depends on the INSTANCE, not on the code: names are learnt from the
+    member list of every gang a local user belongs to (complete for those) plus the
+    leaderboards (global, but only their top slots). A gang nobody here belongs to
+    stays anonymous. Measured on an instance spanning 22 gangs: 100 % within those
+    gangs, 69 % of all players seen."""
     ids = {int(i) for i in ids if i is not None}
     if not ids:
         return {}

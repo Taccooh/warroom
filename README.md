@@ -279,6 +279,20 @@ rather than a name per row on purpose: a turf of 12,000 cells has only a few
 hundred distinct holders. Ids missing from it have no known name — show the number
 instead. `/api/live` carries the same table, since holders change when cells flip.
 
+**How complete that table is depends on your instance, not on the software.**
+Names come from two places:
+
+- the **member list of every gang a user of your instance belongs to** — complete
+  for those gangs, and it costs no extra request (the poller already fetches it)
+- the **leaderboards** — global, but only their top slots, a few hundred players
+
+So a gang nobody on your instance belongs to stays anonymous. On the hosted
+instance, spanning 22 gangs, that means **100 % coverage inside those gangs and
+69 % of all players seen**; within one turf it tends to run higher, because
+neighbours are more often in large gangs. A single-user instance sees its own gang
+plus the boards, and correspondingly more bare ids. Every new user from a gang not
+yet represented unlocks that gang's whole roster at once.
+
 **`gap`** is how many more APs you need to take an enemy cell:
 
 ```
