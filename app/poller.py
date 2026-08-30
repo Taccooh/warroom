@@ -402,16 +402,28 @@ def _learn_names(conn, team: dict) -> int:
     nothing else — this runs once per gang per cycle and would otherwise churn
     hundreds of identical rows through the WAL every five minutes."""
     try:
-        rows = [(_num(m.get("user_id")), m.get("username"))
+        rows = [(_num(m.get("user_id")), m.get("username"),
+                 (m.get("joined_at") or "")[:19] or None)
                 for m in (team.get("members") or [])]
-        rows = [(pid, nm) for pid, nm in rows if pid is not None and nm]
+        rows = [r for r in rows if r[0] is not None and r[1]]
         if not rows:
             return 0
+        # Keep the EARLIEST join ever seen: someone switching gangs later would
+        # otherwise push their date forward and ruin them as a dating anchor.
         conn.executemany(
-            "INSERT INTO player_names (player_id, username, seen_at) "
-            "VALUES (?,?,datetime('now')) "
-            "ON CONFLICT(player_id) DO UPDATE SET username = excluded.username, "
-            "seen_at = excluded.seen_at WHERE username != excluded.username", rows)
+            "INSERT INTO player_names (player_id, username, seen_at, joined_at) "
+            "VALUES (?,?,datetime('now'),?) "
+            "ON CONFLICT(player_id) DO UPDATE SET "
+            "  username  = excluded.username, "
+            "  seen_at   = excluded.seen_at, "
+            "  joined_at = CASE WHEN joined_at IS NULL "
+            "                     OR (excluded.joined_at IS NOT NULL "
+            "                         AND excluded.joined_at < joined_at) "
+            "                   THEN excluded.joined_at ELSE joined_at END "
+            "WHERE username != excluded.username "
+            "   OR joined_at IS NULL "
+            "   OR (excluded.joined_at IS NOT NULL AND excluded.joined_at < joined_at)",
+            rows)
         return len(rows)
     except Exception:
         log.exception("Mitgliedsnamen nicht lesbar")

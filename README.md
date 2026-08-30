@@ -320,8 +320,28 @@ curl -H "$AUTH" '…/api/players?q=nightowl'
   "gang":"Example Gang","gang_id":42,"cells":4233,"aps":327700}]}
 ```
 
-`?id=` adds a `current` block (gang, cells, APs as of the latest sample) next to
-the history.
+`?id=` adds a `current` block (gang, cells, APs as of the latest sample) and a
+`registration` block next to the history.
+
+**Dating an account.** wdgwars does not report when someone signed up, but ids are
+handed out sequentially and every gang member list carries a `joined_at`. So if a
+*higher* id was already in a gang at time T, this account must predate T:
+
+```json
+"registration": {
+  "registered_before": "2026-05-27 14:36:33",
+  "joined_gang":       "2026-05-28 09:11:02",
+  "anchor_below": {"player_id": 4708, "joined_at": "2026-05-26 23:33:31"},
+  "anchor_above": {"player_id": 4713, "joined_at": "2026-05-27 14:36:33"}
+}
+```
+
+`registered_before` is a hard bound. There is **no equally hard lower bound** — an
+old account can join a gang at any time, so a date below only shows where id
+allocation stood, not when that player started. The two anchors are returned so you
+can judge how tight the bracket is: neighbouring ids a few hours apart pin it down,
+a gap of hundreds does not. Accuracy grows with the number of gangs your instance
+can see.
 
 Names come from two places: the gang member lists (every player in a gang any user
 belongs to) and the leaderboards (their top 50). A player nobody has ever shared a

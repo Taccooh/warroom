@@ -201,10 +201,16 @@ CREATE INDEX IF NOT EXISTS idx_gang_snap ON gang_snap(gang, ts DESC);
 -- Names for the bare numeric ids the feed hands out. The feed itself never names
 -- anyone; the leaderboard does, across all its lists. Kept as a growing cache
 -- rather than per sample: a name is a fact about a player, not about a moment.
+-- joined_at is when they joined a GANG, not when they signed up — but ids are
+-- handed out sequentially, so the EARLIEST join seen for an id is a hard upper
+-- bound on registration ("they existed by then"), and the ids around it date any
+-- other id by interpolation. Kept as the minimum ever seen: a later gang switch
+-- must not push the bound forward.
 CREATE TABLE IF NOT EXISTS player_names (
     player_id INTEGER PRIMARY KEY,
     username  TEXT NOT NULL,
-    seen_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    seen_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    joined_at TEXT
 );
 -- The game's own top-50 boards, sampled like everything else. Worth keeping apart
 -- from player_snap for two reasons: they rank by measures the feed does not carry
@@ -271,6 +277,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _add_col(conn, "cell_roads", "path_lng", "REAL")
     _add_col(conn, "cell_roads", "path_kind", "TEXT")
     _add_col(conn, "users", "travel_mode", "TEXT NOT NULL DEFAULT 'car'")
+    _add_col(conn, "player_names", "joined_at", "TEXT")
 
 
 def kv_get(conn, key: str, default=None):

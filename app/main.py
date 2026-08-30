@@ -758,6 +758,7 @@ def api_players(id: int | None = None, q: str | None = None,
         return JSONResponse({"player_id": id,
                              "username": queries.player_name(conn, id),
                              "current": queries.player_current(conn, id),
+                             "registration": queries.registration_bounds(conn, id),
                              "history": queries.player_history(conn, id, since, n)})
     return JSONResponse({"sample": queries.latest_sample(conn),
                          "players": queries.players_now(conn, n)})

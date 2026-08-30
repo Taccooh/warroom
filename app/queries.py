@@ -326,7 +326,8 @@ def find_players(conn, q: str, limit: int) -> list[dict]:
     like = "%" + q.strip().replace("%", r"\%").replace("_", r"\_") + "%"
     ts = latest_sample(conn)
     return [dict(r) for r in conn.execute(
-        """SELECT n.player_id, n.username, p.gang_id, p.gang, p.cells, p.aps, p.ts
+        """SELECT n.player_id, n.username, n.joined_at, p.gang_id, p.gang,
+                  p.cells, p.aps, p.ts
            FROM player_names n
            LEFT JOIN player_snap p ON p.player_id = n.player_id AND p.ts = ?
            WHERE n.username LIKE ? ESCAPE '\\'
@@ -362,10 +363,45 @@ def names_for(conn, ids) -> dict:
     return out
 
 
+def registration_bounds(conn, player_id: int) -> dict:
+    """When did this account first exist? Derived, not reported by wdgwars.
+
+    Ids are handed out sequentially, and every gang member list carries a
+    joined_at. So if a HIGHER id was already in a gang at time T, our player must
+    have registered before T — that bound is hard. There is no equally hard lower
+    bound: an old account can join a gang at any time, so a date below only shows
+    where id allocation stood, not when this player started. Both anchors are
+    returned rather than a single invented range, so the caller can see the
+    difference between what is proven and what is inferred."""
+    before = conn.execute(
+        "SELECT MIN(joined_at) t FROM player_names "
+        "WHERE player_id > ? AND joined_at IS NOT NULL", (player_id,)).fetchone()["t"]
+    below = conn.execute(
+        "SELECT player_id, joined_at FROM player_names "
+        "WHERE player_id < ? AND joined_at IS NOT NULL "
+        "ORDER BY player_id DESC LIMIT 1", (player_id,)).fetchone()
+    above = conn.execute(
+        "SELECT player_id, joined_at FROM player_names "
+        "WHERE player_id > ? AND joined_at IS NOT NULL "
+        "ORDER BY player_id ASC LIMIT 1", (player_id,)).fetchone()
+    own = conn.execute(
+        "SELECT joined_at FROM player_names WHERE player_id = ?", (player_id,)).fetchone()
+    return {
+        # Hard: a higher id was already in a gang then, so this one predates it.
+        "registered_before": before,
+        # Own gang join, if known — also an upper bound, usually a tighter one.
+        "joined_gang": own["joined_at"] if own else None,
+        # Neighbouring anchors, for judging how tight the bracket really is.
+        "anchor_below": dict(below) if below else None,
+        "anchor_above": dict(above) if above else None,
+    }
+
+
 def player_current(conn, player_id: int) -> dict | None:
     """Latest known state of one player: gang, cells, APs."""
     r = conn.execute(
-        """SELECT p.player_id, n.username, p.gang_id, p.gang, p.cells, p.aps, p.ts
+        """SELECT p.player_id, n.username, n.joined_at, p.gang_id, p.gang,
+                  p.cells, p.aps, p.ts
            FROM player_snap p LEFT JOIN player_names n ON n.player_id = p.player_id
            WHERE p.player_id = ? ORDER BY p.ts DESC LIMIT 1""", (player_id,)).fetchone()
     return dict(r) if r else None
