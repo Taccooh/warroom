@@ -28,6 +28,11 @@ https://warroom.mechanics-toolbox.org/about
 - **Coverage brush** — opt-in GPS recording of the ground you actually covered
   while driving: every stamp carries your expected reception radius, the screen
   stays awake while recording, and an interrupted session resumes on its own
+- **Trends** — the one thing the game itself cannot show, because its feed only
+  ever reports the present: your own history over weeks, who gained and lost
+  ground in the last 24 h / 48 h / 7 days, the gang table with movement, and who
+  actually holds cells inside your turf. Charts are server-rendered SVG, so the
+  page draws with JavaScript off
 - **Crew** — friends and opt-in live position sharing (auto-expires, no history)
 - EN/DE, installable as PWA, works on phone and desktop
 
@@ -56,6 +61,14 @@ provider) — that request carries the tour stops plus your own position as
 the start point, resent live while in-app guidance runs. Tapping the Google Maps
 or Street View export hands those stop coordinates to Google. No analytics, no
 trackers, no update check, no phone-home of any kind.
+
+Between users of one instance the line runs like this: everything the **Trends**
+page shows about other players comes from the public game feed and the
+leaderboards — the same numbers wdgwars shows every player anyway. Anything
+derived from a key (your series, your events, your footprint, your position) is
+shown to whoever owns that key and to nobody else. And nothing marks who has an
+account here: the movement tables cover every player in the feed, so signing up
+never lifts anyone into a list that others are missing from.
 
 Raw AP data (exact positions, BSSIDs, names) is aggregated into map cells on
 arrival and never stored. The coverage brush is the one deliberate exception:
