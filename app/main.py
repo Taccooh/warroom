@@ -206,14 +206,21 @@ def analytics_page(request: Request, hours: int = 24,
         return RedirectResponse("/login", status_code=303)
     uid = user["id"]
     hours = 24 if hours not in (24, 48, 168) else hours
+    gangs = queries.gang_standings(conn, uid, hours=hours)
     return render(request, "analytics.html", {
-        "span": queries.archive_span(conn),
+        "span": queries.archive_span(conn, uid),
         "hours": hours,
+        # The two "You" cards run on their own fixed windows, NOT on the chip
+        # above them - a 24 h chip would draw a one-bar chart. The template says
+        # which window each card covers rather than letting the chip look broken.
         "series": queries.own_series(conn, uid),
+        "series_days": 30,
         "activity": queries.event_activity(conn, uid),
-        "movers": queries.movers(conn, hours),
+        "activity_days": 14,
+        "movers": queries.movers(conn, hours, gang_id=queries._gang(conn, uid)),
         "mine": queries.my_movement(conn, uid, hours),
-        "gangs": queries.gang_standings(conn, uid, hours=hours),
+        "gangs": gangs,
+        "gap": queries.points_gap(gangs),
         "neighbours": queries.neighbours(conn, uid, hours=hours),
     })
 
@@ -768,9 +775,10 @@ def api_players(id: int | None = None, q: str | None = None,
                 since: str | None = None, limit: int = 200,
                 conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     """Without `id`: the standings from the latest sample. With `id`: that player's
-    curve. `player_id` is the wdgwars user id from the global feed. `username` is
-    filled in where a leaderboard has ever named that id, and is null otherwise —
-    the territory feed carries no names at all.
+    curve. `player_id` is the wdgwars user id from the global feed. The territory
+    feed carries no names at all; `username` is filled in from the leaderboards and
+    from the member lists of the gangs this instance has users in, and is null
+    where neither source has named that id.
 
     Covers players who hold cells IN A GANG. Gang-less players are absent from the
     feed entirely; the only place they surface is /api/boards."""

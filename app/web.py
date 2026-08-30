@@ -147,10 +147,17 @@ def delta_class(v):
 
 
 def fmt_delta(v):
-    """+12 / -3 / 0, with an explicit sign so a gain is unmistakable."""
+    """+12 / -3 / 0, with an explicit sign so a gain is unmistakable.
+
+    Grouped the same way as every other figure in the app: "+70.680" standing
+    next to "156.123" reads as one number, "+70680" beside it reads as two
+    different conventions six pixels apart."""
     if v is None:
         return "—"
-    return "%+d" % v
+    try:
+        return ("+" if v >= 0 else "-") + fmt_n(abs(int(v)))
+    except (TypeError, ValueError):
+        return "—"
 
 
 templates.env.globals["chart"] = chart

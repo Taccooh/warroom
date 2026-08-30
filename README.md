@@ -394,8 +394,9 @@ curl -H "$AUTH" 'https://your-instance/api/players?id=4711&since=2026-08-21 00:0
 
 The territory feed hands out numeric ids and no names. The game's leaderboards do
 both, so warroom samples them alongside and keeps a growing `player_id → username`
-table. Names then appear in `/api/players` and `/api/boards`; they are `null` for
-anyone who has never placed on a board.
+table. The gang member lists fill the same table — see the coverage note below.
+Names then appear in `/api/players` and `/api/boards`; they are `null` for anyone
+neither source has named.
 
 Sampling the boards also covers the blind spot above: **they are the only place a
 gang-less player appears at all.** Seven boards are kept — `today`, `week`,

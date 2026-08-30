@@ -1331,3 +1331,44 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
 
 /* The way in, from the Info tab's chart section */
 .an-open { margin-top: 0.5rem; }
+
+/* The window the page actually measured, under chips that name a nominal one */
+.an-measured { color: var(--muted, #8b97a6); font-size: 0.72rem; margin: -0.9rem 0 1.2rem;
+               font-family: var(--mono); }
+/* A chip the archive cannot fill still works — it just returns everything there is */
+.an-chip.short { opacity: 0.45; }
+/* Which fixed window a "You" card covers, since the chips do not drive them */
+.an-win { font-style: normal; font-size: 0.7rem; color: var(--muted, #8b97a6);
+          font-family: var(--mono); white-space: nowrap; }
+/* The head is name / figure / note on one line — let the note shrink, never the
+   figure, and never wrap the label away from its window. */
+.an-cardhead > span:first-child { white-space: nowrap; }
+.an-cardhead .an-sub { white-space: nowrap; }
+
+/* Tables get their own horizontal scroll: five columns plus a long gang name
+   outgrow a 360px phone, and .an-wrap has no overflow of its own — without this
+   the whole document slides sideways instead of just the table. */
+.an-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.an-wrap { overflow-x: hidden; }
+.an-tab-gangs th:first-child { width: 3.2rem; }
+/* A long name must not push the delta — the only reason the row exists — off screen */
+.an-list li > span { min-width: 0; }
+.an-nm, .an-gang { overflow-wrap: anywhere; }
+
+/* The result plate takes the colour of the result. It was green in every case,
+   including when it wrapped a loss. */
+.an-mine.d-down { background: #1a1212; border-color: #3a2424; }
+.an-mine.d-flat { background: var(--panel2, #0a0e15); border-color: var(--line, #1d2532); }
+.an-mine b { font-family: var(--mono); font-size: 1.05rem; margin-right: 0.2rem; }
+.an-gap { color: var(--gold, #e8b64c); font-size: 0.8rem; margin: 0.5rem 0 0;
+          font-family: var(--mono); }
+/* Numbers read as numbers: the app's figure idiom is monospace */
+.an-cardhead b, .an-tab .r, .an-d, .an-scale { font-family: var(--mono); }
+/* Sticky range control: it governs the three sections below it, and on a phone
+   those run several screens long. */
+.an-range { position: sticky; top: 0; z-index: 2; background: var(--bg, #07090d);
+            padding: 0.5rem 0; }
+/* A 0.85rem text link is a ~16px tap target; the negative margin keeps the layout. */
+.an-back { min-height: 44px; display: inline-flex; align-items: center;
+           padding: 0.6rem 0.8rem; margin: -0.6rem -0.8rem; }
+.an-foot { margin-top: 1.4rem; display: inline-block; }

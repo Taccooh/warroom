@@ -387,11 +387,13 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
         if stale:
             conn.executemany("DELETE FROM territory WHERE user_id = ? AND cell_key = ?",
                              [(user_id, k) for k in stale])
-        # cap the event log per user at the latest 200 (noisier scopes → more events)
+        # cap the event log per user (noisier scopes → more events). The same
+        # number lives in config, so the trends page can tell a quiet day from a
+        # day this DELETE cut in half.
         conn.execute(
             """DELETE FROM events WHERE user_id = ? AND id NOT IN
-               (SELECT id FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 200)""",
-            (user_id, user_id))
+               (SELECT id FROM events WHERE user_id = ? ORDER BY id DESC LIMIT ?)""",
+            (user_id, user_id, config.EVENT_KEEP))
     return events
 
 

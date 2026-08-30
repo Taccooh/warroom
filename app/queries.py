@@ -304,8 +304,10 @@ def latest_sample(conn) -> str | None:
 
 def players_now(conn, limit: int) -> list[dict]:
     """Standings as of the most recent sample — who holds how much ground.
-    `username` is NULL for anyone who never appeared on a leaderboard: the feed
-    hands out bare ids, only the boards carry names."""
+    `username` is NULL where no name has been learned yet. Two sources fill that
+    table: the leaderboards, and the member list of every gang a user of this
+    instance belongs to — so coverage depends on which gangs are represented
+    here, not on the software."""
     ts = latest_sample(conn)
     if not ts:
         return []
@@ -613,25 +615,33 @@ def _snap_edges(conn, hours: int):
     return oldest, newest
 
 
-def movers(conn, hours: int = 24, limit: int = 10) -> dict:
+def movers(conn, hours: int = 24, limit: int = 10, gang_id: int | None = None) -> dict:
     """Who gained and who lost ground in the window - from the public feed.
 
     This is the one thing the game itself cannot show: it only ever reports the
     present. Players missing from either end are skipped rather than counted as
-    a gain from zero - turning up in the feed is not the same as taking ground."""
+    a gain from zero - turning up in the feed is not the same as taking ground.
+
+    gang_id marks the caller's own gangmates. Five of twenty rows here can be
+    people on your side, and an unmarked list invites reading every one of them
+    as a rival."""
     a, b = _snap_edges(conn, hours)
     if not a or a == b:
-        return {"from": a, "to": b, "hours": hours, "up": [], "down": []}
+        return {"from": a, "to": b, "hours": hours, "up": [], "down": [], "movers": 0}
     rows = [dict(r) for r in conn.execute(
-        """SELECT p1.player_id, n.username, p1.gang, p0.cells AS c0, p1.cells AS c1,
-                  p1.cells - p0.cells AS delta, p1.aps - p0.aps AS d_aps
+        """SELECT p1.player_id, n.username, p1.gang, p1.gang_id, p0.cells AS c0,
+                  p1.cells AS c1, p1.cells - p0.cells AS delta,
+                  p1.aps - p0.aps AS d_aps
            FROM player_snap p0
            JOIN player_snap p1 ON p1.player_id = p0.player_id AND p1.ts = ?
            LEFT JOIN player_names n ON n.player_id = p0.player_id
            WHERE p0.ts = ? AND p1.cells != p0.cells""", (b, a))]
+    for r in rows:
+        r["mine"] = (gang_id is not None and r["gang_id"] == gang_id)
     up = sorted((r for r in rows if r["delta"] > 0), key=lambda r: -r["delta"])[:limit]
     down = sorted((r for r in rows if r["delta"] < 0), key=lambda r: r["delta"])[:limit]
-    return {"from": a, "to": b, "hours": hours, "up": up, "down": down}
+    return {"from": a, "to": b, "hours": hours, "up": up, "down": down,
+            "movers": len(rows)}
 
 
 def my_movement(conn, uid: int, hours: int = 24) -> dict | None:
@@ -656,13 +666,24 @@ def my_movement(conn, uid: int, hours: int = 24) -> dict | None:
     # present at BOTH ends. Counting the field from the newer snapshot alone
     # puts players into the denominator who cannot appear in the numerator -
     # a rank out of more players than were ever compared.
-    better, total = conn.execute(
-        """SELECT SUM((p1.cells - p0.cells) > ?) AS better, COUNT(*) AS total
+    #
+    # The still count matters as much as the rank. Most of the field does not
+    # move in a day - measured here, 914 of 1467 over 24 hours - so a player who
+    # lost a single cell ranks below all of them and lands near 1150th. As a bare
+    # "rank 1150 of 1467" that reads like a collapse; with the still count beside
+    # it, it reads like what it is. Both numbers are shown, never the rank alone.
+    better, still, total = conn.execute(
+        """SELECT SUM((p1.cells - p0.cells) > ?) AS better,
+                  SUM(p1.cells = p0.cells)      AS still,
+                  COUNT(*)                      AS total
            FROM player_snap p0
            JOIN player_snap p1 ON p1.player_id = p0.player_id AND p1.ts = ?
            WHERE p0.ts = ?""", (d["delta"], b, a)).fetchone()
     d["rank_by_delta"] = (better or 0) + 1
+    d["ahead"] = better or 0
+    d["still"] = still or 0
     d["of_players"] = total
+    d["from"], d["to"] = a, b
     return d
 
 
@@ -678,8 +699,9 @@ def gang_standings(conn, uid: int, limit: int = 12, hours: int = 24) -> list[dic
            ORDER BY (rank IS NULL), rank LIMIT ?""", (limit,)).fetchall()
     prev = {}
     if a and a != b:
-        for r in conn.execute("SELECT gang, cells, rank FROM gang_snap WHERE ts = ?", (a,)):
-            prev[r["gang"]] = (r["cells"], r["rank"])
+        for r in conn.execute("SELECT gang, cells, rank, points FROM gang_snap WHERE ts = ?",
+                              (a,)):
+            prev[r["gang"]] = (r["cells"], r["rank"], r["points"])
     out = []
     for r in rows:
         d = dict(r)
@@ -687,9 +709,31 @@ def gang_standings(conn, uid: int, limit: int = 12, hours: int = 24) -> list[dic
         d["d_cells"] = (r["cells"] - p[0]) if p else None
         # Rank delta is inverted on purpose: 5 -> 3 is a gain of two, not a loss.
         d["d_rank"] = (p[1] - r["rank"]) if (p and p[1] and r["rank"]) else None
+        # Points are what the rank is actually made of - a table that ranks by
+        # points and only charts cells cannot answer "are we catching them".
+        d["d_points"] = (r["points"] - p[2]) if (p and p[2] is not None
+                                                 and r["points"] is not None) else None
         d["is_mine"] = (r["gang_id"] == gid)
         out.append(d)
     return out
+
+
+def points_gap(gangs: list[dict]) -> dict | None:
+    """How far the caller's gang is behind the one directly above it.
+
+    Read off the ORDERED list, never by arithmetic on `rank` - rank is nullable
+    (gang_snap keeps gangs the leaderboard did not rank) and two gangs can share
+    a position. The row above in the list is the one to catch, by definition."""
+    for i, g in enumerate(gangs):
+        if not g.get("is_mine"):
+            continue
+        if i == 0:
+            return None                      # already top of the table
+        above = gangs[i - 1]
+        if g.get("points") is None or above.get("points") is None:
+            return None
+        return {"gang": above["gang"], "points": above["points"] - g["points"]}
+    return None
 
 
 def neighbours(conn, uid: int, limit: int = 12, hours: int = 24) -> list[dict]:
@@ -707,37 +751,69 @@ def neighbours(conn, uid: int, limit: int = 12, hours: int = 24) -> list[dict]:
                    JOIN player_snap p1 ON p1.player_id = p0.player_id AND p1.ts = ?
                    WHERE p0.ts = ?""", (b, a)):
             deltas[r["player_id"]] = r["delta"]
-    names = dict(conn.execute("SELECT player_id, username FROM player_names"))
-    out = []
-    for r in conn.execute(
-            """SELECT t.owner_user_id AS pid, t.gang, COUNT(*) AS cells,
-                      SUM(COALESCE(t.count, 0)) AS aps
-               FROM territory t
-               WHERE t.user_id = ? AND t.owner_user_id IS NOT NULL
-               GROUP BY t.owner_user_id ORDER BY cells DESC LIMIT ?""",
-            (uid, limit)):
-        out.append({"player_id": r["pid"], "username": names.get(r["pid"]),
-                    "gang": r["gang"], "cells_here": r["cells"], "aps_here": r["aps"],
-                    "delta": deltas.get(r["pid"]),
-                    "is_me": (me is not None and r["pid"] == me)})
-    return out
+    rows = list(conn.execute(
+        """SELECT t.owner_user_id AS pid, t.gang, COUNT(*) AS cells
+           FROM territory t
+           WHERE t.user_id = ? AND t.owner_user_id IS NOT NULL
+           GROUP BY t.owner_user_id ORDER BY cells DESC LIMIT ?""", (uid, limit)))
+    # Twelve names, not the whole table: names_for takes the ids it needs.
+    # Its keys are STRINGS - it feeds a JSON response where they have to be.
+    names = names_for(conn, [r["pid"] for r in rows])
+    return [{"player_id": r["pid"], "username": names.get(str(r["pid"])),
+             "gang": r["gang"], "cells_here": r["cells"],
+             # NOTE: a world-wide delta beside an in-turf count. territory keeps no
+             # history, so an in-turf trend cannot be computed - the column is
+             # labelled for what it is rather than quietly implying the other thing.
+             "delta_all": deltas.get(r["pid"]),
+             "is_me": (me is not None and r["pid"] == me)} for r in rows]
 
 
 def event_activity(conn, uid: int, days: int = 14) -> list[dict]:
-    """Own watcher events per day - a private activity curve, own data only."""
-    return [dict(r) for r in conn.execute(
+    """Own watcher events per day - a private activity curve, own data only.
+
+    events is pruned to the newest 200 rows per user every cycle (poller._diff),
+    so an active user's window is capped by that long before `days` runs out. The
+    caller gets the real edges back and says so, rather than printing a retention
+    limit as if it were a measurement."""
+    rows = [dict(r) for r in conn.execute(
         """SELECT substr(ts, 1, 10) AS day, COUNT(*) AS n,
                   SUM(kind = 'captured') AS captured,
                   SUM(kind = 'lost') AS lost
            FROM events WHERE user_id = ? AND ts >= datetime('now', ?)
            GROUP BY day ORDER BY day""", (uid, "-%d days" % days))]
+    # The oldest surviving day is a truncated one whenever the cap bit: it holds
+    # only the events that happened to fall inside the last 200. Drop it, or the
+    # first bar reads as a quiet day that never was.
+    total = conn.execute("SELECT COUNT(*) n FROM events WHERE user_id = ?",
+                         (uid,)).fetchone()["n"]
+    capped = total >= config.EVENT_KEEP and len(rows) > 1
+    if capped:
+        rows = rows[1:]
+    return rows
 
 
-def archive_span(conn) -> dict:
+def archive_span(conn, uid: int | None = None) -> dict:
     """How far the archive reaches. Shown on the page so a two-day window is not
-    mistaken for a long-term trend."""
-    p = conn.execute("SELECT MIN(ts) a, MAX(ts) b, COUNT(DISTINCT ts) n "
-                     "FROM player_snap").fetchone()
-    s = conn.execute("SELECT MIN(ts) a FROM stats").fetchone()
-    return {"snap_from": p["a"], "snap_to": p["b"], "samples": p["n"],
-            "stats_from": s["a"] if s else None}
+    mistaken for a long-term trend.
+
+    MIN and MAX are separate statements on purpose: SQLite optimises a lone
+    MIN(ts)/MAX(ts) into an index seek, and loses that the moment a second
+    aggregate joins the select list. On a million-row player_snap that is the
+    difference between a seek and a full scan on every page load."""
+    lo = conn.execute("SELECT MIN(ts) t FROM player_snap").fetchone()["t"]
+    hi = conn.execute("SELECT MAX(ts) t FROM player_snap").fetchone()["t"]
+    n = conn.execute("SELECT COUNT(*) n FROM (SELECT DISTINCT ts FROM player_snap)"
+                     ).fetchone()["n"]
+    # The caller's OWN first sample - the caption promises "your own series", and
+    # an unscoped MIN would answer with the oldest account on the box instead.
+    stats_from = None
+    if uid is not None:
+        stats_from = conn.execute("SELECT MIN(ts) t FROM stats WHERE user_id = ?",
+                                  (uid,)).fetchone()["t"]
+    span_hours = 0
+    if lo and hi:
+        d = conn.execute("SELECT (julianday(?) - julianday(?)) * 24 h",
+                         (hi, lo)).fetchone()["h"]
+        span_hours = int(d or 0)
+    return {"snap_from": lo, "snap_to": hi, "samples": n,
+            "stats_from": stats_from, "span_hours": span_hours}

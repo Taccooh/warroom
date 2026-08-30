@@ -68,3 +68,9 @@ ARCHIVE_HOURS = float(os.environ.get("WARROOM_ARCHIVE_HOURS", "1"))
 # consistent with the rest of the app — see /about, nothing here expires on its
 # own). Set it if disk matters more than long-range history.
 ARCHIVE_KEEP_DAYS = int(os.environ.get("WARROOM_ARCHIVE_KEEP_DAYS", "0"))
+
+# Watcher events kept per user. The log is a rolling window, not an archive:
+# noisier scopes produce more events, and nothing here is meant to grow without
+# bound. queries.event_activity needs the same number to tell a quiet day from a
+# day the cap simply cut off.
+EVENT_KEEP = int(os.environ.get("WARROOM_EVENT_KEEP", "200"))
