@@ -164,3 +164,86 @@ templates.env.globals["chart"] = chart
 templates.env.globals["bars"] = bars
 templates.env.filters["dclass"] = delta_class
 templates.env.filters["delta"] = fmt_delta
+
+
+# --- Trends v4 geometry ------------------------------------------------------
+# Still SVG built on the server: the CSP forbids a chart library, and a page that
+# draws with JavaScript off is worth keeping. These return coordinates, never
+# markup - the template decides what the shapes look like.
+
+def ridge(shape, w=720, h=200, floor=6):
+    """The whole field's movement as a mountain range.
+
+    One column per histogram bin, height by count. Counts are square-rooted
+    before scaling: the zero bin holds two thirds of the field (914 of 1467 on
+    a real day) and a linear scale would flatten every other column into the
+    floor. The zero column is returned separately so the template can give the
+    sedentary their own colour - they are the wall the movers stand against."""
+    import math
+    bins = shape.get("bins") or []
+    if not bins:
+        return {"w": w, "h": h, "cols": [], "zero": None, "me": None, "ridge": ""}
+    top = math.sqrt(shape.get("max") or 1) or 1
+    bw = w / len(bins)
+    cols, pts = [], []
+    for i, n in enumerate(bins):
+        bh = floor + (math.sqrt(n) / top) * (h - floor) if n else 0.0
+        x = i * bw
+        cols.append({"x": round(x, 1), "w": round(bw + 0.6, 1),
+                     "y": round(h - bh, 1), "h": round(bh, 1),
+                     "n": n, "side": ("zero" if i == shape["zero"]
+                                      else ("up" if i > shape["zero"] else "down"))})
+        pts.append("%s,%s" % (round(x + bw / 2, 1), round(h - bh, 1)))
+    me = shape.get("me")
+    return {"w": w, "h": h, "cols": cols, "ridge": " ".join(pts),
+            "zero_x": round((shape["zero"] + 0.5) * bw, 1),
+            "me_x": (round((me + 0.5) * bw, 1) if me is not None else None)}
+
+
+# Bearing → degrees clockwise from north. "center" has no bearing at all and is
+# drawn as a ring instead; giving it one would invent a direction.
+_BRG = {"n": 0, "ne": 45, "e": 90, "se": 135, "s": 180, "sw": 225, "w": 270, "nw": 315}
+
+
+def rose(rows, size=240, r_min=26, r_max=104):
+    """Compass wedges for the attack bearings.
+
+    Radius scales with the SQUARE ROOT of the report count, because a wedge is
+    read as an area: doubling the radius of a 45 degree wedge quadruples its ink,
+    so linear radius would make a front of 16 look four times worse than it is."""
+    import math
+    out = []
+    if not rows:
+        return {"size": size, "c": size / 2, "wedges": [], "ring": False}
+    top = max(r["n"] for r in rows) or 1
+    c = size / 2
+    ring = False
+    for r in rows:
+        if r.get("dir") == "center":
+            ring = True
+            out.append({"gang": r["gang"], "n": r["n"], "center": True,
+                        "color": r.get("color"), "lx": c, "ly": c - r_min - 12})
+            continue
+        deg = _BRG.get(r.get("dir"), 0)
+        rad = r_min + math.sqrt(r["n"] / top) * (r_max - r_min)
+        a0 = math.radians(deg - 22.5 - 90)
+        a1 = math.radians(deg + 22.5 - 90)
+        p = []
+        for a, rr in ((a0, r_min), (a1, r_min)):
+            p.append((c + rr * math.cos(a), c + rr * math.sin(a)))
+        d = ("M%.1f,%.1f A%.1f,%.1f 0 0 1 %.1f,%.1f L%.1f,%.1f A%.1f,%.1f 0 0 0 %.1f,%.1f Z"
+             % (p[0][0], p[0][1], r_min, r_min, p[1][0], p[1][1],
+                c + rad * math.cos(a1), c + rad * math.sin(a1), rad, rad,
+                c + rad * math.cos(a0), c + rad * math.sin(a0)))
+        mid = math.radians(deg - 90)
+        out.append({"gang": r["gang"], "n": r["n"], "dir": r["dir"], "d": d,
+                    "center": False, "color": r.get("color"),
+                    "lx": round(c + (rad + 14) * math.cos(mid), 1),
+                    "ly": round(c + (rad + 14) * math.sin(mid), 1),
+                    "anchor": ("middle" if deg in (0, 180)
+                               else ("start" if deg < 180 else "end"))})
+    return {"size": size, "c": c, "r_min": r_min, "wedges": out, "ring": ring}
+
+
+templates.env.globals["ridge"] = ridge
+templates.env.globals["rose"] = rose

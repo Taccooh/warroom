@@ -191,22 +191,32 @@ def about_page(request: Request):
 
 
 @app.get("/analytics")
-def analytics_page(request: Request, hours: int = 24,
+def analytics_page(request: Request, hours: int = 24, scope: str | None = None,
                    conn: sqlite3.Connection = Depends(get_db),
                    user=Depends(current_user)):
     """Trends over time - the one thing the game itself cannot show, because its
     feed only ever reports the present.
 
+    `scope` decides WHO the caller is measured against: everyone in the feed,
+    their own gang, or the players who actually hold ground on their map. A rank
+    out of 1467 is arithmetic; a rank out of the 41 people on your map is a fact
+    about your war.
+
     Privacy boundary, deliberately: everything about OTHER players on this page
     comes from the public feed and the leaderboards, the same data the game shows
     everyone. Only the caller's own series come from their key. Nothing marks who
-    has a warroom account - the movement tables cover every player in the feed,
-    so signing up never puts anyone into a list that others are absent from."""
+    has a warroom account - membership of every scope is decided by holding a cell
+    or being in a gang, never by having an account here, so signing up never puts
+    anyone into a list that others are absent from."""
     if not user:
         return RedirectResponse("/login", status_code=303)
     uid = user["id"]
     hours = 24 if hours not in (24, 48, 168) else hours
+    if scope not in queries.SCOPES:
+        scope = queries.default_scope(conn, uid)
     gangs = queries.gang_standings(conn, uid, hours=hours)
+    front = queries.bearings(conn, uid)
+    front["keep"] = config.EVENT_KEEP
     return render(request, "analytics.html", {
         "span": queries.archive_span(conn, uid),
         "hours": hours,
@@ -217,8 +227,10 @@ def analytics_page(request: Request, hours: int = 24,
         "series_days": 30,
         "activity": queries.event_activity(conn, uid),
         "activity_days": 14,
-        "movers": queries.movers(conn, hours, gang_id=queries._gang(conn, uid)),
-        "mine": queries.my_movement(conn, uid, hours),
+        # ONE population feeds the standing, the movers and the field shape, so
+        # all three are counted over the same set of players.
+        "field": queries.field(conn, uid, hours, scope),
+        "front": front,
         "gangs": gangs,
         "gap": queries.points_gap(gangs),
         "neighbours": queries.neighbours(conn, uid, hours=hours),

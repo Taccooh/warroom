@@ -13,25 +13,131 @@
     <a class="an-back" href="/?tab=info">{{ t('an_back') }}</a>
   </header>
 
-  {# The window is short on a young archive. Saying so beats letting someone
-     read a two-day slice as a long-term trend. #}
-  <p class="an-span">{{ t('an_span', a=(span.snap_from or '—')|localtime,
-                          b=(span.snap_to or '—')|localtime, n=span.samples) }}</p>
-
-  <div class="an-range">
-    {% for h, lbl in [(24, t('an_24h')), (48, t('an_48h')), (168, t('an_7d'))] %}
-    {# A chip the archive cannot fill yet still works — it just returns the whole
-       archive. Dimming it says so instead of pretending the window was measured. #}
-    <a href="/analytics?hours={{ h }}"
-       class="an-chip{% if hours == h %} on{% endif %}{% if h > span.span_hours %} short{% endif %}"
-       {% if h > span.span_hours %}title="{{ t('an_chip_short') }}"{% endif %}>{{ lbl }}</a>
-    {% endfor %}
+  {# The rail: what is measured, and against whom. Plain links, so it works with
+     JavaScript off, survives a reload and can be bookmarked. It scrolls sideways
+     rather than wrapping — German reads ALLE / MEINE GANG / MEINE KARTE, and a
+     wrapping control group would make the page's chrome height depend on how
+     long the strings happen to be in the current language. #}
+  <div class="an-rail">
+    <span class="an-glabel">{{ t('an_scope') }}</span>
+    <div class="an-group">
+      {% for s, lbl in [('all', t('an_scope_all')), ('gang', t('an_scope_gang')), ('turf', t('an_scope_turf'))] %}
+      <a href="/analytics?hours={{ hours }}&amp;scope={{ s }}"
+         class="an-chip{% if field.scope == s %} on{% endif %}">{{ lbl }}</a>
+      {% endfor %}
+    </div>
+    <div class="an-group">
+      {% for h, lbl in [(24, t('an_24h')), (48, t('an_48h')), (168, t('an_7d'))] %}
+      {# A window the archive cannot fill still works — it just returns everything
+         there is. Dimming it says so instead of pretending it was measured. #}
+      <a href="/analytics?hours={{ h }}&amp;scope={{ field.scope }}"
+         class="an-chip{% if hours == h %} on{% endif %}{% if h > span.span_hours %} short{% endif %}"
+         {% if h > span.span_hours %}title="{{ t('an_chip_short') }}"{% endif %}>{{ lbl }}</a>
+      {% endfor %}
+    </div>
   </div>
   {# What was ACTUALLY measured: both ends are real samples, and on a young
      archive they are not the ends the chip names. #}
-  {% if movers['from'] and movers['to'] %}
-  <p class="an-measured">{{ t('an_measured', a=movers['from']|localtime, b=movers['to']|localtime) }}</p>
-  {% endif %}
+  <p class="an-measured">{% if field['from'] and field['to'] %}<span>{{ t('an_measured', a=field['from']|localtime, b=field['to']|localtime) }}</span>{% endif %}<span>{{ t('an_scope_n_' ~ field.scope, n=field.population) }}</span></p>
+
+  {# ---------- the tide: one number at real size, inside the shape of the field ---------- #}
+  <section class="an-sec">
+    <h2>{{ t('an_tide') }}</h2>
+    {% if field.stand %}
+    {% set rg = ridge(field.shape) %}
+    <div class="an-plate an-hero {{ 'sub-gain' if field.stand.delta > 0 else ('sub-loss' if field.stand.delta < 0 else 'sub-flat') }}">
+      <div class="an-lattice" aria-hidden="true"></div>
+      {# Every compared player's change as a mountain range: losses to the left,
+         gains to the right, and the tall pillar in the middle is everyone who did
+         not move — which on a normal day is most of the field. Your own position
+         is the gold hairline. #}
+      <svg class="an-ridge" viewBox="0 0 {{ rg.w }} {{ rg.h }}" preserveAspectRatio="none"
+           aria-hidden="true">
+        {% for c in rg.cols %}{% if c.h %}<rect class="rg-{{ c.side }}" x="{{ c.x }}" y="{{ c.y }}" width="{{ c.w }}" height="{{ c.h }}"/>{% endif %}{% endfor %}
+        <polyline class="rg-line" points="{{ rg.ridge }}"/>
+        {% if rg.me_x is not none %}<line class="rg-me" x1="{{ rg.me_x }}" y1="0" x2="{{ rg.me_x }}" y2="{{ rg.h }}"/>
+        <circle class="rg-medot" cx="{{ rg.me_x }}" cy="8" r="5"/>{% endif %}
+      </svg>
+      <div class="an-hero-body">
+        <div class="an-face {{ 'gain' if field.stand.delta > 0 else ('loss' if field.stand.delta < 0 else '') }}">{{ field.stand.delta | delta }}<span class="an-unit">{{ t('an_tide_cells') }}</span></div>
+        {# The still count is never omitted: with most of the field stationary, a
+           single lost cell puts you behind hundreds of people who did nothing, and
+           the rank alone would read as a collapse. #}
+        <p>{{ t('an_tide_pop', n=field.stand.of_players, s=field.stand.still, r=field.stand.ahead) }}</p>
+        {% if field.moved == 0 %}<p>{{ t('an_tide_quiet') }}</p>{% endif %}
+      </div>
+      <p class="an-fine">{{ t('an_tide_shape') }}</p>
+      <p class="an-src">{{ t('an_src', w=t('an_win_hours', n=hours), n=field.population, src=t('an_src_feed')) }}</p>
+    </div>
+    {% else %}
+    <div class="an-plate sub-flat">
+      <p class="an-empty">{% if field.population %}{{ t('an_tide_nome') }}{% else %}{{ t('an_nomove') }}{% endif %}</p>
+      {% if field.population %}
+      <p class="an-mine">{{ t('an_tide_churn', n=field.population, m=field.moved, c=field.churn|n) }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </section>
+
+  {# ---------- the front: where the pressure comes from ---------- #}
+  <section class="an-sec">
+    <h2>{{ t('an_front') }}</h2>
+    <div class="an-band">
+      <div class="an-plate sub-front">
+        {% set ro = rose(front.rows) %}
+        <svg class="an-rose" viewBox="0 0 {{ ro.size }} {{ ro.size }}" role="img"
+             aria-label="{{ t('an_front') }}">
+          <defs>
+            {# Hot at the rim, faint at the hub: pressure reads as coming inward #}
+            <radialGradient id="gInward">
+              <stop offset="0.25" stop-color="{{ '#d63b41' }}" stop-opacity="0.05"/>
+              <stop offset="1" stop-color="{{ '#d63b41' }}" stop-opacity="0.42"/>
+            </radialGradient>
+          </defs>
+          {% for r in [40, 70, 100] %}<circle class="ro-ring" cx="{{ ro.c }}" cy="{{ ro.c }}" r="{{ r }}"/>{% endfor %}
+          {% for a in [0, 45, 90, 135] %}<line class="ro-spoke" x1="{{ ro.c }}" y1="{{ ro.c - 104 }}" x2="{{ ro.c }}" y2="{{ ro.c + 104 }}" transform="rotate({{ a }} {{ ro.c }} {{ ro.c }})"/>{% endfor %}
+          <text class="ro-card" x="{{ ro.c }}" y="14" text-anchor="middle">{{ t('an_dir_n') }}</text>
+          <text class="ro-card" x="{{ ro.size - 4 }}" y="{{ ro.c + 4 }}" text-anchor="end">{{ t('an_dir_e') }}</text>
+          <text class="ro-card" x="{{ ro.c }}" y="{{ ro.size - 4 }}" text-anchor="middle">{{ t('an_dir_s') }}</text>
+          <text class="ro-card" x="4" y="{{ ro.c + 4 }}">{{ t('an_dir_w') }}</text>
+          {% for w in ro.wedges %}
+            {% if w.center %}
+            {# A centroid inside the turf core has no bearing — drawing it as a
+               wedge would invent a direction it does not have. #}
+            <circle class="ro-inside" cx="{{ ro.c }}" cy="{{ ro.c }}" r="28"/>
+            {% else %}
+            {# No gang label inside the rose: five names around a 320px circle
+               collide with each other and get clipped by the viewBox. The roster
+               beside it carries the names, the bearing and the count. #}
+            <path class="ro-wedge" fill="url(#gInward)" d="{{ w.d }}"/>
+            {% endif %}
+          {% endfor %}
+          {# The hub is your turf — one of the few gold marks on the page #}
+          <rect class="ro-hub" x="{{ ro.c - 4 }}" y="{{ ro.c - 4 }}" width="8" height="8"
+                transform="rotate(45 {{ ro.c }} {{ ro.c }})"/>
+        </svg>
+      </div>
+      <div class="an-plate sub-front">
+        {% if front.rows %}
+        {% for r in front.rows %}
+        <div class="an-front-row">
+          {% if r.color %}<span class="an-gcolor" style="background: {{ r.color }}"></span>{% endif %}
+          <span class="an-nm">{{ r.gang }}</span>
+          <span class="an-gang">{{ t('an_dir_' ~ r.dir) }}</span>
+          <span class="an-front-n">{{ r.n }}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="an-empty">{{ t('an_front_none') }}</p>
+        {% endif %}
+        {# Three things the rose cannot be read without: whose watcher drew it,
+           how far the event log actually reaches, and over what window. #}
+        <p class="an-fine">{{ t('an_front_scope_' ~ front.level) }}
+          {% if front.capped %}{{ t('an_front_capped', k=front.keep, a=front.oldest|localtime) }}{% endif %}</p>
+        <p class="an-src">{{ t('an_src', w=t('an_win_days', n=front.days), n=front.rows|length, src=t('an_src_events')) }}</p>
+      </div>
+    </div>
+  </section>
 
   {# ---------- your own series: private, from your key ---------- #}
   <section class="an-sec">
@@ -107,44 +213,39 @@
   {# ---------- the field: public feed data, everyone alike ---------- #}
   <section class="an-sec">
     <h2>{{ t('an_field') }}</h2>
-    {% if mine %}
-    {# The plate takes the colour of the result — it used to be green around a loss. #}
-    <div class="an-mine {{ mine.delta | dclass }}">
-      <b class="{{ mine.delta | dclass }}">{{ mine.delta | delta }}</b>
-      {# The still count belongs beside the rank: most of the field does not move
-         in a day, so losing one cell drops you below hundreds of people who did
-         nothing. Without it the rank alone reads as a collapse. #}
-      {{ t('an_you_moved', r=mine.ahead, s=mine.still, n=mine.of_players) }}
-    </div>
-    {% endif %}
-
-    {% if movers.up or movers.down %}
-    <div class="an-cols">
-      <div class="an-col">
-        <h3>{{ t('an_gainers') }}</h3>
-        <ol class="an-list">
-          {# Own gangmates marked: a quarter of these rows can be your own side,
-             and an unmarked list reads as twenty rivals. #}
-          {% for m in movers.up %}
-          <li{% if m.mine %} class="an-me"{% endif %}><span class="an-nm">{{ m.username or '#' ~ m.player_id }}</span>
-              <span class="an-gang">{{ m.gang or '—' }}</span>
-              <span class="an-d d-up">{{ m.delta | delta }}</span></li>
-          {% endfor %}
-        </ol>
+    {% if field.up or field.down %}
+    <div class="an-plate sub-field">
+      <div class="an-cols">
+        <div class="an-col">
+          <h3>{{ t('an_gainers') }}</h3>
+          <ol class="an-list">
+            {# Own gangmates marked: a quarter of these rows can be your own side,
+               and an unmarked list reads as twenty rivals. #}
+            {% for m in field.up %}
+            <li{% if m.mine %} class="an-me"{% endif %}><span class="an-nm">{{ m.username or '#' ~ m.player_id }}</span>
+                <span class="an-gang">{{ m.gang or '—' }}</span>
+                <span class="an-d d-up">{{ m.delta | delta }}</span></li>
+            {% endfor %}
+          </ol>
+        </div>
+        <div class="an-col">
+          <h3>{{ t('an_losers') }}</h3>
+          <ol class="an-list">
+            {% for m in field.down %}
+            <li{% if m.mine %} class="an-me"{% endif %}><span class="an-nm">{{ m.username or '#' ~ m.player_id }}</span>
+                <span class="an-gang">{{ m.gang or '—' }}</span>
+                <span class="an-d d-down">{{ m.delta | delta }}</span></li>
+            {% endfor %}
+          </ol>
+        </div>
       </div>
-      <div class="an-col">
-        <h3>{{ t('an_losers') }}</h3>
-        <ol class="an-list">
-          {% for m in movers.down %}
-          <li{% if m.mine %} class="an-me"{% endif %}><span class="an-nm">{{ m.username or '#' ~ m.player_id }}</span>
-              <span class="an-gang">{{ m.gang or '—' }}</span>
-              <span class="an-d d-down">{{ m.delta | delta }}</span></li>
-          {% endfor %}
-        </ol>
-      </div>
+      {% if field.scope != 'all' and field.population < 60 %}
+      <p class="an-fine">{{ t('an_scope_small') }}</p>
+      {% endif %}
+      <p class="an-src">{{ t('an_src', w=t('an_win_hours', n=hours), n=field.population, src=t('an_src_feed')) }}</p>
     </div>
     {% else %}
-      <p class="an-empty">{{ t('an_nomove') }}</p>
+      <p class="an-empty">{{ t('an_scope_empty') if field.scope != 'all' else t('an_nomove') }}</p>
     {% endif %}
   </section>
 

@@ -1257,118 +1257,231 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
 .tok-list form { margin-left: auto; }
 
 /* --- Trends page -----------------------------------------------------------
-   Charts are inline SVG rendered on the server (see web.chart/bars): the strict
-   CSP rules out a charting library, and this way the page also draws with
-   JavaScript off. Colours follow the map: gold is yours, red a loss, frost a
-   gain, so the page reads the same way the battle map does. */
-.an-wrap { max-width: 760px; margin: 0 auto; padding: 1rem 1rem 3rem; }
-.an-head { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.3rem; }
+   Charts are inline SVG rendered on the server (see web.chart/bars/ridge/rose):
+   the strict CSP rules out a charting library, and this way the page also draws
+   with JavaScript off.
+
+   THE GOLD LAW. The page used to paint every section heading gold, so gold said
+   nothing. Here it marks YOU and your gains, and appears in exactly five places:
+   the hero numeral when the answer is a gain, your own row's left edge in any
+   list, your position marker on the field, your own captures, and the rose hub
+   that stands for your turf. Everything about the FIELD is frost; everything
+   ranked above you is enemy red; everything structural is line/edge. That rule
+   is what makes the page readable at a glance in a parked car. */
+
+.an-wrap {
+  --t-hero: clamp(3.1rem, 15vw, 5.4rem);
+  --t-h2: 1rem; --t-fig: 1.3rem; --t-body: 0.86rem;
+  --t-meta: 0.72rem; --t-src: 0.64rem;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 20px; --s5: 32px; --s6: 46px;
+  max-width: 860px; margin: 0 auto; padding: var(--s4) var(--s4) var(--s6);
+  overflow-x: hidden;
+}
+@media (min-width: 1000px) { .an-wrap { max-width: 1060px; } }
+
+/* --- masthead + rail ------------------------------------------------------ */
+.an-head { display: flex; align-items: center; gap: var(--s3);
+           padding-bottom: var(--s2); border-bottom: 1px solid var(--gold-dim); }
 .an-head .brand { flex: 1; }
-.an-back { color: var(--muted, #8b97a6); text-decoration: none; font-size: 0.85rem; }
-.an-back:hover { color: var(--gold, #e8b64c); }
-.an-span { color: var(--muted, #8b97a6); font-size: 0.78rem; margin: 0 0 0.8rem; line-height: 1.5; }
+.an-back { min-height: 44px; display: inline-flex; align-items: center;
+           padding: 0.6rem 0.8rem; margin: -0.6rem -0.8rem;
+           color: var(--muted); text-decoration: none; font-size: 0.8rem;
+           font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
+.an-back:hover { color: var(--gold); }
+.an-foot { margin-top: var(--s4); display: inline-block; }
 
-.an-range { display: flex; gap: 0.4rem; margin-bottom: 1.2rem; }
+/* The rail never wraps: German reads ALLE / MEINE GANG / MEINE KARTE, and a
+   wrapping control group makes the page's chrome height depend on string
+   length. It scrolls sideways like the app's turf bar instead. */
+.an-rail { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap;
+           margin: var(--s3) 0 var(--s2); }
+.an-group { display: flex; gap: var(--s1); overflow-x: auto; scrollbar-width: none; }
+.an-group::-webkit-scrollbar { display: none; }
+.an-glabel { font-family: var(--mono); font-size: var(--t-src); color: var(--muted);
+             text-transform: uppercase; letter-spacing: 0.12em; white-space: nowrap;
+             align-self: center; }
 .an-chip {
-  padding: 0.3rem 0.7rem; border: 1px solid #26303c; border-radius: 999px;
-  color: var(--muted, #8b97a6); text-decoration: none; font-size: 0.8rem;
+  display: inline-flex; align-items: center; min-height: 34px;
+  padding: 0 0.7rem; border: 1px solid var(--edge); border-radius: 0;
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+  background: var(--iron); color: var(--muted); text-decoration: none;
+  font-family: var(--mono); font-size: var(--t-meta); white-space: nowrap;
+  text-transform: uppercase; letter-spacing: 0.08em;
 }
-.an-chip.on { border-color: var(--gold, #e8b64c); color: var(--gold, #e8b64c); }
+.an-chip:hover { color: var(--text); border-color: var(--free); }
+.an-chip.on { border-color: var(--gold); color: var(--gold-bright); background: #171208; }
+/* A window the archive cannot fill still works — it returns everything there is */
+.an-chip.short { opacity: 0.42; }
+/* Two separate facts — the window that was measured, and against how many. They
+   run together as one sentence if they share a line. */
+.an-measured { color: var(--muted); font-size: var(--t-src); font-family: var(--mono);
+               margin: 0 0 var(--s5); letter-spacing: 0.06em;
+               display: flex; flex-direction: column; gap: 2px; }
 
-.an-sec { margin: 0 0 2rem; }
+/* --- the plate: one object, its left edge coloured by its subject ---------- */
+.an-plate {
+  position: relative; background-color: var(--panel2);
+  background-image: var(--grain), linear-gradient(180deg, #121826, var(--panel2));
+  border: 1px solid var(--line); border-radius: 0; clip-path: var(--notch);
+  box-shadow: inset 0 1px 0 rgba(232, 182, 76, 0.13);
+  padding: var(--s4); margin-bottom: var(--s3);
+}
+.an-plate::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+                    width: 3px; background: var(--sub, var(--edge)); }
+.an-plate.sub-front { --sub: var(--enemy); }
+.an-plate.sub-field { --sub: var(--frost); }
+.an-plate.sub-mine  { --sub: var(--gold-soft); }
+.an-plate.sub-gain  { --sub: var(--gold); }
+.an-plate.sub-loss  { --sub: var(--enemy); }
+.an-plate.sub-flat  { --sub: var(--edge); }
+
+/* --- section headers: frost, never gold ----------------------------------- */
+.an-sec { margin: 0 0 var(--s6); }
 .an-sec h2 {
-  font-family: "Germania One", var(--display, serif); font-weight: normal;
-  font-size: 1.15rem; letter-spacing: 0.04em; color: var(--gold, #e8b64c);
-  margin: 0 0 0.7rem; padding-bottom: 0.3rem; border-bottom: 1px solid #1b2029;
+  display: flex; align-items: center; gap: 0.55rem; margin: 0 0 var(--s3);
+  font-family: var(--display); font-size: var(--t-h2); font-weight: 400;
+  text-transform: uppercase; letter-spacing: 0.16em; color: var(--frost);
 }
-.an-sec h3 { font-size: 0.85rem; color: var(--muted, #8b97a6); margin: 0 0 0.4rem; font-weight: 600; }
+.an-sec h2::before { content: ""; width: 8px; height: 8px; transform: rotate(45deg);
+                     background: var(--edge); flex: 0 0 auto; }
+.an-sec h2::after { content: ""; height: 1px; flex: 1 1 auto;
+                    background: linear-gradient(90deg, var(--edge), transparent); }
+.an-sec h3 { font-family: var(--mono); font-size: var(--t-src); color: var(--muted);
+             margin: 0 0 var(--s2); font-weight: 600; text-transform: uppercase;
+             letter-spacing: 0.14em; }
 
-.an-card { background: #0d1219; border: 1px solid #1b2029; border-radius: 8px;
-           padding: 0.7rem 0.8rem; margin-bottom: 0.7rem; }
-.an-cardhead { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.82rem;
-               color: var(--muted, #8b97a6); margin-bottom: 0.4rem; }
-.an-cardhead b { font-size: 1.1rem; color: var(--text, #e6edf3); margin-left: auto; }
-.an-sub { font-size: 0.8rem; }
-/* preserveAspectRatio=none stretches the viewBox to the card, so the chart is
-   responsive without recomputing geometry per screen width. */
-.an-chart { width: 100%; height: 110px; display: block; }
-.an-line { fill: none; stroke: #6ea8d8; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
-.an-line.gold { stroke: var(--gold, #e8b64c); }
-.an-fill { fill: rgba(110, 168, 216, 0.13); stroke: none; }
-.an-dot { fill: #6ea8d8; }
-.an-dot.gold { fill: var(--gold, #e8b64c); }
-.an-bar { fill: #3d5a75; }
-.an-scale { display: flex; justify-content: space-between; color: var(--muted, #8b97a6);
-            font-size: 0.7rem; margin-top: 0.2rem; }
+/* --- where a number came from, and what it does not cover ----------------- */
+.an-src { font-family: var(--mono); font-size: var(--t-src); text-transform: uppercase;
+          letter-spacing: 0.11em; color: var(--muted); border-top: 2px solid var(--edge);
+          padding-top: var(--s1); margin: var(--s3) 0 0; }
+.an-fine { font-family: var(--sans); font-size: var(--t-meta); line-height: 1.5;
+           color: var(--muted); border-left: 1px solid var(--edge);
+           padding-left: var(--s2); margin: var(--s3) 0 0; max-width: 46ch; }
 
-.an-mine { background: #121a12; border: 1px solid #2a3a24; border-radius: 8px;
-           padding: 0.6rem 0.8rem; margin-bottom: 0.8rem; font-size: 0.88rem; }
-.an-cols { display: grid; grid-template-columns: 1fr; gap: 1rem; }
-@media (min-width: 620px) { .an-cols { grid-template-columns: 1fr 1fr; } }
-.an-list { list-style: none; margin: 0; padding: 0; counter-reset: an; }
-.an-list li { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.35rem 0;
-              border-bottom: 1px solid #151a21; font-size: 0.85rem; }
-.an-nm { font-weight: 600; }
-.an-gang { color: var(--muted, #8b97a6); font-size: 0.75rem; }
-.an-d { margin-left: auto; font-variant-numeric: tabular-nums; }
+/* --- the tide: one number at real size, inside the shape of the field ------ */
+/* The ridge owns the bottom band and every line of text sits above it. Reserving
+   the space is the only way they cannot collide, whatever the language does to
+   the sentence lengths. */
+.an-hero { position: relative; min-height: 300px;
+           padding: var(--s5) var(--s4) 128px; overflow: hidden;
+           background-image:
+             radial-gradient(120% 80% at 50% -10%, rgba(232, 182, 76, 0.05), transparent 60%),
+             var(--grain), linear-gradient(180deg, #121826, var(--panel2)); }
+/* The game's own 0.02-degree grid as wallpaper — no image weight at all */
+.an-lattice { position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(232, 182, 76, 0.04) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(90deg, rgba(232, 182, 76, 0.04) 0 1px, transparent 1px 34px),
+    radial-gradient(115% 115% at 50% 50%, transparent 62%, rgba(0, 0, 0, 0.35)); }
+.an-ridge { position: absolute; left: 0; right: 0; bottom: 0; height: 124px;
+            width: 100%; display: block; }
+.an-face { position: relative; font-family: var(--display); font-size: var(--t-hero);
+           line-height: 0.88; color: var(--text); text-shadow: 0 2px 18px var(--bg); }
+.an-face.gain { color: var(--gold-bright); }
+.an-face.loss { color: var(--enemy-hot); }
+.an-unit { font-family: var(--mono); font-size: var(--t-meta); color: var(--muted);
+           text-transform: uppercase; letter-spacing: 0.16em; margin-left: 0.4rem; }
+.an-hero-body { position: relative; max-width: 34ch; }
+.an-hero-body p { margin: var(--s2) 0 0; font-size: var(--t-body); color: var(--text);
+                  line-height: 1.5; }
+.an-hero .an-src, .an-hero .an-fine { position: relative; }
+/* Column colours: the field in frost, the sedentary as the wall they are */
+.rg-up { fill: var(--frost); fill-opacity: 0.30; }
+.rg-down { fill: var(--enemy); fill-opacity: 0.30; }
+.rg-zero { fill: var(--edge); fill-opacity: 0.85; }
+.rg-line { fill: none; stroke: var(--free); stroke-width: 1; stroke-opacity: 0.65; }
+.rg-me { stroke: var(--gold); stroke-width: 1.5; }
+.rg-medot { fill: var(--gold-bright); }
 
-.an-tab { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
-.an-tab th { text-align: left; color: var(--muted, #8b97a6); font-weight: 600;
-             font-size: 0.75rem; padding: 0.3rem 0.4rem; border-bottom: 1px solid #1b2029; }
-.an-tab td { padding: 0.35rem 0.4rem; border-bottom: 1px solid #151a21; }
-.an-tab .r { text-align: right; font-variant-numeric: tabular-nums; }
-.an-me { background: rgba(232, 182, 76, 0.07); }
-.an-rd { font-size: 0.7rem; margin-left: 0.25rem; }
+/* --- the front: pressure as a shape --------------------------------------- */
+.an-rose { width: 100%; max-width: 320px; aspect-ratio: 1; margin-inline: auto;
+           display: block; }
+.ro-ring { fill: none; stroke: var(--line); stroke-width: 1; }
+.ro-spoke { stroke: var(--line); stroke-width: 1; stroke-opacity: 0.6; }
+.ro-card { fill: var(--muted); font-family: var(--mono); font-size: 9px;
+           letter-spacing: 0.1em; }
+.ro-wedge { stroke: var(--enemy); stroke-width: 1; stroke-opacity: 0.75; }
+/* "inside your turf" is not a bearing, so it never becomes a wedge */
+.ro-inside { fill: none; stroke: var(--enemy); stroke-width: 1.5;
+             stroke-dasharray: 4 4; }
+.ro-hub { fill: var(--gold); }
+.ro-label { fill: var(--text); font-family: var(--mono); font-size: 10px; }
+.ro-n { fill: var(--muted); font-family: var(--mono); font-size: 9px; }
+.an-front-row { display: flex; align-items: center; gap: var(--s2); min-height: 44px;
+                border-bottom: 1px solid var(--line); font-size: var(--t-body); }
+.an-front-row:last-child { border-bottom: 0; }
+/* Feed gang colour lives in a 3px chip and NEVER fills a wedge: a gang whose
+   colour is close to gold or enemy red would silently break the whole page's
+   hue-equals-side reading. */
+.an-gcolor { width: 3px; align-self: stretch; flex: 0 0 auto; }
+.an-front-n { margin-left: auto; font-family: var(--mono); color: var(--enemy-hot); }
+.an-band { display: grid; grid-template-columns: 1fr; gap: var(--s3); }
+@media (min-width: 760px) { .an-band { grid-template-columns: minmax(0, 330px) minmax(0, 1fr); } }
 
-.d-up { color: #7fc98a; }
-.d-down { color: #d8635f; }
-.d-flat, .d-none { color: var(--muted, #8b97a6); }
+/* --- charts --------------------------------------------------------------- */
+.an-card { position: relative; background-color: var(--panel2);
+           background-image: var(--grain), linear-gradient(180deg, #121826, var(--panel2));
+           border: 1px solid var(--line); border-radius: 0; clip-path: var(--notch);
+           padding: var(--s3) var(--s4); margin-bottom: var(--s3); }
+.an-cardhead { display: flex; align-items: baseline; gap: var(--s2);
+               font-size: var(--t-meta); color: var(--muted); margin-bottom: var(--s2);
+               font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.1em; }
+.an-cardhead > span:first-child { white-space: nowrap; }
+.an-cardhead b { font-size: var(--t-fig); color: var(--text); margin-left: auto;
+                 font-family: var(--mono); letter-spacing: 0; }
+.an-cardhead .an-sub { white-space: nowrap; letter-spacing: 0; }
+.an-sub { font-size: var(--t-meta); font-family: var(--mono); }
+.an-win { font-style: normal; font-size: var(--t-src); color: var(--muted);
+          font-family: var(--mono); white-space: nowrap; }
+.an-chart { width: 100%; height: 104px; display: block; }
+.an-line { fill: none; stroke: var(--frost); stroke-width: 1.6;
+           vector-effect: non-scaling-stroke; }
+.an-line.gold { stroke: var(--gold); }
+.an-fill { fill: rgba(143, 167, 189, 0.10); stroke: none; }
+.an-dot { fill: var(--frost); }
+.an-dot.gold { fill: var(--gold-bright); }
+.an-bar { fill: var(--free); fill-opacity: 0.7; }
+.an-scale { display: flex; justify-content: space-between; color: var(--muted);
+            font-size: var(--t-src); margin-top: var(--s1); font-family: var(--mono); }
 
-.an-empty, .an-note { color: var(--muted, #8b97a6); font-size: 0.78rem; line-height: 1.5; }
-.an-note { margin-top: 0.5rem; }
-.an-privacy { color: var(--muted, #8b97a6); font-size: 0.75rem; line-height: 1.6;
-              border-top: 1px solid #1b2029; padding-top: 0.8rem; margin-top: 2rem; }
+/* --- standing, lists, tables ---------------------------------------------- */
+.an-mine { font-size: var(--t-body); line-height: 1.5; }
+.an-mine b { font-family: var(--mono); font-size: var(--t-fig); margin-right: 0.25rem; }
+.an-cols { display: grid; grid-template-columns: 1fr; gap: var(--s4); }
+@media (min-width: 660px) { .an-cols { grid-template-columns: 1fr 1fr; } }
+.an-list { list-style: none; margin: 0; padding: 0; }
+.an-list li { display: flex; align-items: baseline; gap: var(--s2); min-height: 34px;
+              padding: var(--s1) var(--s2); border-bottom: 1px solid var(--line);
+              font-size: var(--t-body); }
+.an-list li > span { min-width: 0; }
+.an-nm { font-weight: 600; overflow-wrap: anywhere; }
+.an-gang { color: var(--muted); font-size: var(--t-meta); overflow-wrap: anywhere; }
+.an-d { margin-left: auto; font-family: var(--mono); white-space: nowrap; }
+
+.an-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.an-tab { width: 100%; border-collapse: collapse; font-size: var(--t-body); }
+.an-tab th { text-align: left; color: var(--muted); font-weight: 600;
+             font-family: var(--mono); font-size: var(--t-src);
+             text-transform: uppercase; letter-spacing: 0.1em;
+             padding: var(--s1) var(--s2); border-bottom: 1px solid var(--edge); }
+.an-tab td { padding: var(--s2); border-bottom: 1px solid var(--line); }
+.an-tab .r { text-align: right; font-family: var(--mono); }
+.an-tab-gangs th:first-child { width: 3.2rem; }
+/* Your own row: a gold edge and a wash. Never gold TEXT in a row — the figure
+   has to stay readable as a figure. */
+.an-me { background: rgba(232, 182, 76, 0.07); box-shadow: inset 3px 0 0 var(--gold); }
+.an-rd { font-size: var(--t-src); margin-left: 0.25rem; font-family: var(--mono); }
+.an-gap { color: var(--gold); font-size: var(--t-body); margin: var(--s2) 0 0;
+          font-family: var(--mono); }
+
+.d-up { color: var(--frost); }
+.d-down { color: var(--enemy-hot); }
+.d-flat, .d-none { color: var(--muted); }
+
+.an-empty, .an-note { color: var(--muted); font-size: var(--t-meta); line-height: 1.5; }
+.an-note { margin-top: var(--s2); }
+.an-privacy { color: var(--muted); font-size: var(--t-meta); line-height: 1.6;
+              margin: var(--s5) 0 0; }
 
 /* The way in, from the Info tab's chart section */
 .an-open { margin-top: 0.5rem; }
-
-/* The window the page actually measured, under chips that name a nominal one */
-.an-measured { color: var(--muted, #8b97a6); font-size: 0.72rem; margin: -0.9rem 0 1.2rem;
-               font-family: var(--mono); }
-/* A chip the archive cannot fill still works — it just returns everything there is */
-.an-chip.short { opacity: 0.45; }
-/* Which fixed window a "You" card covers, since the chips do not drive them */
-.an-win { font-style: normal; font-size: 0.7rem; color: var(--muted, #8b97a6);
-          font-family: var(--mono); white-space: nowrap; }
-/* The head is name / figure / note on one line — let the note shrink, never the
-   figure, and never wrap the label away from its window. */
-.an-cardhead > span:first-child { white-space: nowrap; }
-.an-cardhead .an-sub { white-space: nowrap; }
-
-/* Tables get their own horizontal scroll: five columns plus a long gang name
-   outgrow a 360px phone, and .an-wrap has no overflow of its own — without this
-   the whole document slides sideways instead of just the table. */
-.an-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.an-wrap { overflow-x: hidden; }
-.an-tab-gangs th:first-child { width: 3.2rem; }
-/* A long name must not push the delta — the only reason the row exists — off screen */
-.an-list li > span { min-width: 0; }
-.an-nm, .an-gang { overflow-wrap: anywhere; }
-
-/* The result plate takes the colour of the result. It was green in every case,
-   including when it wrapped a loss. */
-.an-mine.d-down { background: #1a1212; border-color: #3a2424; }
-.an-mine.d-flat { background: var(--panel2, #0a0e15); border-color: var(--line, #1d2532); }
-.an-mine b { font-family: var(--mono); font-size: 1.05rem; margin-right: 0.2rem; }
-.an-gap { color: var(--gold, #e8b64c); font-size: 0.8rem; margin: 0.5rem 0 0;
-          font-family: var(--mono); }
-/* Numbers read as numbers: the app's figure idiom is monospace */
-.an-cardhead b, .an-tab .r, .an-d, .an-scale { font-family: var(--mono); }
-/* Sticky range control: it governs the three sections below it, and on a phone
-   those run several screens long. */
-.an-range { position: sticky; top: 0; z-index: 2; background: var(--bg, #07090d);
-            padding: 0.5rem 0; }
-/* A 0.85rem text link is a ~16px tap target; the negative margin keeps the layout. */
-.an-back { min-height: 44px; display: inline-flex; align-items: center;
-           padding: 0.6rem 0.8rem; margin: -0.6rem -0.8rem; }
-.an-foot { margin-top: 1.4rem; display: inline-block; }

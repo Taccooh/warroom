@@ -817,3 +817,150 @@ def archive_span(conn, uid: int | None = None) -> dict:
         span_hours = int(d or 0)
     return {"snap_from": lo, "snap_to": hi, "samples": n,
             "stats_from": stats_from, "span_hours": span_hours}
+
+
+# --- Trends v4: scope, field shape, bearings ---------------------------------
+# The page used to rank a player out of every player in the game. A rank out of
+# 1467 is arithmetic; a rank out of the 41 people who actually hold ground on
+# your map is a fact about your war. Scope is the switch between the two.
+#
+# PRIVACY: membership of a scope is decided by "holds a cell near me" or "is in
+# my gang" - NEVER by "has a warroom account". Unregistered players enter every
+# scope on identical terms, and no query here touches the users table.
+
+SCOPES = ("all", "gang", "turf")
+
+
+def _roster(conn, uid: int, scope: str, b: str):
+    """The player ids a scope covers, or None for 'everyone'.
+
+    'turf' reads the caller's own copy of the public feed: whoever holds a cell
+    inside the turf we already store for them. 'gang' is the caller's gang as the
+    feed reports it at the newer sample."""
+    if scope == "gang":
+        gid = _gang(conn, uid)
+        if gid is None:
+            return set()
+        return {r["player_id"] for r in conn.execute(
+            "SELECT player_id FROM player_snap WHERE ts = ? AND gang_id = ?", (b, gid))}
+    if scope == "turf":
+        return {r["pid"] for r in conn.execute(
+            """SELECT DISTINCT owner_user_id AS pid FROM territory
+               WHERE user_id = ? AND owner_user_id IS NOT NULL""", (uid,))}
+    return None
+
+
+def default_scope(conn, uid: int) -> str:
+    """'turf' once the user actually holds ground, 'all' before that - a brand
+    new account would otherwise land on an empty page."""
+    n = conn.execute("SELECT COUNT(*) n FROM territory WHERE user_id = ? "
+                     "AND owner_user_id IS NOT NULL", (uid,)).fetchone()["n"]
+    return "turf" if n else "all"
+
+
+def _pairs(conn, hours: int, roster=None) -> list[dict]:
+    """Every compared player's change between the two real samples of the window.
+
+    One query, reused by the standing, the movers list and the field shape, so
+    all three are counted over exactly the same population - the earlier version
+    counted the rank against one set and printed the size of another."""
+    a, b = _snap_edges(conn, hours)
+    if not a or a == b:
+        return []
+    rows = [dict(r) for r in conn.execute(
+        """SELECT p1.player_id, n.username, p1.gang, p1.gang_id,
+                  p0.cells AS c0, p1.cells AS c1,
+                  p1.cells - p0.cells AS delta, p1.aps - p0.aps AS d_aps
+           FROM player_snap p0
+           JOIN player_snap p1 ON p1.player_id = p0.player_id AND p1.ts = ?
+           LEFT JOIN player_names n ON n.player_id = p0.player_id
+           WHERE p0.ts = ?""", (b, a))]
+    if roster is not None:
+        rows = [r for r in rows if r["player_id"] in roster]
+    return rows
+
+
+def field(conn, uid: int, hours: int = 24, scope: str = "all", limit: int = 10) -> dict:
+    """Everything the page says about the field, from ONE population.
+
+    Returns the movers both ways, the caller's own line, the standing counted
+    over that same set, and the shape of every delta in it. Splitting these into
+    separate queries is what let the old page print a rank out of more players
+    than were ever compared."""
+    scope = scope if scope in SCOPES else "all"
+    a, b = _snap_edges(conn, hours)
+    me = _wdg_id(conn, uid)
+    gid = _gang(conn, uid)
+    roster = _roster(conn, uid, scope, b) if (b and scope != "all") else (
+        None if scope == "all" else set())
+    rows = _pairs(conn, hours, roster)
+    for r in rows:
+        r["mine"] = (gid is not None and r["gang_id"] == gid)
+    moved = [r for r in rows if r["delta"]]
+    up = sorted((r for r in moved if r["delta"] > 0), key=lambda r: -r["delta"])[:limit]
+    down = sorted((r for r in moved if r["delta"] < 0), key=lambda r: r["delta"])[:limit]
+    mine = next((r for r in rows if r["player_id"] == me), None)
+    stand = None
+    if mine is not None:
+        d = mine["delta"]
+        stand = {"delta": d, "d_aps": mine["d_aps"],
+                 "ahead": sum(1 for r in rows if r["delta"] > d),
+                 "still": sum(1 for r in rows if r["delta"] == 0),
+                 "of_players": len(rows)}
+    return {"scope": scope, "from": a, "to": b, "hours": hours,
+            "up": up, "down": down, "stand": stand, "in_feed": mine is not None,
+            "population": len(rows), "moved": len(moved),
+            "churn": sum(abs(r["delta"]) for r in rows),
+            "shape": _shape([r["delta"] for r in rows], stand and stand["delta"])}
+
+
+def _shape(deltas: list[int], mine=None, bins: int = 61) -> dict:
+    """The whole field's movement as a histogram, on a signed square-root scale.
+
+    Linear bins would put +225 at one end and crush every +1 into the same
+    column as zero. sqrt spreads the small movements, where nearly everyone
+    actually lives, without hiding the outliers. The zero bin is kept exactly:
+    "did not move" is a different statement from "barely moved"."""
+    import math
+    if not deltas:
+        return {"bins": [], "zero": bins // 2, "me": None, "max": 0, "top": 0}
+    lim = max(abs(d) for d in deltas) or 1
+    root = math.sqrt(lim)
+    half = bins // 2
+
+    def slot(d):
+        if d == 0:
+            return half
+        s = math.sqrt(abs(d)) / root                 # 0..1
+        off = max(1, min(half, int(round(s * half))))
+        return half + off if d > 0 else half - off
+
+    counts = [0] * bins
+    for d in deltas:
+        counts[slot(d)] += 1
+    return {"bins": counts, "zero": half, "max": max(counts) or 1, "top": lim,
+            "me": (slot(mine) if mine is not None else None)}
+
+
+def bearings(conn, uid: int, days: int = 7, top: int = 5) -> dict:
+    """fronts(), plus what the page needs to draw it honestly.
+
+    The watcher has computed attack bearings on every poll since the beginning
+    and the trends page never showed them. Two things travel with the rose now:
+    the watch scope that produced it (a user watching only their own AP cells
+    sees a different front from one watching the whole neighbourhood), and the
+    oldest event actually available - the log is capped, so a nominal 7-day
+    window can really be two days."""
+    rows = fronts(conn, uid, days=days, top=top)
+    n, oldest = conn.execute(
+        "SELECT COUNT(*) n, MIN(ts) o FROM events WHERE user_id = ?", (uid,)).fetchone()
+    u = conn.execute("SELECT watch_level FROM users WHERE id = ?", (uid,)).fetchone()
+    colors = {r["gang"]: r["color"] for r in conn.execute(
+        """SELECT gang, color FROM territory WHERE user_id = ? AND color IS NOT NULL
+           GROUP BY gang""", (uid,))}
+    for r in rows:
+        r["color"] = colors.get(r["gang"])
+    return {"rows": rows, "days": days,
+            "level": (u["watch_level"] if u else None) or "own",
+            # The cap bit, so the window we can honestly claim is shorter
+            "capped": n >= config.EVENT_KEEP, "oldest": oldest}
