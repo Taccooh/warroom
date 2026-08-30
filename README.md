@@ -292,12 +292,12 @@ like a free win.
 question the territory feed cannot: **which gang is this player in.**
 
 ```bash
-curl -H "$AUTH" '…/api/players?q=wesm'
+curl -H "$AUTH" '…/api/players?q=nightowl'
 ```
 
 ```json
-{"query":"wesm","players":[{"player_id":1364,"username":"wesmagyar",
-  "gang":"Black Wire Militia","gang_id":20,"cells":4233,"aps":327700}]}
+{"query":"nightowl","players":[{"player_id":4711,"username":"nightowl",
+  "gang":"Example Gang","gang_id":42,"cells":4233,"aps":327700}]}
 ```
 
 `?id=` adds a `current` block (gang, cells, APs as of the latest sample) next to
@@ -333,8 +333,8 @@ Four things worth knowing, because the numbers are easy to misread:
 ```bash
 # Rivals by ground held, right now
 curl -H "$AUTH" 'https://your-instance/api/players?limit=20'
-# How player 1364 developed over the last week
-curl -H "$AUTH" 'https://your-instance/api/players?id=1364&since=2026-08-21 00:00:00'
+# How one player developed over the last week
+curl -H "$AUTH" 'https://your-instance/api/players?id=4711&since=2026-08-21 00:00:00'
 ```
 
 ### Leaderboards and names
@@ -354,7 +354,7 @@ carries `wifi` and `ble` split out.
 # Who leads all-time, with names
 curl -H "$AUTH" 'https://your-instance/api/boards?board=all_time'
 # One player's climb; gaps mean they were outside the top 50 that hour
-curl -H "$AUTH" 'https://your-instance/api/boards?board=cells&id=1364'
+curl -H "$AUTH" 'https://your-instance/api/boards?board=cells&id=4711'
 ```
 
 `rank` and `points` come from wdgwars, `cells`/`aps`/`players` are counted from

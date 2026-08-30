@@ -474,6 +474,9 @@ JS = {
     # ordinary scans since wdgwars reverted the mast-ownership experiment)
     "lyr_masts": {"en": "GSM masts", "de": "GSM-Masten"},
     "masts_pop": {"en": "📡 {n} GSM masts logged here", "de": "📡 {n} GSM-Masten hier geloggt"},
+    # Holder of a cell. The gang label above says the gang — usually somebody else.
+    "held_by": {"en": "Held by {p}", "de": "Gehalten von {p}"},
+    "held_by_you": {"en": "You hold this cell", "de": "Diese Zelle hältst du"},
     "masts_pop_one": {"en": "📡 1 GSM mast logged here", "de": "📡 1 GSM-Mast hier geloggt"},
     "cov_radius": {"en": "Reception radius", "de": "Empfangsradius"},
     "cov_rec": {"en": "Record", "de": "Aufnahme"},

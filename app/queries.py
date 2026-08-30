@@ -334,6 +334,30 @@ def find_players(conn, q: str, limit: int) -> list[dict]:
            LIMIT ?""", (ts, like, limit))]
 
 
+def names_for(conn, ids) -> dict:
+    """player_id → username for a set of ids, as ONE lookup table.
+
+    Deliberately not a name per row: a turf of 12787 cells has only ~430 distinct
+    holders, so repeating the name per cell would multiply the payload roughly
+    thirtyfold for nothing. Ids with no known name are simply absent — the caller
+    falls back to showing the number, which is still better than nothing.
+    Coverage is about 78 % of holders; see /api/players?q= for where names come from."""
+    ids = {int(i) for i in ids if i is not None}
+    if not ids:
+        return {}
+    out: dict[str, str] = {}
+    # Chunked: SQLite caps variables per statement (999 by default) and a big
+    # multi-theatre turf can pass more holders than that.
+    lst = list(ids)
+    for x in range(0, len(lst), 500):
+        part = lst[x:x + 500]
+        q = "SELECT player_id, username FROM player_names WHERE player_id IN (%s)" % (
+            ",".join("?" * len(part)))
+        for r in conn.execute(q, part):
+            out[str(r["player_id"])] = r["username"]
+    return out
+
+
 def player_current(conn, player_id: int) -> dict | None:
     """Latest known state of one player: gang, cells, APs."""
     r = conn.execute(

@@ -547,13 +547,14 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
     tmode = user["travel_mode"] if "travel_mode" in user.keys() else "car"
     st = queries.latest_stats(conn, uid)
     _pl = queries.planer(conn, uid)
+    _cells = queries.revier_cells(conn, uid)
     _vg = queries.virgin_cells(conn, uid, mode=tmode)
     _tg = queries.targets(conn, uid)
     ctx = {
         "meta": queries.meta(conn, user), "stats": st,
         "grid": {"lat": float(db.kv_get(conn, "grid_lat", 0.02) or 0.02),
                  "lng": float(db.kv_get(conn, "grid_lng", 0.02) or 0.02)},
-        "counts": queries.counts(conn, uid), "cells": queries.revier_cells(conn, uid),
+        "counts": queries.counts(conn, uid), "cells": _cells,
         "gangs": queries.planer_gangs(_pl), "targets": _tg, "virgin_all": _vg,
         "n_all": len(_tg) + len(_vg) // 2,
         "n_ahead": sum(1 for p in _pl if p["gap"] == 0),
@@ -567,6 +568,8 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
         "watch_level": user["watch_level"] if "watch_level" in user.keys() else "near",
         "travel_mode": tmode,
         "user_count": conn.execute("SELECT COUNT(*) FROM users").fetchone()[0],
+        "owner_names": queries.names_for(
+            conn, [c["owner"] for c in _cells] + [p["owner"] for p in _pl]),
         "tab": request.query_params.get("tab"), "pw": request.query_params.get("pw"),
         "del_state": request.query_params.get("del"),
         # wdgwars rejected this key (401) → the watcher is dead until it is
@@ -652,6 +655,7 @@ def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
     uid = user["id"]
     lang = web.lang_of(request)
     pl = queries.planer(conn, uid)
+    _live_cells = queries.revier_cells(conn, uid)
     _virgin = queries.virgin_cells(
         conn, uid, mode=user["travel_mode"] if "travel_mode" in user.keys() else "car")
     _targets = queries.targets(conn, uid)
@@ -675,7 +679,11 @@ def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
     return JSONResponse({
         "poll": db.kv_get(conn, "last_poll", "0"),
         "counts": queries.counts(conn, uid),
-        "cells": queries.revier_cells(conn, uid),
+        "cells": _live_cells,
+        # Holders can change between polls (a flip brings a new one), so the
+        # lookup table travels with every refresh, not just the initial render.
+        "names": queries.names_for(
+            conn, [c["owner"] for c in _live_cells] + [p["owner"] for p in pl]),
         "virgin": _virgin,
         "targets": _targets,
         "events_n": queries.unseen_events(conn, uid),   # badge = UNSEEN, not the capped feed length
@@ -693,9 +701,14 @@ def state(conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     uid = user["id"]
+    cells = queries.revier_cells(conn, uid)
+    pl = queries.planer(conn, uid)
+    # One lookup table instead of a name per row — see queries.names_for.
+    names = queries.names_for(
+        conn, [c["owner"] for c in cells] + [p["owner"] for p in pl])
     return JSONResponse({
         "meta": queries.meta(conn, user), "counts": queries.counts(conn, uid),
-        "cells": queries.revier_cells(conn, uid), "planer": queries.planer(conn, uid),
+        "cells": cells, "planer": pl, "names": names,
         "events": [dict(e) for e in queries.recent_events(conn, uid)],
     })
 

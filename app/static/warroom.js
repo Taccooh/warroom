@@ -35,6 +35,13 @@ document.addEventListener('DOMContentLoaded', function () {
   var initTab = DATA.initTab;
   var POLL_EPOCH = DATA.pollEpoch;
   var TRAVEL = DATA.travelMode || 'car';
+  // player_id -> name, shipped once per response instead of per cell (a big turf
+  // has thousands of cells but only a few hundred holders). Refreshed by applyLive.
+  var OWNERS = DATA.ownerNames || {};
+  function ownerLabel(id) {
+    if (id == null) return '';
+    return OWNERS[id] || ('#' + id);   // unknown name: the bare id still identifies
+  }
   // Data-freshness clock (step 7): reset whenever fresh poll data lands (page render
   // or an applyLive). The here-banner shows "live" / "Nm" from it — a glanceable
   // "is my data still updating?" that goes stale if the poller ever stalls.
@@ -184,6 +191,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     : c.gap === 0 ? '<b>' + T.lead_excl + '</b>'
                     : tf(T.to_flip, {n: c.gap}))
         : '';
+      // Who actually holds it — the gang label says the gang, which is usually
+      // somebody else. held marks the cells that are personally yours.
+      if (c.owner != null) {
+        extra += '<br>' + (c.held ? '<b>' + T.held_by_you + '</b>'
+                                  : tf(T.held_by, {p: esc(ownerLabel(c.owner))}));
+      }
       // GSM masts count as ordinary scans — surface the tally as extra info
       if (c.towers) extra += '<br>' + (c.towers === 1 ? T.masts_pop_one : tf(T.masts_pop, {n: c.towers}));
       var cc = [(c.i + 0.5) * grid.lat, (c.j + 0.5) * grid.lng];
@@ -1270,6 +1283,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!d) return;
         POLL_EPOCH = d.poll;
         dataAt = Date.now();   // fresh poll data landed → reset the freshness clock
+        if (d.names) OWNERS = d.names;   // holders change when cells flip
 
         var ig = document.getElementById('info-grid');
         if (ig && d.info_html != null) ig.innerHTML = d.info_html;

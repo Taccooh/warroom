@@ -161,10 +161,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_coverage_dedup ON coverage_pts(user_id, la
 -- Two limits of the source that the numbers here cannot show on their own:
 --   * The feed names ONE owner per cell. `cells` is therefore what a player
 --     CONTROLS, not every cell they hold APs in — the game's own cell ranking
---     counts the latter and runs 2-4x higher (wesmagyar: 17885 there, 4276 here).
+--     counts the latter and runs 2-4x higher (observed on one top player:
+--     17885 there against 4276 here).
 --     Both are valid; they answer different questions. Do not mix them.
 --   * The feed carries gang territory only — every cell in it has a gang_id.
---     Players in no gang are absent entirely (Farlen226, 3131 cells, invisible).
+--     Players in no gang are absent entirely — one holding 3131 cells was
+--     invisible in it.
 CREATE TABLE IF NOT EXISTS player_snap (
     ts        TEXT NOT NULL,
     player_id INTEGER NOT NULL,      -- wdgwars user_id from the feed, NOT users.id

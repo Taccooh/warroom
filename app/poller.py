@@ -658,10 +658,11 @@ def _write_archive(conn, players: dict, gangs: dict, gctx: dict) -> None:
     # Rank and points both come from `territories`, and both are easy to get wrong:
     #
     # - The leaderboard's ORDER is not the rank. It sorts by AP count, so its first
-    #   entry was Biscuits while the game ranks Black Wire Militia first. Using the
+    #   first entry was not the gang the game ranks first. Using the
     #   list index put every gang on the wrong step.
     # - `territories` lists TERRITORIES, not gangs: one gang appears once per
-    #   contiguous area (Black Wire 5+ times), each with the points of THAT area.
+    #   contiguous area (one gang appeared 5+ times), each with the points of
+    #   THAT area.
     #   Taking the first match reported 658 points for a gang holding 761058.
     #   Rank is per gang and identical across its rows; points must be summed.
     ranks, points = {}, {}
