@@ -190,6 +190,34 @@ def about_page(request: Request):
     return render(request, "about.html", {})
 
 
+@app.get("/analytics")
+def analytics_page(request: Request, hours: int = 24,
+                   conn: sqlite3.Connection = Depends(get_db),
+                   user=Depends(current_user)):
+    """Trends over time - the one thing the game itself cannot show, because its
+    feed only ever reports the present.
+
+    Privacy boundary, deliberately: everything about OTHER players on this page
+    comes from the public feed and the leaderboards, the same data the game shows
+    everyone. Only the caller's own series come from their key. Nothing marks who
+    has a warroom account - the movement tables cover every player in the feed,
+    so signing up never puts anyone into a list that others are absent from."""
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    uid = user["id"]
+    hours = 24 if hours not in (24, 48, 168) else hours
+    return render(request, "analytics.html", {
+        "span": queries.archive_span(conn),
+        "hours": hours,
+        "series": queries.own_series(conn, uid),
+        "activity": queries.event_activity(conn, uid),
+        "movers": queries.movers(conn, hours),
+        "mine": queries.my_movement(conn, uid, hours),
+        "gangs": queries.gang_standings(conn, uid, hours=hours),
+        "neighbours": queries.neighbours(conn, uid, hours=hours),
+    })
+
+
 @app.get("/login")
 def login_page(request: Request, user=Depends(current_user)):
     if user:

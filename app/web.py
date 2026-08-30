@@ -63,3 +63,97 @@ def render(request: Request, template: str, ctx: dict | None = None):
     if ctx:
         base.update(ctx)
     return templates.TemplateResponse(request, template, base)
+
+
+# --- Charts -----------------------------------------------------------------
+# Rendered as inline SVG on the SERVER. The strict CSP forbids third-party
+# scripts, and a charting library would be a large dependency for what is a
+# polyline: this way the page also draws with JavaScript switched off entirely.
+# The helpers return geometry (dicts), never markup - the template decides how
+# it looks, so a restyle needs no Python change.
+
+def _series_geometry(values, w, h, pad):
+    """Map a value list onto SVG coordinates. Returns (points, lo, hi).
+    A flat series is centred instead of dividing by a zero range."""
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return [], 0, 0
+    lo, hi = min(vals), max(vals)
+    span = (hi - lo) or 1
+    n = len(values)
+    step = (w - 2 * pad) / max(1, n - 1)
+    pts = []
+    for i, v in enumerate(values):
+        if v is None:
+            continue
+        x = pad + i * step
+        y = (h - pad) - ((v - lo) / span) * (h - 2 * pad)
+        if hi == lo:                      # flat line sits in the middle
+            y = h / 2
+        pts.append((round(x, 1), round(y, 1)))
+    return pts, lo, hi
+
+
+def chart(values, w=560, h=120, pad=8, invert=False):
+    """Line chart geometry for a series of numbers.
+
+    invert=True flips the y axis, for values where SMALLER is better - a gang
+    rank of 3 must sit above a rank of 12, or the curve reads backwards.
+    """
+    vals = list(values)
+    if invert:
+        vals = [(-v if v is not None else None) for v in vals]
+    pts, lo, hi = _series_geometry(vals, w, h, pad)
+    if invert:
+        lo, hi = -hi, -lo
+    real = [v for v in values if v is not None]
+    return {
+        "w": w, "h": h,
+        "line": " ".join("%s,%s" % p for p in pts),
+        # Closed shape for the fill under the curve
+        "area": ("%s %s,%s %s,%s" % (" ".join("%s,%s" % p for p in pts),
+                                     pts[-1][0], h - pad, pts[0][0], h - pad)) if pts else "",
+        "first": real[0] if real else None,
+        "last": real[-1] if real else None,
+        "min": lo if real else None,
+        "max": hi if real else None,
+        "n": len(real),
+        "dot": pts[-1] if pts else None,
+    }
+
+
+def bars(values, w=560, h=90, pad=6, gap=2):
+    """Bar geometry, for counts per day. Bars keep a minimum height of 1px so a
+    day with a single event is visible rather than invisible."""
+    vals = [v or 0 for v in values]
+    if not vals:
+        return {"w": w, "h": h, "bars": [], "max": 0}
+    top = max(vals) or 1
+    n = len(vals)
+    bw = max(1.0, (w - 2 * pad - gap * (n - 1)) / n)
+    out = []
+    for i, v in enumerate(vals):
+        bh = max(1.0, (v / top) * (h - 2 * pad))
+        out.append({"x": round(pad + i * (bw + gap), 1), "y": round(h - pad - bh, 1),
+                    "w": round(bw, 1), "h": round(bh, 1), "v": v})
+    return {"w": w, "h": h, "bars": out, "max": top}
+
+
+def delta_class(v):
+    """CSS class for a change: gain, loss or unchanged."""
+    if v is None:
+        return "d-none"
+    return "d-up" if v > 0 else ("d-down" if v < 0 else "d-flat")
+
+
+def fmt_delta(v):
+    """+12 / -3 / 0, with an explicit sign so a gain is unmistakable."""
+    if v is None:
+        return "—"
+    return "%+d" % v
+
+
+templates.env.globals["chart"] = chart
+templates.env.globals["bars"] = bars
+templates.env.filters["dclass"] = delta_class
+templates.env.filters["delta"] = fmt_delta

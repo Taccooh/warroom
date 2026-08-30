@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Warroom — {{ t('an_title') }}{% endblock %}
+{# body.doc: the app body is globally overflow:hidden so the map never scrolls.
+   A document page without it is unreachable below the fold. #}
+{% block bodyclass %}doc{% endblock %}
+{% block content %}
+<div class="an-wrap">
+
+  <header class="an-head">
+    <div class="brand"><svg class="sigil" viewBox="0 0 24 28" aria-hidden="true"><path d="M12 1 22 5v9c0 7-4.6 11.4-10 13C6.6 25.4 2 21 2 14V5Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 6.5 16.5 14 12 21.5 7.5 14Z" fill="currentColor"/></svg><span class="brand-name">{{ t('an_title') }}</span></div>
+    <a class="an-back" href="/">{{ t('an_back') }}</a>
+  </header>
+
+  {# The window is short on a young archive. Saying so beats letting someone
+     read a two-day slice as a long-term trend. #}
+  <p class="an-span">{{ t('an_span', a=(span.snap_from or '—')|localtime,
+                          b=(span.snap_to or '—')|localtime, n=span.samples) }}</p>
+
+  <div class="an-range">
+    {% for h, lbl in [(24, t('an_24h')), (48, t('an_48h')), (168, t('an_7d'))] %}
+    <a href="/analytics?hours={{ h }}" class="an-chip{% if hours == h %} on{% endif %}">{{ lbl }}</a>
+    {% endfor %}
+  </div>
+
+  {# ---------- your own series: private, from your key ---------- #}
+  <section class="an-sec">
+    <h2>{{ t('an_you') }}</h2>
+    {% if series|length > 1 %}
+      {% set ctot = chart(series | map(attribute='total') | list) %}
+      <div class="an-card">
+        <div class="an-cardhead">
+          <span>{{ t('an_aps') }}</span>
+          <b>{{ ctot.last | n }}</b>
+          <span class="an-sub {{ (ctot.last - ctot.first) | dclass }}">{{ (ctot.last - ctot.first) | delta }}</span>
+        </div>
+        <svg class="an-chart" viewBox="0 0 {{ ctot.w }} {{ ctot.h }}" preserveAspectRatio="none" role="img"
+             aria-label="{{ t('an_aps') }}: {{ ctot.first | n }} → {{ ctot.last | n }}">
+          <polygon class="an-fill" points="{{ ctot.area }}"/>
+          <polyline class="an-line" points="{{ ctot.line }}"/>
+          {% if ctot.dot %}<circle class="an-dot" cx="{{ ctot.dot[0] }}" cy="{{ ctot.dot[1] }}" r="3"/>{% endif %}
+        </svg>
+        {# A flat series would print the same number twice — say nothing instead. #}
+        {% if ctot.min != ctot.max %}
+        <div class="an-scale"><span>{{ ctot.min | n }}</span><span>{{ ctot.max | n }}</span></div>
+        {% endif %}
+      </div>
+
+      {% set ranks = series | map(attribute='gang_rank') | select('!=', None) | list %}
+      {% if ranks | length > 1 %}
+      {% set crank = chart(series | map(attribute='gang_rank') | list, h=90, invert=true) %}
+      <div class="an-card">
+        <div class="an-cardhead">
+          <span>{{ t('an_rank') }}</span>
+          <b>#{{ crank.last }}</b>
+          {# Rank delta is inverted: 5 -> 3 is an improvement of two. #}
+          <span class="an-sub {{ (crank.first - crank.last) | dclass }}">{{ (crank.first - crank.last) | delta }}</span>
+        </div>
+        <svg class="an-chart" viewBox="0 0 {{ crank.w }} {{ crank.h }}" preserveAspectRatio="none" role="img"
+             aria-label="{{ t('an_rank') }}: {{ crank.first }} → {{ crank.last }}">
+          <polyline class="an-line gold" points="{{ crank.line }}"/>
+          {% if crank.dot %}<circle class="an-dot gold" cx="{{ crank.dot[0] }}" cy="{{ crank.dot[1] }}" r="3"/>{% endif %}
+        </svg>
+        {% if crank.min != crank.max %}
+        <div class="an-scale"><span>#{{ crank.max }}</span><span>#{{ crank.min }}</span></div>
+        {% else %}
+        <div class="an-scale"><span>{{ t('an_rank_flat') }}</span></div>
+        {% endif %}
+      </div>
+      {% endif %}
+    {% else %}
+      <p class="an-empty">{{ t('an_nodata') }}</p>
+    {% endif %}
+
+    {% if activity %}
+      {% set b = bars(activity | map(attribute='n') | list) %}
+      <div class="an-card">
+        <div class="an-cardhead"><span>{{ t('an_events') }}</span>
+          <b>{{ activity | sum(attribute='n') }}</b>
+          <span class="an-sub">{{ t('an_events_days', n=activity|length) }}</span></div>
+        <svg class="an-chart" viewBox="0 0 {{ b.w }} {{ b.h }}" preserveAspectRatio="none" role="img"
+             aria-label="{{ t('an_events') }}">
+          {% for bar in b.bars %}<rect class="an-bar" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}"/>{% endfor %}
+        </svg>
+      </div>
+    {% endif %}
+  </section>
+
+  {# ---------- the field: public feed data, everyone alike ---------- #}
+  <section class="an-sec">
+    <h2>{{ t('an_field') }}</h2>
+    {% if mine %}
+    <div class="an-mine">
+      {{ t('an_you_moved', d=mine.delta|delta, r=mine.rank_by_delta, n=mine.of_players) }}
+    </div>
+    {% endif %}
+
+    {% if movers.up or movers.down %}
+    <div class="an-cols">
+      <div class="an-col">
+        <h3>{{ t('an_gainers') }}</h3>
+        <ol class="an-list">
+          {% for m in movers.up %}
+          <li><span class="an-nm">{{ m.username or '#' ~ m.player_id }}</span>
+              <span class="an-gang">{{ m.gang or '—' }}</span>
+              <span class="an-d d-up">{{ m.delta | delta }}</span></li>
+          {% endfor %}
+        </ol>
+      </div>
+      <div class="an-col">
+        <h3>{{ t('an_losers') }}</h3>
+        <ol class="an-list">
+          {% for m in movers.down %}
+          <li><span class="an-nm">{{ m.username or '#' ~ m.player_id }}</span>
+              <span class="an-gang">{{ m.gang or '—' }}</span>
+              <span class="an-d d-down">{{ m.delta | delta }}</span></li>
+          {% endfor %}
+        </ol>
+      </div>
+    </div>
+    {% else %}
+      <p class="an-empty">{{ t('an_nomove') }}</p>
+    {% endif %}
+  </section>
+
+  {# ---------- gangs: ranks/points from wdgwars, cells counted from the feed ---------- #}
+  <section class="an-sec">
+    <h2>{{ t('an_gangs') }}</h2>
+    <table class="an-tab">
+      <thead><tr><th>#</th><th>{{ t('an_gang') }}</th><th class="r">{{ t('an_points') }}</th>
+        <th class="r">{{ t('an_cells') }}</th><th class="r">{{ t('an_change') }}</th></tr></thead>
+      <tbody>
+      {% for g in gangs %}
+      <tr{% if g.is_mine %} class="an-me"{% endif %}>
+        <td>{{ g.rank or '—' }}{% if g.d_rank %}<span class="an-rd {{ g.d_rank | dclass }}">{{ g.d_rank | delta }}</span>{% endif %}</td>
+        <td>{{ g.gang }}{% if g.member_count %}
+          <span class="an-gang" title="{{ t('an_members', n=g.member_count) }}">{{ g.member_count }}</span>{% endif %}</td>
+        <td class="r">{{ g.points | n }}</td>
+        <td class="r">{{ g.cells | n }}</td>
+        <td class="r {{ g.d_cells | dclass }}">{{ g.d_cells | delta }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="an-note">{{ t('an_gang_note') }}</p>
+  </section>
+
+  {# ---------- neighbours: who holds ground inside your turf ---------- #}
+  <section class="an-sec">
+    <h2>{{ t('an_neighbours') }}</h2>
+    {% if neighbours %}
+    <table class="an-tab">
+      <thead><tr><th>{{ t('an_holder') }}</th><th>{{ t('an_gang') }}</th>
+        <th class="r">{{ t('an_here') }}</th><th class="r">{{ t('an_change') }}</th></tr></thead>
+      <tbody>
+      {% for p in neighbours %}
+      <tr{% if p.is_me %} class="an-me"{% endif %}>
+        <td>{{ p.username or '#' ~ p.player_id }}{% if p.is_me %} <span class="an-gang">{{ t('an_thats_you') }}</span>{% endif %}</td>
+        <td>{{ p.gang or '—' }}</td>
+        <td class="r">{{ p.cells_here }}</td>
+        <td class="r {{ p.delta | dclass }}">{{ p.delta | delta }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="an-empty">{{ t('an_noneigh') }}</p>
+    {% endif %}
+  </section>
+
+  <p class="an-privacy">{{ t('an_privacy') }}</p>
+</div>
+{% endblock %}

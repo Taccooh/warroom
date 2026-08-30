@@ -1255,3 +1255,79 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
 .tok-list .tok-nm { font-weight: 600; }
 .tok-list .tok-meta { color: var(--muted, #8b97a6); font-size: 0.8rem; }
 .tok-list form { margin-left: auto; }
+
+/* --- Trends page -----------------------------------------------------------
+   Charts are inline SVG rendered on the server (see web.chart/bars): the strict
+   CSP rules out a charting library, and this way the page also draws with
+   JavaScript off. Colours follow the map: gold is yours, red a loss, frost a
+   gain, so the page reads the same way the battle map does. */
+.an-wrap { max-width: 760px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+.an-head { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.3rem; }
+.an-head .brand { flex: 1; }
+.an-back { color: var(--muted, #8b97a6); text-decoration: none; font-size: 0.85rem; }
+.an-back:hover { color: var(--gold, #e8b64c); }
+.an-span { color: var(--muted, #8b97a6); font-size: 0.78rem; margin: 0 0 0.8rem; line-height: 1.5; }
+
+.an-range { display: flex; gap: 0.4rem; margin-bottom: 1.2rem; }
+.an-chip {
+  padding: 0.3rem 0.7rem; border: 1px solid #26303c; border-radius: 999px;
+  color: var(--muted, #8b97a6); text-decoration: none; font-size: 0.8rem;
+}
+.an-chip.on { border-color: var(--gold, #e8b64c); color: var(--gold, #e8b64c); }
+
+.an-sec { margin: 0 0 2rem; }
+.an-sec h2 {
+  font-family: "Germania One", var(--display, serif); font-weight: normal;
+  font-size: 1.15rem; letter-spacing: 0.04em; color: var(--gold, #e8b64c);
+  margin: 0 0 0.7rem; padding-bottom: 0.3rem; border-bottom: 1px solid #1b2029;
+}
+.an-sec h3 { font-size: 0.85rem; color: var(--muted, #8b97a6); margin: 0 0 0.4rem; font-weight: 600; }
+
+.an-card { background: #0d1219; border: 1px solid #1b2029; border-radius: 8px;
+           padding: 0.7rem 0.8rem; margin-bottom: 0.7rem; }
+.an-cardhead { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.82rem;
+               color: var(--muted, #8b97a6); margin-bottom: 0.4rem; }
+.an-cardhead b { font-size: 1.1rem; color: var(--text, #e6edf3); margin-left: auto; }
+.an-sub { font-size: 0.8rem; }
+/* preserveAspectRatio=none stretches the viewBox to the card, so the chart is
+   responsive without recomputing geometry per screen width. */
+.an-chart { width: 100%; height: 110px; display: block; }
+.an-line { fill: none; stroke: #6ea8d8; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.an-line.gold { stroke: var(--gold, #e8b64c); }
+.an-fill { fill: rgba(110, 168, 216, 0.13); stroke: none; }
+.an-dot { fill: #6ea8d8; }
+.an-dot.gold { fill: var(--gold, #e8b64c); }
+.an-bar { fill: #3d5a75; }
+.an-scale { display: flex; justify-content: space-between; color: var(--muted, #8b97a6);
+            font-size: 0.7rem; margin-top: 0.2rem; }
+
+.an-mine { background: #121a12; border: 1px solid #2a3a24; border-radius: 8px;
+           padding: 0.6rem 0.8rem; margin-bottom: 0.8rem; font-size: 0.88rem; }
+.an-cols { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+@media (min-width: 620px) { .an-cols { grid-template-columns: 1fr 1fr; } }
+.an-list { list-style: none; margin: 0; padding: 0; counter-reset: an; }
+.an-list li { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.35rem 0;
+              border-bottom: 1px solid #151a21; font-size: 0.85rem; }
+.an-nm { font-weight: 600; }
+.an-gang { color: var(--muted, #8b97a6); font-size: 0.75rem; }
+.an-d { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+.an-tab { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.an-tab th { text-align: left; color: var(--muted, #8b97a6); font-weight: 600;
+             font-size: 0.75rem; padding: 0.3rem 0.4rem; border-bottom: 1px solid #1b2029; }
+.an-tab td { padding: 0.35rem 0.4rem; border-bottom: 1px solid #151a21; }
+.an-tab .r { text-align: right; font-variant-numeric: tabular-nums; }
+.an-me { background: rgba(232, 182, 76, 0.07); }
+.an-rd { font-size: 0.7rem; margin-left: 0.25rem; }
+
+.d-up { color: #7fc98a; }
+.d-down { color: #d8635f; }
+.d-flat, .d-none { color: var(--muted, #8b97a6); }
+
+.an-empty, .an-note { color: var(--muted, #8b97a6); font-size: 0.78rem; line-height: 1.5; }
+.an-note { margin-top: 0.5rem; }
+.an-privacy { color: var(--muted, #8b97a6); font-size: 0.75rem; line-height: 1.6;
+              border-top: 1px solid #1b2029; padding-top: 0.8rem; margin-top: 2rem; }
+
+/* The way in, from the Info tab's chart section */
+.an-open { margin-top: 0.5rem; }

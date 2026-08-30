@@ -558,3 +558,184 @@ def theatres(conn, uid: int) -> list[dict]:
         res.append({"key": "region_europe" if los[0] > -30 else "region_na", "n": len(g),
                     "bounds": [[min(las), min(los)], [max(las), max(los)]]})
     return sorted(res, key=lambda r: -r["n"])
+
+
+# --- Analytics page ---------------------------------------------------------
+# PRIVACY BOUNDARY, and it is the whole design of this section:
+#
+#   * Anything shown about OTHER players comes from the public game feed and the
+#     leaderboards only - cells, gang, ranks, names from member lists. Every
+#     player already sees the same about everyone else inside the game.
+#   * Anything derived from a USER'S KEY - stats, events, footprint, position,
+#     coverage - is shown to that user and to nobody else.
+#   * Nothing here reveals WHO uses warroom. A registered player must not turn up
+#     in a list that non-registered players are missing from, or signing up would
+#     itself be a disclosure. The movement tables below therefore span every
+#     player in the feed, account or not.
+#
+# Keep new queries on the same side of that line.
+
+def own_series(conn, uid: int, days: int = 30, points: int = 120) -> list[dict]:
+    """The caller's own measured history, thinned for drawing.
+
+    stats holds a row per poll - roughly 288 a day, far more than a chart can
+    show. Bucketing by hour and taking one value per bucket keeps the shape and
+    cuts the payload about twelvefold. Own data only."""
+    rows = conn.execute(
+        """SELECT substr(ts, 1, 13) AS bucket, MAX(ts) AS ts,
+                  MAX(total) AS total, MAX(wifi) AS wifi, MAX(ble) AS ble,
+                  MAX(credits) AS credits, MIN(gang_rank) AS gang_rank,
+                  MAX(gang_points) AS gang_points
+           FROM stats
+           WHERE user_id = ? AND ts >= datetime('now', ?)
+           GROUP BY bucket ORDER BY bucket""",
+        (uid, "-%d days" % days)).fetchall()
+    out = [dict(r) for r in rows]
+    if len(out) > points:
+        step = len(out) / float(points)
+        thin = [out[int(i * step)] for i in range(points)]
+        if thin[-1] is not out[-1]:
+            thin.append(out[-1])
+        out = thin
+    return out
+
+
+def _snap_edges(conn, hours: int):
+    """(oldest, newest) sample timestamps inside the window, or (None, None).
+    Both ends are real samples, so a delta is measured rather than guessed."""
+    row = conn.execute("SELECT MAX(ts) t FROM player_snap").fetchone()
+    newest = row["t"] if row else None
+    if not newest:
+        return None, None
+    oldest = conn.execute(
+        "SELECT MIN(ts) t FROM player_snap WHERE ts >= datetime(?, ?)",
+        (newest, "-%d hours" % hours)).fetchone()["t"]
+    return oldest, newest
+
+
+def movers(conn, hours: int = 24, limit: int = 10) -> dict:
+    """Who gained and who lost ground in the window - from the public feed.
+
+    This is the one thing the game itself cannot show: it only ever reports the
+    present. Players missing from either end are skipped rather than counted as
+    a gain from zero - turning up in the feed is not the same as taking ground."""
+    a, b = _snap_edges(conn, hours)
+    if not a or a == b:
+        return {"from": a, "to": b, "hours": hours, "up": [], "down": []}
+    rows = [dict(r) for r in conn.execute(
+        """SELECT p1.player_id, n.username, p1.gang, p0.cells AS c0, p1.cells AS c1,
+                  p1.cells - p0.cells AS delta, p1.aps - p0.aps AS d_aps
+           FROM player_snap p0
+           JOIN player_snap p1 ON p1.player_id = p0.player_id AND p1.ts = ?
+           LEFT JOIN player_names n ON n.player_id = p0.player_id
+           WHERE p0.ts = ? AND p1.cells != p0.cells""", (b, a))]
+    up = sorted((r for r in rows if r["delta"] > 0), key=lambda r: -r["delta"])[:limit]
+    down = sorted((r for r in rows if r["delta"] < 0), key=lambda r: r["delta"])[:limit]
+    return {"from": a, "to": b, "hours": hours, "up": up, "down": down}
+
+
+def my_movement(conn, uid: int, hours: int = 24) -> dict | None:
+    """The caller's own line from that same table, so they can place themselves
+    without hunting through it. Same public numbers, just picked out."""
+    me = _wdg_id(conn, uid)
+    if me is None:
+        return None
+    a, b = _snap_edges(conn, hours)
+    if not a or a == b:
+        return None
+    r = conn.execute(
+        """SELECT p0.cells c0, p1.cells c1, p1.cells - p0.cells delta,
+                  p0.aps a0, p1.aps a1, p1.aps - p0.aps d_aps, p1.gang
+           FROM player_snap p0 JOIN player_snap p1
+             ON p1.player_id = p0.player_id AND p1.ts = ?
+           WHERE p0.ts = ? AND p0.player_id = ?""", (b, a, me)).fetchone()
+    if not r:
+        return None
+    d = dict(r)
+    better = conn.execute(
+        """SELECT COUNT(*) n FROM player_snap p0
+           JOIN player_snap p1 ON p1.player_id = p0.player_id AND p1.ts = ?
+           WHERE p0.ts = ? AND (p1.cells - p0.cells) > ?""",
+        (b, a, d["delta"])).fetchone()["n"]
+    total = conn.execute("SELECT COUNT(*) n FROM player_snap WHERE ts = ?",
+                         (b,)).fetchone()["n"]
+    d["rank_by_delta"] = better + 1
+    d["of_players"] = total
+    return d
+
+
+def gang_standings(conn, uid: int, limit: int = 12, hours: int = 24) -> list[dict]:
+    """Gang table with movement. Public throughout: ranks and points come from
+    wdgwars, cells and players are counted from the feed."""
+    gid = _gang(conn, uid)
+    a, b = _snap_edges(conn, hours)
+    rows = conn.execute(
+        """SELECT gang, gang_id, rank, points, cells, aps, players,
+                  ap_count, member_count
+           FROM gang_snap WHERE ts = (SELECT MAX(ts) FROM gang_snap)
+           ORDER BY (rank IS NULL), rank LIMIT ?""", (limit,)).fetchall()
+    prev = {}
+    if a and a != b:
+        for r in conn.execute("SELECT gang, cells, rank FROM gang_snap WHERE ts = ?", (a,)):
+            prev[r["gang"]] = (r["cells"], r["rank"])
+    out = []
+    for r in rows:
+        d = dict(r)
+        p = prev.get(r["gang"])
+        d["d_cells"] = (r["cells"] - p[0]) if p else None
+        # Rank delta is inverted on purpose: 5 -> 3 is a gain of two, not a loss.
+        d["d_rank"] = (p[1] - r["rank"]) if (p and p[1] and r["rank"]) else None
+        d["is_mine"] = (r["gang_id"] == gid)
+        out.append(d)
+    return out
+
+
+def neighbours(conn, uid: int, limit: int = 12, hours: int = 24) -> list[dict]:
+    """Who actually holds ground inside your turf, and which way they are moving.
+
+    Public data throughout: holders come from the territory feed, the trend from
+    the same snapshots everyone else is measured by."""
+    me = _wdg_id(conn, uid)
+    a, b = _snap_edges(conn, hours)
+    deltas = {}
+    if a and a != b:
+        for r in conn.execute(
+                """SELECT p0.player_id, p1.cells - p0.cells AS delta
+                   FROM player_snap p0
+                   JOIN player_snap p1 ON p1.player_id = p0.player_id AND p1.ts = ?
+                   WHERE p0.ts = ?""", (b, a)):
+            deltas[r["player_id"]] = r["delta"]
+    names = dict(conn.execute("SELECT player_id, username FROM player_names"))
+    out = []
+    for r in conn.execute(
+            """SELECT t.owner_user_id AS pid, t.gang, COUNT(*) AS cells,
+                      SUM(COALESCE(t.count, 0)) AS aps
+               FROM territory t
+               WHERE t.user_id = ? AND t.owner_user_id IS NOT NULL
+               GROUP BY t.owner_user_id ORDER BY cells DESC LIMIT ?""",
+            (uid, limit)):
+        out.append({"player_id": r["pid"], "username": names.get(r["pid"]),
+                    "gang": r["gang"], "cells_here": r["cells"], "aps_here": r["aps"],
+                    "delta": deltas.get(r["pid"]),
+                    "is_me": (me is not None and r["pid"] == me)})
+    return out
+
+
+def event_activity(conn, uid: int, days: int = 14) -> list[dict]:
+    """Own watcher events per day - a private activity curve, own data only."""
+    return [dict(r) for r in conn.execute(
+        """SELECT substr(ts, 1, 10) AS day, COUNT(*) AS n,
+                  SUM(kind = 'captured') AS captured,
+                  SUM(kind = 'lost') AS lost
+           FROM events WHERE user_id = ? AND ts >= datetime('now', ?)
+           GROUP BY day ORDER BY day""", (uid, "-%d days" % days))]
+
+
+def archive_span(conn) -> dict:
+    """How far the archive reaches. Shown on the page so a two-day window is not
+    mistaken for a long-term trend."""
+    p = conn.execute("SELECT MIN(ts) a, MAX(ts) b, COUNT(DISTINCT ts) n "
+                     "FROM player_snap").fetchone()
+    s = conn.execute("SELECT MIN(ts) a FROM stats").fetchone()
+    return {"snap_from": p["a"], "snap_to": p["b"], "samples": p["n"],
+            "stats_from": s["a"] if s else None}
