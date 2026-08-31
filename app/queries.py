@@ -974,3 +974,207 @@ def bearings(conn, uid: int, days: int = 7, top: int = 5) -> dict:
             "level": (u["watch_level"] if u else None) or "own",
             # The cap bit, so the window we can honestly claim is shorter
             "capped": n >= config.EVENT_KEEP, "oldest": oldest}
+
+
+# --- Trends v4, part two: the tape, the race, exposure, the boards -----------
+
+def sample_stamps(conn, since: str | None = None) -> list[str]:
+    """Every archive sample, in order. The spine every chart is drawn against."""
+    if since:
+        return [r["ts"] for r in conn.execute(
+            "SELECT ts FROM snap_log WHERE ts >= ? ORDER BY ts", (since,))]
+    return [r["ts"] for r in conn.execute("SELECT ts FROM snap_log ORDER BY ts")]
+
+
+def gang_race(conn, uid: int, hours: int = 24, top: int = 8) -> dict:
+    """Points GAINED per gang over the window, not absolute points.
+
+    The table right below already ranks by absolute points; plotting them again
+    would restate it. Baselined at the window start, the same chart answers the
+    question the table cannot: who is gaining fastest.
+
+    A gang missing from the sample that opens the window has no baseline and is
+    left out. Baselining it at its first appearance would draw its entire
+    holdings as a surge that never happened."""
+    a, b = _snap_edges(conn, hours)
+    gid = _gang(conn, uid)
+    if not a or a == b:
+        return {"from": a, "to": b, "series": [], "skipped": 0, "gap": None}
+    names = [r["gang"] for r in conn.execute(
+        """SELECT gang FROM gang_snap WHERE ts = (SELECT MAX(ts) FROM gang_snap)
+           ORDER BY (rank IS NULL), rank LIMIT ?""", (top,))]
+    if not names:
+        return {"from": a, "to": b, "series": [], "skipped": 0, "gap": None}
+    q = ("SELECT gang, gang_id, ts, points, rank FROM gang_snap "
+         "WHERE ts >= ? AND gang IN (%s) ORDER BY gang, ts" % ",".join("?" * len(names)))
+    rows = list(conn.execute(q, [a] + names))
+    per: dict[str, list] = {}
+    for r in rows:
+        # A NULL points sample is skipped, never read as zero - the gang would
+        # appear to have lost everything it has for one hour.
+        if r["points"] is None:
+            continue
+        per.setdefault(r["gang"], []).append(r)
+    series, skipped = [], 0
+    for name in names:
+        pts = per.get(name) or []
+        if not pts or pts[0]["ts"] != a:
+            skipped += 1
+            continue
+        base = pts[0]["points"]
+        series.append({"gang": name, "gang_id": pts[0]["gang_id"],
+                       "mine": (pts[0]["gang_id"] == gid),
+                       "rank": pts[-1]["rank"],
+                       "vals": [p["points"] - base for p in pts],
+                       "stamps": [p["ts"] for p in pts],
+                       "now": pts[-1]["points"]})
+    series.sort(key=lambda s: (s["rank"] is None, s["rank"]))
+    # The gap to the gang directly above, and how it MOVED over the window. Not a
+    # projection: a rate from two points on a young archive would be the most
+    # authoritative-looking number on the page and the least true.
+    gap = None
+    for i, s in enumerate(series):
+        if not s["mine"] or i == 0:
+            continue
+        up = series[i - 1]
+        n = min(len(s["vals"]), len(up["vals"]))
+        if n:
+            gap = {"gang": up["gang"], "points": up["now"] - s["now"],
+                   # negative = the gap shrank
+                   "moved": (up["vals"][n - 1] - s["vals"][n - 1])}
+        break
+    return {"from": a, "to": b, "series": series, "skipped": skipped, "gap": gap}
+
+
+def exposed(conn, uid: int, hours: int = 24, limit: int = 8) -> dict:
+    """Cells of yours that sit hardest against enemy ground.
+
+    The planner says what to take; nothing said what you are about to lose.
+
+    TWO BLIND SPOTS, both printed on the plate, because the ordering is wrong at
+    exactly the edge where the fighting is if either goes unsaid:
+      1. Enemy AP presence INSIDE a cell is not in the data - the feed names one
+         holder and one count per cell. This is structural adjacency, not a
+         prediction.
+      2. territory holds own AP cells plus a ring around them, so a cell at the
+         edge of the stored turf has neighbours we never fetched and will score
+         as safer than an interior one."""
+    gid = _gang(conn, uid)
+    if gid is None:
+        return {"rows": [], "hours": hours}
+    a, _b = _snap_edges(conn, hours)
+    own = list(conn.execute(
+        """SELECT m.cell_key, m.i, m.j, m.lat, m.lng, m.count AS hold,
+                  COALESCE(f.my_aps, 0) AS mine_here,
+                  COUNT(e.cell_key) AS enemy_adj
+           FROM territory m
+           LEFT JOIN footprint_cells f
+                  ON f.user_id = m.user_id AND f.cell_key = m.cell_key
+           JOIN territory e
+                  ON e.user_id = m.user_id
+                 AND e.i BETWEEN m.i - 1 AND m.i + 1
+                 AND e.j BETWEEN m.j - 1 AND m.j + 1
+                 AND NOT (e.i = m.i AND e.j = m.j)
+                 AND e.gang_id IS NOT NULL AND e.gang_id != ?
+           WHERE m.user_id = ? AND m.gang_id = ?
+           GROUP BY m.cell_key
+           ORDER BY enemy_adj DESC, m.count ASC
+           LIMIT ?""", (gid, uid, gid, limit)))
+    if not own:
+        return {"rows": [], "hours": hours}
+    imin = min(r["i"] for r in own) - 1
+    imax = max(r["i"] for r in own) + 1
+    jmin = min(r["j"] for r in own) - 1
+    jmax = max(r["j"] for r in own) + 1
+    # One bounded read for every neighbour of the eight, resolved in Python.
+    near = {}
+    for r in conn.execute(
+            """SELECT i, j, gang, gang_id, count, color FROM territory
+               WHERE user_id = ? AND i BETWEEN ? AND ? AND j BETWEEN ? AND ?""",
+            (uid, imin, imax, jmin, jmax)):
+        near[(r["i"], r["j"])] = r
+    keys = [r["cell_key"] for r in own]
+    seen = {}
+    if a:
+        qs = ",".join("?" * len(keys))
+        for r in conn.execute(
+                "SELECT cell_key, MAX(ts) t FROM events WHERE user_id = ? AND ts >= ? "
+                "AND cell_key IN (%s) GROUP BY cell_key" % qs, [uid, a] + keys):
+            seen[r["cell_key"]] = r["t"]
+    out = []
+    for r in own:
+        ring, worst = [], None
+        for dj in (1, 0, -1):                      # north row first: the glyph
+            for di in (-1, 0, 1):                  # reads like a map
+                if di == 0 and dj == 0:
+                    ring.append("me")
+                    continue
+                nb = near.get((r["i"] + di, r["j"] + dj))
+                if nb is None:
+                    ring.append("unknown")         # outside the stored turf
+                elif nb["gang_id"] is not None and nb["gang_id"] != gid:
+                    ring.append("enemy")
+                    if worst is None or (nb["count"] or 0) > (worst["count"] or 0):
+                        worst = nb
+                elif nb["gang_id"] == gid:
+                    ring.append("mine")
+                else:
+                    ring.append("free")
+        out.append({"cell_key": r["cell_key"], "i": r["i"], "j": r["j"],
+                    "lat": r["lat"], "lng": r["lng"], "hold": r["hold"],
+                    "mine_here": r["mine_here"], "enemy_adj": r["enemy_adj"],
+                    "ring": ring, "seen": seen.get(r["cell_key"]),
+                    "by": (worst["gang"] if worst else None),
+                    "by_count": (worst["count"] if worst else None),
+                    "color": (worst["color"] if worst else None)})
+    # A watcher report inside the window is the only OBSERVED signal in the mix;
+    # everything else is inferred from adjacency. It sorts first for that reason.
+    out.sort(key=lambda x: (x["seen"] is None, -x["enemy_adj"], x["hold"] or 0))
+    return {"rows": out, "hours": hours, "gid": gid}
+
+
+BOARDS = ("cells", "today", "week", "all_time", "hunters", "flock", "arcade")
+
+
+def board_wall(conn, uid: int, board: str = "cells", limit: int = 12) -> dict:
+    """One leaderboard, with movement since a day ago.
+
+    board_snap has held seven boards, top 50, hourly, since the archive started
+    and no page has ever read a row. It is also the only place a gang-less player
+    exists at all - the territory feed lists nobody without a gang.
+
+    board values are NEVER shown next to feed values: the game's cells board and
+    our own cell count measure different things and run 2-4x apart, because the
+    feed names one owner per cell. Two valid numbers six pixels apart is an
+    honesty accident, so board figures live only here."""
+    board = board if board in BOARDS else "cells"
+    now = conn.execute("SELECT MAX(ts) t FROM board_snap").fetchone()["t"]
+    if not now:
+        return {"board": board, "rows": [], "ts": None, "mine": None, "boards": BOARDS}
+    then = conn.execute("SELECT MAX(ts) t FROM board_snap WHERE ts <= datetime(?, ?)",
+                        (now, "-24 hours")).fetchone()["t"]
+    prev = {}
+    if then and then != now:
+        prev = {r["player_id"]: r["rank"] for r in conn.execute(
+            "SELECT rank, player_id FROM board_snap WHERE board = ? AND ts = ?",
+            (board, then))}
+    rows = []
+    for r in conn.execute(
+            """SELECT b.rank, b.player_id, n.username, b.value, b.wifi, b.ble
+               FROM board_snap b LEFT JOIN player_names n ON n.player_id = b.player_id
+               WHERE b.board = ? AND b.ts = ? AND b.rank <= ? ORDER BY b.rank""",
+            (board, now, limit)):
+        d = dict(r)
+        was = prev.get(r["player_id"])
+        # A rank climbing from 9 to 4 is +5, not -5.
+        d["d_rank"] = (was - r["rank"]) if was else None
+        d["new"] = (bool(prev) and was is None)
+        rows.append(d)
+    me = _wdg_id(conn, uid)
+    mine = None
+    if me is not None:
+        mine = {r["board"]: dict(r) for r in conn.execute(
+            "SELECT board, rank, value FROM board_snap WHERE ts = ? AND player_id = ?",
+            (now, me))}
+    return {"board": board, "rows": rows, "ts": now, "since": then,
+            "mine": mine, "boards": BOARDS}

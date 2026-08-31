@@ -73,6 +73,11 @@ CREATE TABLE IF NOT EXISTS territory (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, cell_key)
 );
+-- Neighbour lookups by grid position: the exposure query self-joins territory on
+-- i BETWEEN … AND j BETWEEN …, and without this it is a scan per cell. user_id
+-- leads because every query here is per user; i carries the range, j is filtered
+-- after it, which is why j sits last.
+CREATE INDEX IF NOT EXISTS idx_territory_ij ON territory(user_id, i, j);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -198,6 +203,16 @@ CREATE TABLE IF NOT EXISTS gang_snap (
     PRIMARY KEY (ts, gang)
 );
 CREATE INDEX IF NOT EXISTS idx_gang_snap ON gang_snap(gang, ts DESC);
+-- One row per archive sample: WHEN we looked, and how much came back. Without it
+-- a missed poll is indistinguishable from a quiet hour, and every chart draws a
+-- confident straight line across the hole. ts is the primary key, so MIN/MAX are
+-- index seeks rather than the scan a COUNT(DISTINCT ts) over player_snap forces.
+CREATE TABLE IF NOT EXISTS snap_log (
+    ts      TEXT PRIMARY KEY,
+    players INTEGER NOT NULL DEFAULT 0,
+    gangs   INTEGER NOT NULL DEFAULT 0,
+    boards  INTEGER NOT NULL DEFAULT 0
+);
 -- Names for the bare numeric ids the feed hands out. The feed itself never names
 -- anyone; the leaderboard does, across all its lists. Kept as a growing cache
 -- rather than per sample: a name is a fact about a player, not about a moment.
@@ -278,6 +293,22 @@ def init_db(conn: sqlite3.Connection) -> None:
     _add_col(conn, "cell_roads", "path_kind", "TEXT")
     _add_col(conn, "users", "travel_mode", "TEXT NOT NULL DEFAULT 'car'")
     _add_col(conn, "player_names", "joined_at", "TEXT")
+    _backfill_snap_log(conn)
+
+
+def _backfill_snap_log(conn: sqlite3.Connection) -> None:
+    """Reconstruct the sample log from the archive that already exists.
+
+    Unusually for this schema, this one IS fully backfillable: every sample left
+    its rows behind, so the timestamps and the counts can be recovered exactly.
+    Idempotent - INSERT OR IGNORE plus two UPDATEs that recompute the same values,
+    so a restart costs one pass and changes nothing."""
+    conn.execute("""INSERT OR IGNORE INTO snap_log (ts, players)
+                    SELECT ts, COUNT(*) FROM player_snap GROUP BY ts""")
+    conn.execute("""UPDATE snap_log SET gangs = COALESCE(
+                      (SELECT COUNT(*) FROM gang_snap g WHERE g.ts = snap_log.ts), 0)""")
+    conn.execute("""UPDATE snap_log SET boards = COALESCE(
+                      (SELECT COUNT(*) FROM board_snap b WHERE b.ts = snap_log.ts), 0)""")
 
 
 def kv_get(conn, key: str, default=None):

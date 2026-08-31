@@ -271,3 +271,83 @@ def rose(rows, size=240, r_min=26, r_max=104):
 
 templates.env.globals["ridge"] = ridge
 templates.env.globals["rose"] = rose
+
+
+def spine(stamps, w=720):
+    """Where the archive actually looked, as drawable geometry.
+
+    The cadence is the MEDIAN interval between samples, not the configured one:
+    the same helper then works unchanged on five-minute stats and on hourly
+    snapshots, and it keeps working if the setting is ever changed. Anything
+    longer than 1.8 cadences is a hole the poller did not fill.
+
+    Returns contiguous runs, so a chart draws one polyline per run instead of a
+    single confident line straight across a missing day."""
+    n = len(stamps)
+    if n < 2:
+        return {"w": w, "n": n, "runs": ([[0, 0]] if n else []), "gaps": [],
+                "ticks": [], "cadence": 0, "missing": 0.0}
+    secs = [_epoch(s) for s in stamps]
+    steps = sorted(secs[i] - secs[i - 1] for i in range(1, n))
+    cadence = steps[len(steps) // 2] or 1
+    step_x = w / float(n - 1)
+    runs, gaps, start = [], [], 0
+    missing = 0.0
+    for i in range(1, n):
+        d = secs[i] - secs[i - 1]
+        if d > cadence * 1.8:
+            runs.append([start, i - 1])
+            gaps.append({"x": round((i - 1) * step_x, 1), "w": round(step_x, 1),
+                         "hours": round(d / 3600.0, 1)})
+            missing += (d - cadence) / 3600.0
+            start = i
+    runs.append([start, n - 1])
+    # One tick per local day boundary, so a week-long tape has scale
+    ticks = []
+    for i in range(1, n):
+        if stamps[i][:10] != stamps[i - 1][:10]:
+            ticks.append({"x": round(i * step_x, 1), "label": stamps[i][5:10]})
+    return {"w": w, "n": n, "runs": runs, "gaps": gaps, "ticks": ticks,
+            "cadence": cadence, "missing": round(missing, 1), "step": round(step_x, 2)}
+
+
+def _epoch(ts):
+    """'YYYY-MM-DD HH:MM:SS' -> seconds. No timezone maths: the archive is all
+    UTC and only DIFFERENCES are used here."""
+    import calendar
+    import time as _t
+    try:
+        return calendar.timegm(_t.strptime(ts[:19], "%Y-%m-%d %H:%M:%S"))
+    except (ValueError, TypeError):
+        return 0
+
+
+def races(series, w=720, h=180, pad=10):
+    """Several gangs on one shared scale, baselined at the window start.
+
+    A shared scale is the whole point - separately scaled lines would let a gang
+    that gained 300 points look like one that gained 30,000."""
+    if not series:
+        return {"w": w, "h": h, "lines": [], "zero_y": h / 2, "lo": 0, "hi": 0}
+    vals = [v for s in series for v in s["vals"]]
+    lo, hi = min(vals + [0]), max(vals + [0])
+    span = (hi - lo) or 1
+    longest = max(len(s["vals"]) for s in series)
+
+    def y(v):
+        return round((h - pad) - ((v - lo) / span) * (h - 2 * pad), 1)
+
+    out = []
+    for s in series:
+        n = len(s["vals"])
+        step = (w - 2 * pad) / max(1, longest - 1)
+        pts = [(round(pad + i * step, 1), y(v)) for i, v in enumerate(s["vals"])]
+        out.append({"gang": s["gang"], "mine": s["mine"], "rank": s["rank"],
+                    "last": s["vals"][-1], "now": s["now"],
+                    "line": " ".join("%s,%s" % p for p in pts),
+                    "end": pts[-1] if pts else None, "n": n})
+    return {"w": w, "h": h, "lines": out, "zero_y": y(0), "lo": lo, "hi": hi}
+
+
+templates.env.globals["spine"] = spine
+templates.env.globals["races"] = races

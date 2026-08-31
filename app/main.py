@@ -192,6 +192,7 @@ def about_page(request: Request):
 
 @app.get("/analytics")
 def analytics_page(request: Request, hours: int = 24, scope: str | None = None,
+                   board: str = "cells",
                    conn: sqlite3.Connection = Depends(get_db),
                    user=Depends(current_user)):
     """Trends over time - the one thing the game itself cannot show, because its
@@ -234,6 +235,12 @@ def analytics_page(request: Request, hours: int = 24, scope: str | None = None,
         "gangs": gangs,
         "gap": queries.points_gap(gangs),
         "neighbours": queries.neighbours(conn, uid, hours=hours),
+        # The archive's own record of when it looked — so a missed poll draws as
+        # a hole rather than a confident straight line across it.
+        "stamps": queries.sample_stamps(conn),
+        "race": queries.gang_race(conn, uid, hours),
+        "exposed": queries.exposed(conn, uid, hours),
+        "wall": queries.board_wall(conn, uid, board),
     })
 
 

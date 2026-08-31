@@ -721,12 +721,19 @@ def _write_archive(conn, players: dict, gangs: dict, gctx: dict) -> None:
         n_names = _write_boards(conn, ts, gctx.get("leaderboard", {}) or {})
     except Exception:
         log.exception("Ranglisten nicht geschrieben")
+    # When we looked and how much came back. Written last, so a sample only
+    # counts as taken once its rows are actually in.
+    n_boards = conn.execute("SELECT COUNT(*) n FROM board_snap WHERE ts = ?",
+                            (ts,)).fetchone()["n"]
+    conn.execute("INSERT OR REPLACE INTO snap_log (ts, players, gangs, boards) "
+                 "VALUES (?,?,?,?)", (ts, len(players), len(gangs), n_boards))
     db.kv_set(conn, "archive_at", time.time())
     if config.ARCHIVE_KEEP_DAYS > 0:
         cutoff = f"-{config.ARCHIVE_KEEP_DAYS} days"
         conn.execute("DELETE FROM player_snap WHERE ts < datetime('now', ?)", (cutoff,))
         conn.execute("DELETE FROM gang_snap   WHERE ts < datetime('now', ?)", (cutoff,))
         conn.execute("DELETE FROM board_snap  WHERE ts < datetime('now', ?)", (cutoff,))
+        conn.execute("DELETE FROM snap_log    WHERE ts < datetime('now', ?)", (cutoff,))
         # player_names is deliberately NOT pruned: it is a lookup table, and losing
         # a name turns every historical row back into a bare id.
     log.info("Archiv: %d Spieler, %d Gangs, %d Namen (ts %s)",
