@@ -936,9 +936,19 @@ def _shape(deltas: list[int], mine=None, bins: int = 61) -> dict:
         return half + off if d > 0 else half - off
 
     counts = [0] * bins
+    # The real range of values that landed in each bin, recorded rather than
+    # derived. Inverting the sqrt scale would give edges close to - but not the
+    # same as - the numbers actually in there, and the hover detail would
+    # quietly disagree with the column it is describing.
+    lows: list = [None] * bins
+    highs: list = [None] * bins
     for d in deltas:
-        counts[slot(d)] += 1
+        s = slot(d)
+        counts[s] += 1
+        lows[s] = d if lows[s] is None else min(lows[s], d)
+        highs[s] = d if highs[s] is None else max(highs[s], d)
     return {"bins": counts, "zero": half, "max": max(counts) or 1, "top": lim,
+            "lo": lows, "hi": highs,
             "me": (slot(mine) if mine is not None else None)}
 
 

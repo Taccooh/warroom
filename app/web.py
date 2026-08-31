@@ -107,6 +107,18 @@ def chart(values, w=560, h=120, pad=8, invert=False):
     if invert:
         lo, hi = -hi, -lo
     real = [v for v in values if v is not None]
+    # Hit strips, one per drawn point, spanning the full height: a pointer
+    # anywhere in the column selects that sample. Nearest-point maths in
+    # JavaScript would have to re-derive the geometry the server already knows,
+    # and would break the moment the chart is styled differently.
+    hits = []
+    if pts:
+        step = (pts[-1][0] - pts[0][0]) / max(1, len(pts) - 1) if len(pts) > 1 else w
+        idx = [i for i, v in enumerate(values) if v is not None]
+        for k, (px, py) in enumerate(pts):
+            hits.append({"x": round(max(0, px - step / 2), 1),
+                         "w": round(step if k else step / 2, 1),
+                         "cx": px, "cy": py, "i": idx[k], "v": values[idx[k]]})
     return {
         "w": w, "h": h,
         "line": " ".join("%s,%s" % p for p in pts),
@@ -119,6 +131,7 @@ def chart(values, w=560, h=120, pad=8, invert=False):
         "max": hi if real else None,
         "n": len(real),
         "dot": pts[-1] if pts else None,
+        "hits": hits,
     }
 
 
@@ -135,7 +148,12 @@ def bars(values, w=560, h=90, pad=6, gap=2):
     for i, v in enumerate(vals):
         bh = max(1.0, (v / top) * (h - 2 * pad))
         out.append({"x": round(pad + i * (bw + gap), 1), "y": round(h - pad - bh, 1),
-                    "w": round(bw, 1), "h": round(bh, 1), "v": v})
+                    "w": round(bw, 1), "h": round(bh, 1), "v": v, "i": i,
+                    # A one-event day is a 1px bar. The hit area is the whole
+                    # column, or the detail is unreachable exactly where it is
+                    # most needed.
+                    "hx": round(pad + i * (bw + gap) - gap / 2, 1),
+                    "hw": round(bw + gap, 1)})
     return {"w": w, "h": h, "bars": out, "max": top}
 
 
@@ -192,7 +210,13 @@ def ridge(shape, w=720, h=200, floor=6):
         cols.append({"x": round(x, 1), "w": round(bw + 0.6, 1),
                      "y": round(h - bh, 1), "h": round(bh, 1),
                      "n": n, "side": ("zero" if i == shape["zero"]
-                                      else ("up" if i > shape["zero"] else "down"))})
+                                      else ("up" if i > shape["zero"] else "down")),
+                     # The real span of values in this column, for the readout
+                     "lo": (shape.get("lo") or [None] * len(bins))[i],
+                     "hi": (shape.get("hi") or [None] * len(bins))[i],
+                     # Full-height hit area: the columns are 12px wide and a
+                     # one-player column is 6px tall — unhittable otherwise.
+                     "hx": round(x, 1), "hw": round(bw + 0.6, 1)})
         pts.append("%s,%s" % (round(x + bw / 2, 1), round(h - bh, 1)))
     me = shape.get("me")
     return {"w": w, "h": h, "cols": cols, "ridge": " ".join(pts),

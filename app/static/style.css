@@ -1483,5 +1483,20 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
 .an-privacy { color: var(--muted); font-size: var(--t-meta); line-height: 1.6;
               margin: var(--s5) 0 0; }
 
+/* --- readouts -------------------------------------------------------------
+   Invisible hit areas over every chart. They carry a finished sentence from the
+   server; analytics.js only decides which one is under the pointer. The page is
+   complete without the script — this only ever adds detail. */
+.an-hit { fill: transparent; cursor: crosshair; outline: none; }
+.an-hit.on, .an-hit:focus-visible { fill: rgba(232, 182, 76, 0.10); }
+path.an-hit.on, path.an-hit:focus-visible { stroke-width: 2; stroke-opacity: 1; }
+circle.ro-inside.an-hit.on, circle.ro-inside.an-hit:focus-visible {
+  stroke-opacity: 1; stroke-width: 2.5; }
+/* The source line doubles as the readout. It changes colour while it holds a
+   reading, so it is obvious the line is answering the pointer. */
+.an-readout { transition: color .12s linear; min-height: 1.1em; }
+.an-readout.live { color: var(--gold); border-top-color: var(--gold-soft); }
+@media (hover: none) { .an-hit { cursor: default; } }
+
 /* The way in, from the Info tab's chart section */
 .an-open { margin-top: 0.5rem; }

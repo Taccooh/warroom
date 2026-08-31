@@ -3,6 +3,9 @@
 {# body.doc: the app body is globally overflow:hidden so the map never scrolls.
    A document page without it is unreachable below the fold. #}
 {% block bodyclass %}doc{% endblock %}
+{# Readouts only. Every shape is already drawn and labelled by the server; this
+   adds the detail under the pointer, and the page stays complete without it. #}
+{% block head %}<script src="/static/analytics.js?v={{ asset_v }}" defer></script>{% endblock %}
 {% block content %}
 <div class="an-wrap">
 
@@ -45,7 +48,8 @@
     <h2>{{ t('an_tide') }}</h2>
     {% if field.stand %}
     {% set rg = ridge(field.shape) %}
-    <div class="an-plate an-hero {{ 'sub-gain' if field.stand.delta > 0 else ('sub-loss' if field.stand.delta < 0 else 'sub-flat') }}">
+    <div class="an-plate an-hero {{ 'sub-gain' if field.stand.delta > 0 else ('sub-loss' if field.stand.delta < 0 else 'sub-flat') }}"
+         data-readout>
       <div class="an-lattice" aria-hidden="true"></div>
       {# Every compared player's change as a mountain range: losses to the left,
          gains to the right, and the tall pillar in the middle is everyone who did
@@ -57,6 +61,12 @@
         <polyline class="rg-line" points="{{ rg.ridge }}"/>
         {% if rg.me_x is not none %}<line class="rg-me" x1="{{ rg.me_x }}" y1="0" x2="{{ rg.me_x }}" y2="{{ rg.h }}"/>
         <circle class="rg-medot" cx="{{ rg.me_x }}" cy="8" r="5"/>{% endif %}
+        {# Full-height hit areas: a column holding one player is 6px tall and
+           would otherwise be unpointable exactly where the detail is wanted. #}
+        <g class="an-hits">
+          {% for c in rg.cols %}{% if c.n %}<rect class="an-hit" x="{{ c.hx }}" y="0" width="{{ c.hw }}" height="{{ rg.h }}" tabindex="0"
+            data-tip="{% if c.side == 'zero' %}{{ t('an_tip_bin_still_one') if c.n == 1 else t('an_tip_bin_still', n=c.n) }}{% elif c.lo != c.hi %}{{ t('an_tip_bin', n=c.n, a=c.lo|delta, b=c.hi|delta) }}{% elif c.n == 1 %}{{ t('an_tip_bin_one', a=c.lo|delta) }}{% else %}{{ t('an_tip_bin1', n=c.n, a=c.lo|delta) }}{% endif %}"/>{% endif %}{% endfor %}
+        </g>
       </svg>
       <div class="an-hero-body">
         <div class="an-face {{ 'gain' if field.stand.delta > 0 else ('loss' if field.stand.delta < 0 else '') }}">{{ field.stand.delta | delta }}<span class="an-unit">{{ t('an_tide_cells') }}</span></div>
@@ -67,7 +77,9 @@
         {% if field.moved == 0 %}<p>{{ t('an_tide_quiet') }}</p>{% endif %}
       </div>
       <p class="an-fine">{{ t('an_tide_shape') }}</p>
-      <p class="an-src">{{ t('an_src', w=t('an_win_hours', n=hours), n=field.population, src=t('an_src_feed')) }}</p>
+      {# Doubles as the readout: pointing at a column replaces the source line
+         with what that column holds, and letting go puts the source back. #}
+      <p class="an-src an-readout">{{ t('an_src', w=t('an_win_hours', n=hours), n=field.population, src=t('an_src_feed')) }}</p>
     </div>
     {% else %}
     <div class="an-plate sub-flat">
@@ -83,7 +95,7 @@
   <section class="an-sec">
     <h2>{{ t('an_front') }}</h2>
     <div class="an-band">
-      <div class="an-plate sub-front">
+      <div class="an-plate sub-front" data-readout>
         {% set ro = rose(front.rows) %}
         <svg class="an-rose" viewBox="0 0 {{ ro.size }} {{ ro.size }}" role="img"
              aria-label="{{ t('an_front') }}">
@@ -101,21 +113,25 @@
           <text class="ro-card" x="{{ ro.c }}" y="{{ ro.size - 4 }}" text-anchor="middle">{{ t('an_dir_s') }}</text>
           <text class="ro-card" x="4" y="{{ ro.c + 4 }}">{{ t('an_dir_w') }}</text>
           {% for w in ro.wedges %}
+            {% set tip = t('an_tip_front', g=w.gang, n=w.n, d=t('an_dir_' ~ (w.dir or 'center'))) %}
             {% if w.center %}
             {# A centroid inside the turf core has no bearing — drawing it as a
                wedge would invent a direction it does not have. #}
-            <circle class="ro-inside" cx="{{ ro.c }}" cy="{{ ro.c }}" r="28"/>
+            <circle class="ro-inside an-hit" cx="{{ ro.c }}" cy="{{ ro.c }}" r="28"
+                    tabindex="0" data-tip="{{ tip }}"/>
             {% else %}
             {# No gang label inside the rose: five names around a 320px circle
                collide with each other and get clipped by the viewBox. The roster
-               beside it carries the names, the bearing and the count. #}
-            <path class="ro-wedge" fill="url(#gInward)" d="{{ w.d }}"/>
+               beside it carries the names, and pointing at a wedge says the rest. #}
+            <path class="ro-wedge an-hit" fill="url(#gInward)" d="{{ w.d }}"
+                  tabindex="0" data-tip="{{ tip }}"/>
             {% endif %}
           {% endfor %}
           {# The hub is your turf — one of the few gold marks on the page #}
           <rect class="ro-hub" x="{{ ro.c - 4 }}" y="{{ ro.c - 4 }}" width="8" height="8"
                 transform="rotate(45 {{ ro.c }} {{ ro.c }})"/>
         </svg>
+        <p class="an-src an-readout">{{ t('an_tip_rose') }}</p>
       </div>
       <div class="an-plate sub-front">
         {% if front.rows %}
@@ -144,7 +160,7 @@
     <h2>{{ t('an_you') }}</h2>
     {% if series|length > 1 %}
       {% set ctot = chart(series | map(attribute='total') | list) %}
-      <div class="an-card">
+      <div class="an-card" data-readout>
         <div class="an-cardhead">
           {# This card runs on 30 days regardless of the chip above — say so, or
              switching the chip looks like it did nothing. #}
@@ -157,17 +173,26 @@
           <polygon class="an-fill" points="{{ ctot.area }}"/>
           <polyline class="an-line" points="{{ ctot.line }}"/>
           {% if ctot.dot %}<circle class="an-dot" cx="{{ ctot.dot[0] }}" cy="{{ ctot.dot[1] }}" r="3"/>{% endif %}
+          <g class="an-hits">
+            {% for hp in ctot.hits %}<rect class="an-hit" x="{{ hp.x }}" y="0" width="{{ hp.w }}" height="{{ ctot.h }}" tabindex="0"
+              data-tip="{{ series[hp.i].ts | localtime }} · {{ hp.v | n }} {{ t('an_aps') }}"/>{% endfor %}
+          </g>
         </svg>
         {# A flat series would print the same number twice — say nothing instead. #}
         {% if ctot.min != ctot.max %}
         <div class="an-scale"><span>{{ ctot.min | n }}</span><span>{{ ctot.max | n }}</span></div>
         {% endif %}
+        <p class="an-src an-readout">{{ t('an_tip_hint') }}</p>
       </div>
 
       {% set ranks = series | map(attribute='gang_rank') | select('!=', None) | list %}
       {% if ranks | length > 1 %}
       {% set crank = chart(series | map(attribute='gang_rank') | list, h=90, invert=true) %}
-      <div class="an-card{% if crank.min == crank.max %} flat{% endif %}">
+      {# A flat rank draws no chart, so there is nothing to point at — and no
+         readout region either, rather than one listening for events that cannot
+         come. #}
+      {% set drawn = crank.min != crank.max %}
+      <div class="an-card{{ ' flat' if not drawn }}"{% if drawn %} data-readout{% endif %}>
         <div class="an-cardhead">
           <span>{{ t('an_rank') }}</span>
           <b>#{{ crank.last }}</b>
@@ -177,13 +202,18 @@
         {# A rank that never moved draws a straight line across 110px to say what
            one sentence says better. Most gangs are stable; don't spend the first
            screen on it. #}
-        {% if crank.min != crank.max %}
+        {% if drawn %}
         <svg class="an-chart" viewBox="0 0 {{ crank.w }} {{ crank.h }}" preserveAspectRatio="none" role="img"
              aria-label="{{ t('an_rank') }}: {{ crank.first }} → {{ crank.last }}">
           <polyline class="an-line gold" points="{{ crank.line }}"/>
           {% if crank.dot %}<circle class="an-dot gold" cx="{{ crank.dot[0] }}" cy="{{ crank.dot[1] }}" r="3"/>{% endif %}
+          <g class="an-hits">
+            {% for hp in crank.hits %}<rect class="an-hit" x="{{ hp.x }}" y="0" width="{{ hp.w }}" height="{{ crank.h }}" tabindex="0"
+              data-tip="{{ series[hp.i].ts | localtime }} · {{ t('an_rank') }} #{{ hp.v }}"/>{% endfor %}
+          </g>
         </svg>
         <div class="an-scale"><span>#{{ crank.min }}</span><span>#{{ crank.max }}</span></div>
+        <p class="an-src an-readout">{{ t('an_tip_hint') }}</p>
         {% else %}
         <div class="an-scale"><span>{{ t('an_rank_flat') }}</span></div>
         {% endif %}
@@ -195,7 +225,7 @@
 
     {% if activity %}
       {% set b = bars(activity | map(attribute='n') | list) %}
-      <div class="an-card">
+      <div class="an-card" data-readout>
         <div class="an-cardhead">
           <span>{{ t('an_events') }} <em class="an-win">{{ t('an_win_days', n=activity_days) }}</em></span>
           <b>{{ activity | sum(attribute='n') }}</b>
@@ -205,7 +235,12 @@
         <svg class="an-chart" viewBox="0 0 {{ b.w }} {{ b.h }}" preserveAspectRatio="none" role="img"
              aria-label="{{ t('an_events') }}">
           {% for bar in b.bars %}<rect class="an-bar" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}"/>{% endfor %}
+          <g class="an-hits">
+            {% for bar in b.bars %}<rect class="an-hit" x="{{ bar.hx }}" y="0" width="{{ bar.hw }}" height="{{ b.h }}" tabindex="0"
+              data-tip="{{ activity[bar.i].day }} · {{ t('an_tip_events', n=bar.v, c=activity[bar.i].captured or 0, l=activity[bar.i].lost or 0) }}"/>{% endfor %}
+          </g>
         </svg>
+        <p class="an-src an-readout">{{ t('an_tip_hint') }}</p>
       </div>
     {% endif %}
   </section>

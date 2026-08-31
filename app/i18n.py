@@ -198,6 +198,28 @@ STRINGS = {
                        "de": "Bei kleiner Grundgesamtheit schlägt ein Rang stark aus. Deshalb steht die Zahl der Unbewegten daneben."},
     "an_scope_empty": {"en": "Nobody else holds ground on your map yet.",
                        "de": "Auf deiner Karte hält noch niemand sonst Boden."},
+    # Chart readouts. The source line doubles as the readout: pointing at a shape
+    # replaces it, letting go puts the source back — detail without a hovering
+    # box, and without costing the page any vertical space.
+    "an_tip_hint": {"en": "Point at the chart for the reading behind a point.",
+                    "de": "Auf die Grafik zeigen für den Wert hinter einem Punkt."},
+    "an_tip_rose": {"en": "Point at a wedge for the gang and the count.",
+                    "de": "Auf einen Keil zeigen für Gang und Anzahl."},
+    "an_tip_bin": {"en": "{n} players between {a} and {b} cells",
+                   "de": "{n} Spieler zwischen {a} und {b} Zellen"},
+    "an_tip_bin1": {"en": "{n} players at {a} cells", "de": "{n} Spieler bei {a} Zellen"},
+    # A column holding exactly one player is the common case out at the edges,
+    # where the biggest movers of the day sit — "1 players" there is conspicuous.
+    "an_tip_bin_one": {"en": "1 player at {a} cells", "de": "1 Spieler bei {a} Zellen"},
+    # The zero column is the biggest thing on the chart. "+0 cells" would be an
+    # odd way to say the one thing it means.
+    "an_tip_bin_still": {"en": "{n} players did not move at all",
+                         "de": "{n} Spieler haben sich gar nicht bewegt"},
+    "an_tip_bin_still_one": {"en": "1 player did not move at all",
+                             "de": "1 Spieler hat sich gar nicht bewegt"},
+    "an_tip_events": {"en": "{n} events · {c} taken, {l} lost",
+                      "de": "{n} Ereignisse · {c} geholt, {l} verloren"},
+    "an_tip_front": {"en": "{g} · {n} reports from {d}", "de": "{g} · {n} Meldungen aus {d}"},
     "an_src": {"en": "{w} · {n} compared · {src}", "de": "{w} · {n} verglichen · {src}"},
     "an_src_feed": {"en": "Map feed", "de": "Karten-Feed"},
     "an_src_events": {"en": "Your watcher", "de": "Dein Wächter"},
