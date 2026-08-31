@@ -305,6 +305,13 @@ document.addEventListener('DOMContentLoaded', function () {
     if (rects.length) map.fitBounds(L.featureGroup(rects).getBounds(), {padding: [30, 30]});
   }
   function fitInitial() {
+    // A deep link names ONE cell (?lat=&lng=, e.g. from the trends page's
+    // exposed list). Fitting the whole turf instead is the one view in which a
+    // single cell cannot be seen, so the focus wins over the default fit.
+    if (DATA.focus && isFinite(DATA.focus.lat) && isFinite(DATA.focus.lng)) {
+      map.setView([DATA.focus.lat, DATA.focus.lng], 14);
+      return;
+    }
     if (theatres.length) map.fitBounds(theatres[0].bounds, {padding: [30, 30]});
     else fitAll();
   }

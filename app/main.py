@@ -142,6 +142,19 @@ def _in_front_of_someone(request: Request) -> bool:
     return request.headers.get("X-Seen") == "1"
 
 
+def _focus(request: Request) -> dict | None:
+    """?lat=&lng= from a deep link, or None. Anything unparsable is simply not a
+    focus - a bad link opens the normal map rather than an error."""
+    try:
+        la = float(request.query_params["lat"])
+        lo = float(request.query_params["lng"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (-90 <= la <= 90 and -180 <= lo <= 180):
+        return None
+    return {"lat": la, "lng": lo}
+
+
 # Brute-force brake for login/register: sliding window per IP, in-memory (single
 # process). The client IP is correct because uvicorn runs with --proxy-headers.
 _rl: dict[tuple[str, str], list[float]] = {}
@@ -625,6 +638,10 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
         "owner_names": queries.names_for(
             conn, [c["owner"] for c in _cells] + [p["owner"] for p in _pl]),
         "tab": request.query_params.get("tab"), "pw": request.query_params.get("pw"),
+        # ?lat=&lng= — a deep link to one cell, used by the trends page. Without
+        # it the map opens fitted to the whole turf, which is the one view in
+        # which a single cell is invisible.
+        "focus": _focus(request),
         "del_state": request.query_params.get("del"),
         # wdgwars rejected this key (401) → the watcher is dead until it is
         # replaced. The page opens a dialog about it instead of staying quiet.

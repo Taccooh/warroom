@@ -436,11 +436,14 @@
 
   {# ---------- the boards: seven leaderboards, collected hourly, never shown ---------- #}
   {% if wall.rows %}
-  <section class="an-sec">
+  {# The chips reload the page, so they carry their own anchor — otherwise
+     switching board throws the reader back to the top of a page they had
+     scrolled to the bottom of. #}
+  <section class="an-sec" id="boards">
     <h2>{{ t('an_boards') }}</h2>
     <div class="an-group an-boards">
       {% for bd in wall.boards %}
-      <a href="/analytics?hours={{ hours }}&amp;scope={{ field.scope }}&amp;board={{ bd }}"
+      <a href="/analytics?hours={{ hours }}&amp;scope={{ field.scope }}&amp;board={{ bd }}#boards"
          class="an-chip{% if wall.board == bd %} on{% endif %}">{{ t('an_board_' ~ bd) }}</a>
       {% endfor %}
     </div>

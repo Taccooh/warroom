@@ -1539,6 +1539,13 @@ circle.ro-inside.an-hit.on, circle.ro-inside.an-hit:focus-visible {
 .an-boards { margin-bottom: var(--s3); }
 .an-rk { font-family: var(--mono); color: var(--muted); font-size: var(--t-meta);
          min-width: 1.6rem; }
+/* The board chips reload the page and land on #boards. Without this the sticky
+   range rail sits on top of the heading they jump to. Scoped to document pages:
+   the app shell does not scroll, and a global scroll-behavior would reach the
+   map and the panels for no reason. */
+#boards { scroll-margin-top: 64px; }
+body.doc { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { body.doc { scroll-behavior: auto; } }
 
 /* The way in, from the Info tab's chart section */
 .an-open { margin-top: 0.5rem; }
