@@ -152,6 +152,27 @@ docker pull ghcr.io/taccooh/warroom:latest
 # or track master: ghcr.io/taccooh/warroom:edge
 ```
 
+### Upgrading
+
+One line, from the directory holding your `compose.yml`:
+
+```sh
+docker compose pull && docker compose up -d
+```
+
+**There is no migration step, by design.** New tables and indexes are
+`CREATE … IF NOT EXISTS` in `db.SCHEMA`, new columns are added by `_add_col`, and
+anything derivable from data you already have is backfilled at startup — the
+sample log added in 1.8.0 reconstructs itself from `player_snap` in 47 ms over
+176k rows, and is idempotent, so a restart costs one pass and changes nothing.
+New settings always ship with a working default; you only touch `.env` if you
+want to change one.
+
+Your database lives in the `data/` volume and is never touched by an image
+change. Downgrading is a `docker compose pull` away too, but a database written
+by a newer version may carry columns the older one does not know about — those
+are ignored, not removed.
+
 The Dockerfile is a two-stage build: a builder stage with a C toolchain
 (needed because `cffi`/`httptools`/`uvloop` have no prebuilt wheels for
 `linux/arm/v7`, so pip compiles them from source on that platform) and a slim
