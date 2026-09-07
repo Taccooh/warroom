@@ -489,11 +489,20 @@ def virgin_targets(conn, uid: int, bbox: tuple | None, roads_only: bool,
     return rows[:limit]
 
 
+def board_latest_ts(conn, board: str) -> str | None:
+    """When this board was last sampled. A board that drops out of the upstream
+    feed (the cells board does this intermittently) simply stops being written, and
+    its latest sample then ages with no other signal. Callers need this to tell a
+    live board from a stale one, and to tell a stale board apart from a player who
+    merely fell out of the top 50 (whose own history stops while the board is fine)."""
+    r = conn.execute("SELECT MAX(ts) t FROM board_snap WHERE board = ?",
+                     (board,)).fetchone()
+    return r["t"] if r and r["t"] else None
+
+
 def boards_now(conn, board: str, limit: int) -> list[dict]:
     """One of the game's top-50 lists as of the latest sample, names resolved."""
-    ts = conn.execute("SELECT MAX(ts) t FROM board_snap WHERE board = ?",
-                      (board,)).fetchone()
-    ts = ts["t"] if ts else None
+    ts = board_latest_ts(conn, board)
     if not ts:
         return []
     return [dict(r) for r in conn.execute(

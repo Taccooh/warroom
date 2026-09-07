@@ -425,6 +425,15 @@ gang-less player appears at all.** Seven boards are kept — `today`, `week`,
 figure it ranks by (`ranks_by` in the response says which). `all_time` additionally
 carries `wifi` and `ble` split out.
 
+The response carries `sampled_at` (and `board_sampled_at` on the `?id=` form): when
+that board was last written. A board that drops out of the upstream feed — the
+`cells` board does this now and then — stops being sampled and its standings age
+with no other signal, so check this timestamp before trusting the numbers as
+current. On the `?id=` form it also tells a stale board apart from a player who left
+the top 50: if `board_sampled_at` is fresh but the newest `ts` in `history` is old,
+the player dropped out; if `board_sampled_at` itself is old, the whole board is
+behind.
+
 ```bash
 # Who leads all-time, with names
 curl -H "$AUTH" 'https://your-instance/api/boards?board=all_time'

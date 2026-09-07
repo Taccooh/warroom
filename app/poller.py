@@ -636,9 +636,12 @@ def _write_boards(conn, ts: str, lb: dict) -> int:
     territory feed does not carry at all (raw AP totals, hunts, arcade), and they
     are the ONLY place a gang-less player shows up — member-territories is gang
     territory exclusively, so a strong solo player is otherwise invisible."""
-    rows, names = [], {}
+    rows, names, empty = [], {}, []
     for board, field in BOARD_VALUE.items():
-        for rank, e in enumerate(lb.get(board, []) or [], 1):
+        entries = lb.get(board) or []
+        if not entries:
+            empty.append(board)
+        for rank, e in enumerate(entries, 1):
             pid = _num(e.get("user_id"))
             if pid is None:
                 continue
@@ -646,6 +649,12 @@ def _write_boards(conn, ts: str, lb: dict) -> int:
                          _num(e.get("wifi")), _num(e.get("ble"))))
             if e.get("username"):
                 names[pid] = e["username"]
+    if empty:
+        # A board missing from the feed is written as nothing, so its last sample
+        # ages with no other trace. The cells board drops out intermittently
+        # upstream; log it so a long absence is visible here and not only as a
+        # stale /api/boards reply on a self-hosted instance.
+        log.info("Board(s) im Feed leer, nicht archiviert: %s", ", ".join(empty))
     if rows:
         conn.executemany(
             "INSERT OR REPLACE INTO board_snap (ts, board, rank, player_id, value, wifi, ble) "

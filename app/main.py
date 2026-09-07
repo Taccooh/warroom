@@ -894,7 +894,14 @@ def api_boards(board: str = "all_time", id: int | None = None,
     `cells`, `hunters`, `flock`, `arcade`. With `id`, one player's movement on that
     board — a gap means they left the top 50 at that sample, not that they stopped.
 
-    These carry names, and unlike /api/players they include players with no gang."""
+    These carry names, and unlike /api/players they include players with no gang.
+
+    `sampled_at` / `board_sampled_at` is when the board itself was last written. A
+    board that drops out of the upstream feed (the cells board does this) stops
+    being sampled and then ages silently, so this is what says whether the standings
+    are current. On the `?id=` form it also separates a stale board from a player
+    who merely fell out of the top 50: compare it against the newest `ts` in
+    `history` — a fresh board with an old last entry means the player dropped out."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
     if board not in poller.BOARD_VALUE:
@@ -904,6 +911,8 @@ def api_boards(board: str = "all_time", id: int | None = None,
     if id is not None:
         return JSONResponse({"board": board, "player_id": id,
                              "username": queries.player_name(conn, id),
+                             "board_sampled_at": queries.board_latest_ts(conn, board),
                              "history": queries.board_history(conn, board, id, since, n)})
     return JSONResponse({"board": board, "ranks_by": poller.BOARD_VALUE[board],
+                         "sampled_at": queries.board_latest_ts(conn, board),
                          "entries": queries.boards_now(conn, board, n)})
