@@ -557,11 +557,22 @@ def _fetch_global(conn, users) -> tuple[list, float, float, dict]:
             gctx = {}
             try:
                 gctx["leaderboard"] = client.leaderboard()
-            except WdgError:
+            except WdgError as e:
+                # A failed fetch is not "the game has no boards". Swallowed silently,
+                # this freezes ALL SEVEN boards at their last sample while the rest of
+                # the cycle succeeds: the feed pass still writes player_snap/gang_snap,
+                # the sample still counts as taken, and nothing anywhere says why the
+                # standings stopped moving. Same rule as the road cache — a network
+                # error is not a finding.
+                log.warning("Leaderboard via %s fehlgeschlagen, Boards bekommen diesmal "
+                            "kein Sample: %s", u["wdg_username"], e)
                 gctx["leaderboard"] = {}
             try:
                 gctx["territories"] = client.territories()
-            except WdgError:
+            except WdgError as e:
+                # Same again: without it every gang in this sample gets rank/points NULL.
+                log.warning("Territories via %s fehlgeschlagen, Gang-Rang und -Punkte "
+                            "bleiben in diesem Sample leer: %s", u["wdg_username"], e)
                 gctx["territories"] = []
             return mt.get("cells", []), glat, glng, gctx
         except WdgError as e:
