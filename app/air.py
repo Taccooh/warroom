@@ -358,15 +358,33 @@ def _km(lat1, lng1, lat2, lng2) -> float:
     return 12742.0 * math.asin(min(1.0, math.sqrt(h)))
 
 
+EXTRAP_MAX_S = 1200     # the client never moves a sample further than this: keep in step with it
+HIDE_AFTER_S = 1500     # a sample older than this is not shown at all (a frozen ghost is worse)
+PAD_DEG = 3.2           # ~170 nm: the farthest a jet gets in EXTRAP_MAX_S, so a plane whose stored
+                        # position is outside the view box can still belong inside it
+
+
+def _extrap(a: list, now_s: float) -> tuple:
+    """Where the client draws this aircraft right now. Must stay identical to acPos() in
+    warroom.js: the view is chosen by THIS position, not the stored one, otherwise a plane
+    that is on screen (dead-reckoned) is missing from the answer once the view shrinks."""
+    dt = min(max(now_s - a[9], -EXTRAP_MAX_S), EXTRAP_MAX_S)
+    if not a[6] or a[7] is None or not dt:
+        return a[3], a[4]
+    nm, rad = a[6] * dt / 3600.0, math.radians(a[7])
+    return (a[3] + nm * math.cos(rad) / 60.0,
+            a[4] + nm * math.sin(rad) / (60.0 * max(0.05, math.cos(math.radians(a[3])))))
+
+
 def now(conn: sqlite3.Connection, bbox: tuple, center: tuple, mode: str = "all",
         radius: bool = False) -> dict:
     """Aircraft for the view: [hex, callsign, type, lat, lng, alt, gs, track, kind, t,
     registration, squawk, vertical rate ft/min, country, category key, indicated airspeed].
     `t` is when the position was valid - the client dead-reckons forward from it.
-    World scope: everything in the view box, thinned once more than THIN_MIN are in it,
-    at most MAX_VIEW.
-    Radius scope: everything within RADIUS_KM of `center`, never thinned - the box is the
-    circle's bounding box and `bbox` is ignored."""
+    World scope: everything in the view box, thinned once more than THIN_MIN are in it, at
+    most MAX_VIEW. Radius scope: everything within RADIUS_KM of `center`, never thinned - the
+    box is the circle's bounding box and `bbox` is ignored. Membership is decided by the
+    dead-reckoned position (see _extrap), the same one the client draws."""
     clat, clng = center
     if radius:
         dlat = RADIUS_KM / 111.0
@@ -377,21 +395,43 @@ def now(conn: sqlite3.Connection, bbox: tuple, center: tuple, mode: str = "all",
             w, e = ((w + 180) % 360) - 180, ((e + 180) % 360) - 180
     else:
         s, w, n, e = bbox
-    if w <= e:
-        lng_sql, args = "lng BETWEEN ? AND ?", [s, n, w, e]
-    else:                                  # across the antimeridian
-        lng_sql, args = "(lng >= ? OR lng <= ?)", [s, n, w, e]
-    ac = [list(r) for r in conn.execute(
+    # Pre-select by the stored position with a generous margin, then decide exactly below.
+    ps, pn = max(-90.0, s - PAD_DEG), min(90.0, n + PAD_DEG)
+    pad_lng = PAD_DEG / max(0.05, math.cos(math.radians(min(89.0, max(abs(ps), abs(pn))))))
+    pw, pe = w - pad_lng, e + pad_lng
+    if w > e or pw < -180 or pe > 180:
+        lng_sql, args = "1 = 1", [ps, pn]  # wraps the antimeridian (or nearly): no longitude filter
+    else:
+        lng_sql, args = "lng BETWEEN ? AND ?", [ps, pn, pw, pe]
+    rows = [list(r) for r in conn.execute(
         "SELECT hex, callsign, type, lat, lng, alt, gs, track, kind, t, "
         "COALESCE(reg, ''), COALESCE(squawk, ''), vrate, COALESCE(country, ''), COALESCE(cat, ''), ias "
         f"FROM air_now WHERE lat BETWEEN ? AND ? AND {lng_sql}{MODES.get(mode, '')}", args)]
-    if radius:
-        ac = [a for a in ac if _km(clat, clng, a[3], a[4]) <= RADIUS_KM]
-    ac.sort(key=lambda a: (a[3] - clat) ** 2 + ((a[4] - clng + 180) % 360 - 180) ** 2)
-    total = len(ac)
+
+    def inside(la: float, lo: float) -> bool:
+        if not (s <= la <= n):
+            return False
+        return (w <= lo <= e) if w <= e else (lo >= w or lo <= e)
+
+    now_s = time.time()
+    shown = []                              # (aircraft row, dead-reckoned lat, lng)
+    for a in rows:
+        if now_s - a[9] > HIDE_AFTER_S:       # too old to guess a position: better gone than frozen
+            continue
+        la, lo = _extrap(a, now_s)
+        if radius:
+            if _km(clat, clng, la, lo) <= RADIUS_KM:
+                shown.append((a, la, lo))
+        elif inside(la, lo):
+            shown.append((a, la, lo))
+    shown.sort(key=lambda x: (x[1] - clat) ** 2 + ((x[2] - clng + 180) % 360 - 180) ** 2)
+    total = len(shown)
+    ac = [x[0] for x in shown]
     if not radius:
         span = max(n - s, (e - w) if e >= w else (e - w + 360.0))
         # the rare kinds are never thinned: all helicopters / all military fit on the screen
-        if len(ac) > THIN_MIN and mode in ("all", "low"):
-            ac = _thin(ac, span / THIN_CELLS)
+        if total > THIN_MIN and mode in ("all", "low"):
+            ac = _thin([[x[0][0], 0, 0, x[1], x[2], 0, x[0][6], 0, x[0][8]] for x in shown], span / THIN_CELLS)
+            keep = {a[0] for a in ac}
+            ac = [x[0] for x in shown if x[0][0] in keep]
     return {"last": int(db.kv_get(conn, "air_last", "0")), "total": total, "ac": ac[:MAX_VIEW]}
