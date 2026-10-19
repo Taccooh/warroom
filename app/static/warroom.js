@@ -280,7 +280,10 @@ document.addEventListener('DOMContentLoaded', function () {
   var AIR_COL = {all: '#5cc8ff', low: '#ffd45c', heli: '#7dff9a', mil: '#ff7a5c'};
   // Density cells get their own pane above the wdgwars cells (SVG, overlay pane), so the
   // aircraft cells win every tap; markers and popups stay above.
-  map.createPane('airPane'); map.getPane('airPane').style.zIndex = 450;
+  map.createPane('airPane', map.getPane('rotatePane') || undefined); map.getPane('airPane').style.zIndex = 450;
+  // The plane canvas lives in a map pane just below the popups (700) and markers (600): a
+  // sibling of the map pane would sit above ALL of them and draw planes over popups.
+  map.createPane('livePane', map.getPane('rotatePane') || undefined); map.getPane('livePane').style.zIndex = 460;
   var airRenderer = L.canvas({padding: 0.3, pane: 'airPane'});
   // While an air layer is on, the territory cells step back (see .air-focus in style.css).
   function airFocus() { map.getContainer().classList.toggle('air-focus', airOn || liveOn); }
@@ -361,9 +364,14 @@ document.addEventListener('DOMContentLoaded', function () {
     liveCv.width = sz.x * dpr; liveCv.height = sz.y * dpr;
     liveCv.style.width = sz.x + 'px'; liveCv.style.height = sz.y + 'px';
     liveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    placeLive();
   }
+  // Panes move with the map while the canvas should stay glued to the viewport: pin it to
+  // the top-left corner of the view in pane coordinates, then draw in container coordinates.
+  function placeLive() { L.DomUtil.setPosition(liveCv, map.containerPointToLayerPoint([0, 0])); }
   function drawLive() {
     if (!liveCv) return;
+    placeLive();
     var sz = map.getSize(), z = map.getZoom(), nowS = Date.now() / 1000;
     liveCtx.clearRect(0, 0, sz.x, sz.y);
     var k = z < 4 ? 0.5 : z < 6 ? 0.65 : z < 9 ? 0.85 : 1.1;
@@ -448,7 +456,7 @@ document.addEventListener('DOMContentLoaded', function () {
     liveOn = !liveOn;
     if (liveOn) {
       liveCv = document.createElement('canvas'); liveCv.className = 'air-canvas';
-      liveCtx = liveCv.getContext('2d'); map.getContainer().appendChild(liveCv); sizeLive();
+      liveCtx = liveCv.getContext('2d'); map.getPane('livePane').appendChild(liveCv); sizeLive();
       pullLive(); livePull = setInterval(pullLive, 60000); liveTick = setInterval(drawLive, 1000);
     } else {
       clearInterval(livePull); clearInterval(liveTick);
