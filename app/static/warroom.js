@@ -269,6 +269,78 @@ document.addEventListener('DOMContentLoaded', function () {
     else { mastsLayer.clearLayers(); map.removeLayer(mastsLayer); }
     if (typeof reflectLayers === 'function') reflectLayers();
   }
+  // ---- Air traffic: density map of where aircraft fly (adsb.lol samples aggregated by
+  // the server, see air.py) plus the latest snapshot as live dots. Data comes from our
+  // own /api/air/*; the page never talks to adsb.lol. Both layers sit in the ◈ popover.
+  var AIR_MODES = ['all', 'low', 'heli', 'mil'];
+  var AIR_COL = {all: '#5cc8ff', low: '#ffd45c', heli: '#7dff9a', mil: '#ff7a5c'};
+  var airRenderer = L.canvas({padding: 0.3});
+  var airLayer = L.layerGroup(), airLive = L.layerGroup();
+  var airOn = false, liveOn = false, airMode = 'all', airData = null, airTimer = null;
+  try { var am = localStorage.getItem('wr_air_mode'); if (AIR_MODES.indexOf(am) >= 0) airMode = am; } catch (e) {}
+  // cell row: [i, j, ground, low, mid, high, heli, mil]
+  function airVal(r, mode) {
+    return mode === 'low' ? r[3] : mode === 'heli' ? r[6] : mode === 'mil' ? r[7] : r[3] + r[4] + r[5];
+  }
+  function renderAir() {
+    airLayer.clearLayers();
+    if (!airOn || !airData) return;
+    var g = airData.grid, bnd = map.getBounds().pad(0.1), max = 1, rows = [];
+    airData.cells.forEach(function (r) {
+      var v = airVal(r, airMode);
+      if (!v) return;
+      if (v > max) max = v;
+      var la = r[0] * g, lo = r[1] * g;
+      if (la > bnd.getNorth() || la + g < bnd.getSouth() || lo > bnd.getEast() || lo + g < bnd.getWest()) return;
+      rows.push([r, v, la, lo]);
+    });
+    var col = AIR_COL[airMode], lm = Math.log(1 + max);
+    rows.forEach(function (x) {
+      var r = x[0], op = 0.06 + 0.5 * Math.log(1 + x[1]) / lm;
+      L.rectangle([[x[2], x[3]], [x[2] + g, x[3] + g]], {stroke: false, fillColor: col, fillOpacity: op,
+        renderer: airRenderer})
+        .bindPopup('<b>' + esc(T.air_pop_head) + '</b><br>' +
+          tf(T.air_pop_bands, {low: r[3], mid: r[4], high: r[5]}) + '<br>' +
+          tf(T.air_pop_kinds, {heli: r[6], mil: r[7], ground: r[2]}) + '<br><small>' +
+          tf(T.air_pop_since, {n: airData.samples, d: airData.since}) + '</small>')
+        .addTo(airLayer);
+    });
+  }
+  function loadAir(cb) {
+    fetch('/api/air/cells', {credentials: 'same-origin'}).then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.cells) { airData = d; if (cb) cb(); } }).catch(function () {});
+  }
+  function toggleAir() {
+    airOn = !airOn;
+    if (airOn) { airLayer.addTo(map); loadAir(renderAir); }
+    else { airLayer.clearLayers(); map.removeLayer(airLayer); }
+    reflectLayers();
+  }
+  function renderLive(d) {
+    airLive.clearLayers();
+    if (!liveOn || !d) return;
+    d.ac.forEach(function (a) {
+      var alt = a[5], c = a[8] === 2 ? AIR_COL.mil : a[8] === 1 ? AIR_COL.heli : alt !== null && alt < 3000 ? AIR_COL.low : AIR_COL.all;
+      L.circleMarker([a[3], a[4]], {radius: 3.5, weight: 1, color: '#0b0f14', fillColor: c, fillOpacity: 0.95,
+        renderer: airRenderer})
+        .bindPopup('<b>' + esc(a[1] || a[0].toUpperCase()) + '</b>' + (a[2] ? ' · ' + esc(a[2]) : '') + '<br>' +
+          (alt === null ? '' : alt + ' ft') + (a[6] === null ? '' : ' · ' + a[6] + ' kt') +
+          (a[7] === null ? '' : ' · ' + a[7] + '°'))
+        .addTo(airLive);
+    });
+  }
+  function pullLive() {
+    fetch('/api/air/now', {credentials: 'same-origin'}).then(function (r) { return r.json(); })
+      .then(renderLive).catch(function () {});
+  }
+  function toggleLive() {
+    liveOn = !liveOn;
+    if (liveOn) { airLive.addTo(map); pullLive(); airTimer = setInterval(pullLive, 60000); }
+    else { clearInterval(airTimer); airLive.clearLayers(); map.removeLayer(airLive); }
+    reflectLayers();
+  }
+  map.on('moveend', function () { if (airOn) renderAir(); });
+
   // Virgin cells sit purely on geometry, so some land in lakes/rivers (Lake Erie).
   // Snap the nearest ones to a road via /api/snap; cells with no drivable road
   // (water/forest) come back null → drop them from virginCells. This runs once on load
@@ -1158,6 +1230,12 @@ document.addEventListener('DOMContentLoaded', function () {
       '<span class="lyr-ic">⊚</span>' + esc(T.lyr_rings) + '</button>';
     rows += '<button type="button" class="lyr-row" data-layer="masts">' +
       '<span class="lyr-ic">📡</span>' + esc(T.lyr_masts) + '</button>';
+    rows += '<button type="button" class="lyr-row" data-layer="air">' +
+      '<span class="lyr-ic">✈</span>' + esc(T.lyr_air) + '</button>' +
+      '<div class="cov-ctrls"><div class="cov-line"><span>' + esc(T.air_mode) + '</span>' +
+        '<button type="button" class="cov-radius" id="air-mode">' + esc(T['air_mode_' + airMode]) + '</button></div></div>' +
+      '<button type="button" class="lyr-row" data-layer="live">' +
+      '<span class="lyr-ic">◉</span>' + esc(T.lyr_live) + '</button>';
     rows += '<div class="lyr-sep"></div>' +
       '<button type="button" class="lyr-row" data-layer="cov"><span class="lyr-ic">▨</span>' + esc(T.lyr_cov) + '</button>' +
       '<div class="cov-ctrls">' +
@@ -1177,7 +1255,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function reflectLayers() {
     var box = document.getElementById('layers-box');
     if (!box) return;
-    var st = {virgin: virginOn, rings: ringsOn, masts: mastsOn, cov: covOn};
+    var st = {virgin: virginOn, rings: ringsOn, masts: mastsOn, air: airOn, live: liveOn, cov: covOn};
     box.querySelectorAll('.lyr-row').forEach(function (row) {
       row.classList.toggle('on', !!st[row.dataset.layer]);
     });
@@ -1200,8 +1278,16 @@ document.addEventListener('DOMContentLoaded', function () {
       if (l === 'virgin') toggleVirgin();
       else if (l === 'rings') toggleRings();
       else if (l === 'masts') toggleMasts();
+      else if (l === 'air') toggleAir();
+      else if (l === 'live') toggleLive();
       else if (l === 'cov') toggleCoverage();
     });
+  });
+  document.getElementById('air-mode').addEventListener('click', function () {
+    airMode = AIR_MODES[(AIR_MODES.indexOf(airMode) + 1) % AIR_MODES.length];
+    try { localStorage.setItem('wr_air_mode', airMode); } catch (e) {}
+    this.textContent = T['air_mode_' + airMode];
+    renderAir();
   });
   document.getElementById('cov-radius').addEventListener('click', function () {
     var i = COV_RADII.indexOf(recRadius);

@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
-from . import auth, config, coverage, crypto, db, i18n, poller, push, queries, roads, routing, social, web
+from . import air, auth, config, coverage, crypto, db, i18n, poller, push, queries, roads, routing, social, web
 from .security import SecurityHeadersMiddleware
 from .web import render
 from .wdg import Wdg, WdgError
@@ -40,6 +40,22 @@ async def poll_loop():
         await asyncio.sleep(max(1.0, config.POLL_SECONDS - (time.monotonic() - t0)))
 
 
+async def air_loop():
+    """Air traffic sampler. Its own loop and its own upstream: a slow or dead adsb.lol
+    must never delay the wdgwars poll."""
+    while config.AIR_SECONDS > 0:
+        t0 = time.monotonic()
+        try:
+            conn = db.connect()
+            try:
+                log.info("air: %s", await asyncio.to_thread(air.poll, conn))
+            finally:
+                conn.close()
+        except Exception:
+            log.exception("air loop failed")
+        await asyncio.sleep(max(30.0, config.AIR_SECONDS - (time.monotonic() - t0)))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     c = db.connect(); db.init_db(c); c.close()
@@ -48,10 +64,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("VAPID-Init fehlgeschlagen")
     task = asyncio.create_task(poll_loop())
+    air_task = asyncio.create_task(air_loop())
     try:
         yield
     finally:
         task.cancel()
+        air_task.cancel()
 
 
 app = FastAPI(lifespan=lifespan, title="Warroom")
@@ -481,6 +499,21 @@ def friends_positions(conn: sqlite3.Connection = Depends(get_db), user=Depends(c
     # when the value changes, the page reloads itself (no extra endpoint).
     return JSONResponse({"friends": social.friends_positions(conn, user["id"]),
                          "last_poll": db.kv_get(conn, "last_poll", "0")})
+
+
+# ---- Air traffic (adsb.lol density map) ----
+@app.get("/api/air/cells")
+def air_cells(conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    return JSONResponse(air.cells(conn), headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.get("/api/air/now")
+def air_now(conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    return JSONResponse(air.now(conn), headers={"Cache-Control": "private, max-age=60"})
 
 
 # ---- Coverage brush ----

@@ -32,6 +32,19 @@ CREATE TABLE IF NOT EXISTS users (
     -- phone in a pocket would read as permanently active.
     last_seen     TEXT
 );
+-- Air traffic density (air.py): counts only, no per-flight history.
+CREATE TABLE IF NOT EXISTS air_cells (
+    i INTEGER NOT NULL, j INTEGER NOT NULL,
+    band INTEGER NOT NULL,   -- 0 ground, 1 low, 2 mid, 3 cruise
+    kind INTEGER NOT NULL,   -- 0 civil, 1 helicopter, 2 military
+    n INTEGER NOT NULL,
+    PRIMARY KEY (i, j, band, kind)
+);
+-- The latest snapshot, replaced every sample.
+CREATE TABLE IF NOT EXISTS air_now (
+    hex TEXT PRIMARY KEY, callsign TEXT, type TEXT, lat REAL, lng REAL,
+    alt INTEGER, gs INTEGER, track INTEGER, kind INTEGER
+);
 CREATE TABLE IF NOT EXISTS sessions (
     token      TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

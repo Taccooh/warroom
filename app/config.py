@@ -74,3 +74,13 @@ ARCHIVE_KEEP_DAYS = int(os.environ.get("WARROOM_ARCHIVE_KEEP_DAYS", "0"))
 # bound. queries.event_activity needs the same number to tell a quiet day from a
 # day the cap simply cut off.
 EVENT_KEEP = int(os.environ.get("WARROOM_EVENT_KEEP", "200"))
+
+# --- Air traffic (adsb.lol) --------------------------------------------------
+# Open ADS-B data, sampled into a density map (see air.py). The point endpoint allows
+# 500 requests/day per IP, so 300 s (288/day) leaves room; AIR_DAILY_MAX is our own cap
+# below that. AIR_SECONDS=0 switches the feature off.
+AIR_BASE_URL = os.environ.get("WARROOM_AIR_URL", "https://api.adsb.lol")
+AIR_SECONDS = int(os.environ.get("WARROOM_AIR_SECONDS", "300"))
+AIR_DAILY_MAX = int(os.environ.get("WARROOM_AIR_DAILY_MAX", "400"))
+# "lat,lng,nm;lat,lng,nm" - one 250 nm circle around central Germany covers the country.
+AIR_CIRCLES = os.environ.get("WARROOM_AIR_CIRCLES", "51.2,10.4,250")

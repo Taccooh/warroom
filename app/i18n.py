@@ -639,6 +639,19 @@ JS = {
     "lyr_virgin": {"en": "Virgin land", "de": "Neuland"},
     "lyr_rings": {"en": "Distance rings", "de": "Distanzringe"},
     "lyr_cov": {"en": "Coverage", "de": "Abdeckung"},
+    # Air traffic layer (adsb.lol density map + live snapshot)
+    "lyr_air": {"en": "Air traffic", "de": "Flugverkehr"},
+    "lyr_live": {"en": "Aircraft now", "de": "Flugzeuge jetzt"},
+    "air_mode": {"en": "Show", "de": "Zeige"},
+    "air_mode_all": {"en": "All", "de": "Alle"},
+    "air_mode_low": {"en": "Low (<3000 ft)", "de": "Tief (<3000 ft)"},
+    "air_mode_heli": {"en": "Helicopters", "de": "Hubschrauber"},
+    "air_mode_mil": {"en": "Military", "de": "Militär"},
+    "air_pop_head": {"en": "✈ Air traffic here", "de": "✈ Flugverkehr hier"},
+    "air_pop_bands": {"en": "Low {low} · mid {mid} · cruise {high}", "de": "Tief {low} · mittel {mid} · Reiseflug {high}"},
+    "air_pop_kinds": {"en": "Helicopters {heli} · military {mil} · on ground {ground}",
+                      "de": "Hubschrauber {heli} · Militär {mil} · am Boden {ground}"},
+    "air_pop_since": {"en": "{n} samples since {d} (adsb.lol)", "de": "{n} Messungen seit {d} (adsb.lol)"},
     # GSM masts: informational overlay of towers logged per cell (they count as
     # ordinary scans since wdgwars reverted the mast-ownership experiment)
     "lyr_masts": {"en": "GSM masts", "de": "GSM-Masten"},
