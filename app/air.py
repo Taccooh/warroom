@@ -44,16 +44,20 @@ MAX_POS_AGE_S = 60      # drop positions older than this when sampling
 KEEP_S = 2400           # live rows are forgotten after this
 M_TO_FT, MS_TO_KT = 3.28084, 1.94384
 
-NEAR_NM = 108           # 200 km
-NEAR_CELL = 1.0         # degrees: view centres within one cell share a cached fetch
-MAX_VIEW = 2500         # aircraft handed to the client per request
-# Zoomed out, every aircraft would just be one big blob: past THIN_SPAN degrees across the
-# view, keep one aircraft per (span / THIN_CELLS)-degree square - military and helicopters
-# first, then the fastest (cruising airliners show the routes best).
-THIN_SPAN = 8.0
-THIN_CELLS = 34
+NEAR_NM = 125           # 200 km plus a margin: the fetch centre is snapped to a 0.5 deg grid
+NEAR_CELL = 0.5         # degrees: view centres within one cell share a cached fetch
+RADIUS_KM = 200.0       # the 200 km scope
+MAX_VIEW = 4000         # aircraft handed to the client per request
+# Thinning: with up to THIN_MIN aircraft in the view every one is shown, however far out. Past
+# that, keep one aircraft per (span / THIN_CELLS)-degree square - military and helicopters
+# first, then the fastest (cruising airliners show the routes best) - so a crowded view
+# stays readable instead of one big blob.
+THIN_MIN = 40
+THIN_CELLS = 40
 
 _near_lock = threading.Lock()
+_fi_lock = threading.Lock()          # adsb.fi allows 1 request/s
+_fi_last = [0.0]
 _near_done: dict[tuple, float] = {}   # (cell_lat, cell_lng) -> time of last fetch
 
 
@@ -255,29 +259,48 @@ def poll_mil(conn: sqlite3.Connection) -> str:
     return f"{len(rows)} military"
 
 
+def _fetch_area(conn: sqlite3.Connection, lat: float, lng: float) -> list:
+    """Raw aircraft around a point: adsb.fi first (no daily cap), adsb.lol as the fallback
+    (counted against its daily budget). Empty list when both fail."""
+    with _fi_lock:                      # serialise: the open API wants one request a second
+        wait = 1.1 - (time.time() - _fi_last[0])
+        if wait > 0:
+            time.sleep(wait)
+        _fi_last[0] = time.time()
+        try:
+            d = _get_json(f"{config.AIR_FI_URL}/v2/lat/{lat:.3f}/lon/{lng:.3f}/dist/{NEAR_NM}", timeout=30)
+            return d.get("aircraft") or d.get("ac") or []
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            log.warning("adsb.fi: %s", e)
+    if not _spend(conn, "adsblol", 1, config.AIR_DAILY_MAX):
+        return []
+    try:
+        return _get_json(f"{config.AIR_BASE_URL}/v2/point/{lat:.3f}/{lng:.3f}/{NEAR_NM}").get("ac") or []
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        log.warning("adsb.lol: %s", e)
+        return []
+
+
 def near(conn: sqlite3.Connection, lat: float, lng: float) -> str:
-    """adsb.lol 200 km around a view centre, for the detail the global feed lacks. Cached
-    per 1 deg cell; shares the daily budget with the military list. Meant to be called in
-    the background after a request - never make a viewer wait for it."""
+    """Complete picture around a point (~230 km), for the detail the global feed lacks.
+    The centre is snapped to a 0.5 deg grid and cached for AIR_NEAR_TTL seconds, so viewers
+    in the same area share one fetch. Zoomed-in views call it in the background; the 200 km
+    scope calls it and waits."""
     key = (round(lat / NEAR_CELL), round(lng / NEAR_CELL))
     with _near_lock:
         if time.time() - _near_done.get(key, 0) < config.AIR_NEAR_TTL:
             return "cached"
         _near_done[key] = time.time()
-        if len(_near_done) > 2000:
+        if len(_near_done) > 4000:
             for k in [k for k, v in _near_done.items() if time.time() - v > 3600]:
                 del _near_done[k]
-    if not _spend(conn, "adsblol", 1, config.AIR_DAILY_MAX):
-        return "daily budget used up"
-    try:
-        ac = _get_json(f"{config.AIR_BASE_URL}/v2/point/{lat:.3f}/{lng:.3f}/{NEAR_NM}").get("ac") or []
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        return f"near failed: {e}"
+    ac = _fetch_area(conn, key[0] * NEAR_CELL, key[1] * NEAR_CELL)
     now = time.time()
     rows = [r for a in ac if (r := _row_adsb(a, now))]
-    with conn:
-        conn.execute("BEGIN IMMEDIATE")
-        _store_live(conn, rows)
+    if rows:
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            _store_live(conn, rows)
     return f"{len(rows)} aircraft near {lat:.1f},{lng:.1f}"
 
 
@@ -327,27 +350,48 @@ MODES = {"all": "", "low": " AND alt IS NOT NULL AND alt < 3000",
          "heli": f" AND kind = {KIND_HELI}", "mil": f" AND kind = {KIND_MIL}"}
 
 
-def now(conn: sqlite3.Connection, bbox: tuple, center: tuple, mode: str = "all") -> dict:
-    """Aircraft inside the view: [hex, callsign, type, lat, lng, alt, gs, track, kind, t,
+def _km(lat1, lng1, lat2, lng2) -> float:
+    """Great-circle distance, km (haversine)."""
+    p = math.pi / 180
+    h = (math.sin((lat2 - lat1) * p / 2) ** 2 +
+         math.cos(lat1 * p) * math.cos(lat2 * p) * math.sin((lng2 - lng1) * p / 2) ** 2)
+    return 12742.0 * math.asin(min(1.0, math.sqrt(h)))
+
+
+def now(conn: sqlite3.Connection, bbox: tuple, center: tuple, mode: str = "all",
+        radius: bool = False) -> dict:
+    """Aircraft for the view: [hex, callsign, type, lat, lng, alt, gs, track, kind, t,
     registration, squawk, vertical rate ft/min, country, category key, indicated airspeed].
-    `t` is when the position was valid - the client dead-reckons forward from it. At most
-    MAX_VIEW rows, nearest to the view centre first."""
-    s, w, n, e = bbox
+    `t` is when the position was valid - the client dead-reckons forward from it.
+    World scope: everything in the view box, thinned once more than THIN_MIN are in it,
+    at most MAX_VIEW.
+    Radius scope: everything within RADIUS_KM of `center`, never thinned - the box is the
+    circle's bounding box and `bbox` is ignored."""
     clat, clng = center
+    if radius:
+        dlat = RADIUS_KM / 111.0
+        dlng = RADIUS_KM / (111.0 * max(0.05, math.cos(math.radians(clat))))
+        s, n = max(-90.0, clat - dlat), min(90.0, clat + dlat)
+        w, e = clng - dlng, clng + dlng
+        if w < -180 or e > 180:            # circle across the antimeridian
+            w, e = ((w + 180) % 360) - 180, ((e + 180) % 360) - 180
+    else:
+        s, w, n, e = bbox
     if w <= e:
         lng_sql, args = "lng BETWEEN ? AND ?", [s, n, w, e]
-    else:                                  # view across the antimeridian
+    else:                                  # across the antimeridian
         lng_sql, args = "(lng >= ? OR lng <= ?)", [s, n, w, e]
     ac = [list(r) for r in conn.execute(
         "SELECT hex, callsign, type, lat, lng, alt, gs, track, kind, t, "
         "COALESCE(reg, ''), COALESCE(squawk, ''), vrate, COALESCE(country, ''), COALESCE(cat, ''), ias "
-        "FROM air_now "
-        f"WHERE lat BETWEEN ? AND ? AND {lng_sql}{MODES.get(mode, '')}", args)]
+        f"FROM air_now WHERE lat BETWEEN ? AND ? AND {lng_sql}{MODES.get(mode, '')}", args)]
+    if radius:
+        ac = [a for a in ac if _km(clat, clng, a[3], a[4]) <= RADIUS_KM]
     ac.sort(key=lambda a: (a[3] - clat) ** 2 + ((a[4] - clng + 180) % 360 - 180) ** 2)
     total = len(ac)
-    span = max(n - s, (e - w) if e >= w else (e - w + 360.0))
-    # the rare kinds are never thinned: all helicopters / all military fit on the screen
-    if span >= THIN_SPAN and mode in ("all", "low"):
-        ac = _thin(ac, span / THIN_CELLS)
-    ac = ac[:MAX_VIEW]
-    return {"last": int(db.kv_get(conn, "air_last", "0")), "total": total, "ac": ac}
+    if not radius:
+        span = max(n - s, (e - w) if e >= w else (e - w + 360.0))
+        # the rare kinds are never thinned: all helicopters / all military fit on the screen
+        if len(ac) > THIN_MIN and mode in ("all", "low"):
+            ac = _thin(ac, span / THIN_CELLS)
+    return {"last": int(db.kv_get(conn, "air_last", "0")), "total": total, "ac": ac[:MAX_VIEW]}

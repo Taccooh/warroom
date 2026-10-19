@@ -523,13 +523,21 @@ def air_cells(s: float, w: float, n: float, e: float,
 
 @app.get("/api/air/now")
 def air_now(s: float, w: float, n: float, e: float, background: BackgroundTasks, mode: str = "all",
+            r: int = 0, clat: float = 0.0, clng: float = 0.0,
             conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
+    """World scope (r=0): everything in the view box. r=200: everything within 200 km of
+    (clat, clng) - fetched fresh first, so the answer is complete the first time."""
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
+    if r:
+        clat, clng = max(-90.0, min(90.0, clat)), ((clng + 180.0) % 360.0) - 180.0
+        if config.AIR_SECONDS > 0:
+            air.near(conn, clat, clng)
+        return JSONResponse(air.now(conn, (0, 0, 0, 0), (clat, clng), mode, radius=True))
     view = _view(s, w, n, e)
     clat, clng = (view[0] + view[2]) / 2, ((view[1] + view[3]) / 2 if view[1] <= view[3] else view[1])
-    # Zoomed in on a region (<= ~600 km across): refresh it from adsb.lol after answering.
-    if view[2] - view[0] <= 6.0 and config.AIR_SECONDS > 0:
+    # Zoomed in on a region: refresh it in the background after answering.
+    if view[2] - view[0] <= 8.0 and config.AIR_SECONDS > 0:
         background.add_task(_near_bg, clat, clng)
     return JSONResponse(air.now(conn, view, (clat, clng), mode))
 

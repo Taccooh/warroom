@@ -282,12 +282,27 @@ document.addEventListener('DOMContentLoaded', function () {
   // contexts cannot be ordered against each other.
   map.createPane('livePane', map.getPane('rotatePane') || undefined);
   map.getPane('livePane').style.zIndex = 460;
-  var liveOn = false, airMode = 'all';
+  var liveOn = false, airMode = 'all', airScope = 'world', airCircle = null, airFit = false, airCFix = null;
   try { var am = localStorage.getItem('wr_air_mode'); if (AIR_MODES.indexOf(am) >= 0) airMode = am; } catch (e) {}
+  try { if (localStorage.getItem('wr_air_scope') === 'r200') airScope = 'r200'; } catch (e) {}
   // While the aircraft are on, the territory cells (SVG overlay pane) step back: thin and
   // untouchable, so the planes win every tap (see .air-focus in style.css).
   function airFocus() { map.getContainer().classList.toggle('air-focus', liveOn); }
+  // The centre of the 200 km scope: your own position when there is one. Without one it is
+  // the map centre at the moment you switch on, and stays put (the ring must not drift while
+  // the view re-fits); panning far away re-centres it.
+  function airCentre() {
+    var mp = (typeof myPos === 'function') ? myPos() : null;
+    if (mp) return L.latLng(mp.lat, mp.lng);
+    if (!airCFix) airCFix = map.getCenter();
+    return airCFix;
+  }
   function airView() {
+    if (airScope === 'r200') {
+      var c = airCentre();
+      return 'r=200&clat=' + c.lat.toFixed(3) + '&clng=' + c.lng.toFixed(3) + '&mode=' + airMode +
+             '&s=0&w=0&n=0&e=0';
+    }
     var b = map.getBounds(), w = b.getWest(), e = b.getEast();
     if (e - w >= 360) { w = -180; e = 180; }
     else { w = ((w + 180) % 360 + 360) % 360 - 180; e = ((e + 180) % 360 + 360) % 360 - 180; }
@@ -297,14 +312,15 @@ document.addEventListener('DOMContentLoaded', function () {
   function debounce(fn, ms) { var t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; }
 
   var PLANE_PATH = new Path2D('M12 1.5c.9 0 1.5.9 1.5 2v6.2l8.5 5.1v2.1l-8.5-2.3v4.7l2.2 1.7v1.6L12 21.5l-3.7 1.1v-1.6l2.2-1.7v-4.7L2 16.9v-2.1l8.5-5.1V3.5c0-1.1.6-2 1.5-2z');
-  var liveCv = null, liveCtx = null, liveAc = [], liveTick = null, livePull = null, liveSeq = 0, liveDone = 0;
+  var liveCv = null, liveCtx = null, liveAc = [], liveTick = null, livePull = null, liveSeq = 0, liveDone = 0, liveTotal = 0;
   function acColor(a) {
     return a[8] === 2 ? AIR_COL.mil : a[8] === 1 ? AIR_COL.heli : a[5] !== null && a[5] < 3000 ? AIR_COL.low : AIR_COL.all;
   }
-  // Position `back` seconds before now (negative = ahead): the sampled position moved along the
-  // track for the time since it was valid. Capped, a stale sample must not run away.
+  // Position `back` seconds before now: the sampled position moved along the track for the
+  // time since it was valid (backwards when that is negative, so a tail stays the same length
+  // even right after a fresh sample). Capped, a stale sample must not run away.
   function acPos(a, nowS, back) {
-    var dt = Math.min(Math.max(nowS - a[9] - (back || 0), 0), 1200);
+    var dt = Math.min(Math.max(nowS - a[9] - (back || 0), -1200), 1200);
     if (!a[6] || a[7] === null || !dt) return [a[3], a[4]];
     var nm = a[6] * dt / 3600, rad = a[7] * Math.PI / 180;
     return [a[3] + nm * Math.cos(rad) / 60, a[4] + nm * Math.sin(rad) / (60 * Math.max(0.05, Math.cos(a[3] * Math.PI / 180)))];
@@ -348,7 +364,8 @@ document.addEventListener('DOMContentLoaded', function () {
       liveCtx.restore();
     });
     var n = document.getElementById('live-count');
-    if (n) n.textContent = liveAc.length ? String(liveAc.length) : '';
+    if (n) n.textContent = !liveAc.length ? '' : liveTotal > liveAc.length ?
+      tf(T.air_count_of, {n: liveAc.length, total: liveTotal}) : String(liveAc.length);
   }
   // [hex, callsign, type, lat, lng, alt, gs, track, kind, t, reg, squawk, vrate, country, cat, ias]
   var EMERG = {'7500': 'air_sq_7500', '7600': 'air_sq_7600', '7700': 'air_sq_7700'};
@@ -383,7 +400,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // The canvas ignores pointer events (the map stays draggable), so taps are hit-tested here.
   map.on('click', function (ev) {
     if (!liveOn) return;
-    var best = null, bd = 18 * 18;
+    var best = null, bd = 26 * 26;
     liveAc.forEach(function (a) {
       if (a._x === undefined) return;
       var dx = a._x - ev.containerPoint.x, dy = a._y - ev.containerPoint.y, d = dx * dx + dy * dy;
@@ -399,8 +416,24 @@ document.addEventListener('DOMContentLoaded', function () {
         // Answers can overtake each other while zooming: only ever apply a newer one than
         // the last applied, otherwise a slow zoomed-out reply wipes the zoomed-in planes.
         if (!d || !d.ac || !liveOn || seq < liveDone) return;
-        liveDone = seq; liveAc = d.ac; drawLive();
+        liveDone = seq; liveAc = d.ac; liveTotal = d.total || d.ac.length; drawLive(); drawCircle();
       }).catch(function () {});
+  }
+  // The 200 km scope shows its edge: a dashed ring around the centre.
+  function drawCircle() {
+    if (airCircle) { map.removeLayer(airCircle); airCircle = null; }
+    if (!liveOn || airScope !== 'r200') return;
+    var c = airCentre();
+    airCircle = L.circle(c, {radius: 200000, color: '#5cc8ff', weight: 1.5, opacity: 0.8, dashArray: '6 8',
+      fill: false, interactive: false}).addTo(map);
+    if (!airFit) { airFit = true; map.fitBounds(airCircle.getBounds(), {padding: [10, 10]}); }
+  }
+  function setScope(sc) {
+    airScope = sc; airFit = false; airCFix = null;
+    try { localStorage.setItem('wr_air_scope', sc); } catch (e) {}
+    liveAc = []; liveTotal = 0; drawLive();
+    var b = document.getElementById('air-scope'); if (b) b.textContent = T['air_scope_' + sc];
+    drawCircle(); pullLive();
   }
   var pullLiveSoon = debounce(pullLive, 250);
   function toggleLive() {
@@ -408,11 +441,12 @@ document.addEventListener('DOMContentLoaded', function () {
     if (liveOn) {
       liveCv = document.createElement('canvas'); liveCv.className = 'air-canvas';
       liveCtx = liveCv.getContext('2d'); map.getPane('livePane').appendChild(liveCv); sizeLive();
-      pullLive(); livePull = setInterval(pullLive, 60000); liveTick = setInterval(drawLive, 1000);
+      airFit = false; airCFix = null; drawCircle(); pullLive(); livePull = setInterval(pullLive, airScope === 'r200' ? 30000 : 60000);
+      liveTick = setInterval(drawLive, 1000);
     } else {
       clearInterval(livePull); clearInterval(liveTick);
       if (liveCv) liveCv.remove();
-      liveCv = liveCtx = null; liveAc = [];
+      liveCv = liveCtx = null; liveAc = []; drawCircle();
       var n = document.getElementById('live-count'); if (n) n.textContent = '';
     }
     airFocus();
@@ -420,7 +454,14 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   map.on('move zoom', function () { if (liveOn) drawLive(); });
   map.on('resize', function () { if (liveOn) { sizeLive(); drawLive(); } });
-  map.on('moveend zoomend', function () { if (liveOn) pullLiveSoon(); });
+  map.on('moveend zoomend', function () {
+    if (!liveOn) return;
+    if (airScope === 'world') { pullLiveSoon(); return; }
+    // 200 km scope without a GPS marker: re-centre once the view has moved well away
+    if (airCFix && !(typeof myPos === 'function' && myPos()) && map.getCenter().distanceTo(airCFix) > 60000) {
+      airCFix = null; airFit = true; drawCircle(); pullLiveSoon();
+    }
+  });
 
   // Virgin cells sit purely on geometry, so some land in lakes/rivers (Lake Erie).
   // Snap the nearest ones to a road via /api/snap; cells with no drivable road
@@ -1313,7 +1354,9 @@ document.addEventListener('DOMContentLoaded', function () {
       '<span class="lyr-ic">📡</span>' + esc(T.lyr_masts) + '</button>';
     rows += '<button type="button" class="lyr-row" data-layer="live">' +
       '<span class="lyr-ic">◉</span>' + esc(T.lyr_live) + ' <span id="live-count" class="lyr-count"></span></button>' +
-      '<div class="cov-ctrls"><div class="cov-line"><span>' + esc(T.air_mode) + '</span>' +
+      '<div class="cov-ctrls"><div class="cov-line"><span>' + esc(T.air_scope) + '</span>' +
+        '<button type="button" class="cov-radius" id="air-scope">' + esc(T['air_scope_' + airScope]) + '</button></div>' +
+      '<div class="cov-line"><span>' + esc(T.air_mode) + '</span>' +
         '<button type="button" class="cov-radius" id="air-mode">' + esc(T['air_mode_' + airMode]) + '</button></div></div>';
     rows += '<div class="lyr-sep"></div>' +
       '<button type="button" class="lyr-row" data-layer="cov"><span class="lyr-ic">▨</span>' + esc(T.lyr_cov) + '</button>' +
@@ -1360,6 +1403,9 @@ document.addEventListener('DOMContentLoaded', function () {
       else if (l === 'live') toggleLive();
       else if (l === 'cov') toggleCoverage();
     });
+  });
+  document.getElementById('air-scope').addEventListener('click', function () {
+    setScope(airScope === 'world' ? 'r200' : 'world');
   });
   document.getElementById('air-mode').addEventListener('click', function () {
     airMode = AIR_MODES[(AIR_MODES.indexOf(airMode) + 1) % AIR_MODES.length];

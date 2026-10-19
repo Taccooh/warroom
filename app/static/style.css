@@ -1554,5 +1554,8 @@ body.doc { scroll-behavior: smooth; }
 .air-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
 /* While an air layer is on, the territory cells (SVG overlay pane) step back: thin and
    untouchable, so the aircraft cells and planes win every tap. */
-.air-focus .leaflet-overlay-pane svg { opacity: .22; pointer-events: none; }
+.air-focus .leaflet-overlay-pane svg { opacity: .22; }
+/* Leaflet gives every interactive path its own pointer-events, so the container rule alone
+   is not enough: the paths must be switched off one by one. */
+.air-focus .leaflet-overlay-pane svg, .air-focus .leaflet-overlay-pane svg path { pointer-events: none !important; }
 .lyr-count { margin-left: .4em; opacity: .7; font-size: .85em; }

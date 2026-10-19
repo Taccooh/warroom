@@ -94,4 +94,6 @@ AIR_BASE_URL = os.environ.get("WARROOM_AIR_URL", "https://api.adsb.lol")
 AIR_DAILY_MAX = int(os.environ.get("WARROOM_AIR_DAILY_MAX", "420"))
 AIR_MIL_SECONDS = int(os.environ.get("WARROOM_AIR_MIL_SECONDS", "900"))
 # One on-demand fetch per 1 degree area at most this often.
-AIR_NEAR_TTL = int(os.environ.get("WARROOM_AIR_NEAR_TTL", "120"))
+AIR_NEAR_TTL = int(os.environ.get("WARROOM_AIR_NEAR_TTL", "60"))
+# Area queries go to adsb.fi first (open data, 1 request/s, no daily cap), adsb.lol second.
+AIR_FI_URL = os.environ.get("WARROOM_AIR_FI_URL", "https://opendata.adsb.fi/api")
