@@ -58,6 +58,16 @@ _near_lock = threading.Lock()
 _near_done: dict[tuple, float] = {}   # (cell_lat, cell_lng) -> time of last fetch
 
 
+# Aircraft category, normalised from both feeds (ADS-B emitter category A/B/C codes from
+# adsb.lol, the numeric category from OpenSky). The client translates the keys.
+_CAT_ADSB = {"A1": "light", "A2": "small", "A3": "large", "A4": "b757", "A5": "heavy",
+             "A6": "hiperf", "A7": "rotor", "B1": "glider", "B2": "balloon", "B4": "ultralight",
+             "B6": "uav", "B7": "space", "C1": "vehicle", "C2": "vehicle", "C3": "vehicle"}
+_CAT_OS = {2: "light", 3: "small", 4: "large", 5: "b757", 6: "heavy", 7: "hiperf", 8: "rotor",
+           9: "glider", 10: "balloon", 11: "parachute", 12: "ultralight", 14: "uav", 15: "space",
+           16: "vehicle", 17: "vehicle"}
+
+
 def band_of(alt_ft, ground=False) -> int:
     if ground or alt_ft == "ground":
         return BAND_GROUND
@@ -71,7 +81,8 @@ def band_of(alt_ft, ground=False) -> int:
 
 
 # ---- source parsing: everything is normalised to one row ---------------------------
-# (hex, callsign, type, lat, lng, alt_ft|None, gs_kt|None, track|None, kind, t, ground)
+# (hex, callsign, type, lat, lng, alt_ft|None, gs_kt|None, track|None, kind, t, ground,
+#  reg, squawk, vrate_fpm|None, country, category_key, ias_kt|None)
 # t = epoch second at which the position was valid; the client dead-reckons from it.
 
 def _num(v):
@@ -92,7 +103,10 @@ def _row_adsb(ac: dict, now: float):
         kind = KIND_HELI
     return (ac["hex"], (ac.get("flight") or "").strip()[:12], (ac.get("t") or "")[:8],
             round(ac["lat"], 4), round(ac["lon"], 4), None if alt == "ground" else _num(alt),
-            _num(ac.get("gs")), _num(ac.get("track")), kind, int(now - age), alt == "ground")
+            _num(ac.get("gs")), _num(ac.get("track")), kind, int(now - age), alt == "ground",
+            (ac.get("r") or "")[:12], ac.get("squawk") or "",
+            _num(ac.get("baro_rate", ac.get("geom_rate"))), "",
+            _CAT_ADSB.get(ac.get("category") or "", ""), _num(ac.get("ias")))
 
 
 def _row_opensky(s: list, mil: set):
@@ -104,7 +118,9 @@ def _row_opensky(s: list, mil: set):
     kind = KIND_MIL if s[0] in mil else KIND_HELI if len(s) > 17 and s[17] == 8 else KIND_CIVIL
     return (s[0], (s[1] or "").strip()[:12], "", round(s[6], 4), round(s[5], 4), alt,
             None if s[9] is None else int(s[9] * MS_TO_KT),
-            None if s[10] is None else int(s[10]), kind, int(s[3]), bool(s[8]))
+            None if s[10] is None else int(s[10]), kind, int(s[3]), bool(s[8]),
+            "", s[14] or "", None if s[11] is None else int(s[11] * 196.85), s[2] or "",
+            _CAT_OS.get(s[17], "") if len(s) > 17 and s[17] else "", None)
 
 
 # ---- HTTP ------------------------------------------------------------------------------
@@ -159,14 +175,21 @@ def _store_live(conn, rows: list) -> None:
     """Upsert into the live table. A row only replaces an existing one when it is newer,
     so a fresh on-demand fetch is never overwritten by an older global snapshot."""
     conn.executemany(
-        "INSERT INTO air_now (hex, callsign, type, lat, lng, alt, gs, track, kind, t) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(hex) DO UPDATE SET "
+        "INSERT INTO air_now (hex, callsign, type, lat, lng, alt, gs, track, kind, t, "
+        "reg, squawk, vrate, country, cat, ias) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(hex) DO UPDATE SET "
+        # text a feed does not carry (OpenSky has no registration, adsb.lol no country)
+        # must not wipe what the other one told us
         "callsign = CASE WHEN excluded.callsign != '' THEN excluded.callsign ELSE callsign END, "
         "type = CASE WHEN excluded.type != '' THEN excluded.type ELSE type END, "
+        "reg = CASE WHEN excluded.reg != '' THEN excluded.reg ELSE reg END, "
+        "country = CASE WHEN excluded.country != '' THEN excluded.country ELSE country END, "
+        "cat = CASE WHEN excluded.cat != '' THEN excluded.cat ELSE cat END, "
+        "squawk = excluded.squawk, vrate = excluded.vrate, ias = COALESCE(excluded.ias, ias), "
         "lat = excluded.lat, lng = excluded.lng, alt = excluded.alt, gs = excluded.gs, "
         "track = excluded.track, "
         "kind = MAX(kind, excluded.kind), t = excluded.t WHERE excluded.t > air_now.t",
-        [r[:10] for r in rows if not r[10]])
+        [r[:10] + r[11:] for r in rows if not r[10]])
     conn.executemany("INSERT INTO air_trail (hex, ts, lat, lng) VALUES (?,?,?,?)",
                      [(r[0], r[9], r[3], r[4]) for r in rows if not r[10]])
 
@@ -304,7 +327,8 @@ def _thin(ac: list, cell: float) -> list:
 
 
 def now(conn: sqlite3.Connection, bbox: tuple, center: tuple) -> dict:
-    """Aircraft inside the view: [hex, callsign, type, lat, lng, alt, gs, track, kind, t].
+    """Aircraft inside the view: [hex, callsign, type, lat, lng, alt, gs, track, kind, t,
+    registration, squawk, vertical rate ft/min, country, category key, indicated airspeed].
     `t` is when the position was valid - the client dead-reckons forward from it. At most
     MAX_VIEW rows, nearest to the view centre first. `trails` = recent [lat, lng] points
     per returned aircraft, oldest first."""
@@ -315,7 +339,9 @@ def now(conn: sqlite3.Connection, bbox: tuple, center: tuple) -> dict:
     else:                                  # view across the antimeridian
         lng_sql, args = "(lng >= ? OR lng <= ?)", [s, n, w, e]
     ac = [list(r) for r in conn.execute(
-        "SELECT hex, callsign, type, lat, lng, alt, gs, track, kind, t FROM air_now "
+        "SELECT hex, callsign, type, lat, lng, alt, gs, track, kind, t, "
+        "COALESCE(reg, ''), COALESCE(squawk, ''), vrate, COALESCE(country, ''), COALESCE(cat, ''), ias "
+        "FROM air_now "
         f"WHERE lat BETWEEN ? AND ? AND {lng_sql}", args)]
     ac.sort(key=lambda a: (a[3] - clat) ** 2 + ((a[4] - clng + 180) % 360 - 180) ** 2)
     total = len(ac)

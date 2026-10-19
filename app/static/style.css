@@ -1552,4 +1552,7 @@ body.doc { scroll-behavior: smooth; }
 
 /* Air traffic: one canvas over the map, below the controls; taps are hit-tested in JS */
 .air-canvas { position: absolute; left: 0; top: 0; z-index: 450; pointer-events: none; }
+/* While an air layer is on, the territory cells (SVG overlay pane) step back: thin and
+   untouchable, so the aircraft cells and planes win every tap. */
+.air-focus .leaflet-overlay-pane svg { opacity: .22; pointer-events: none; }
 .lyr-count { margin-left: .4em; opacity: .7; font-size: .85em; }

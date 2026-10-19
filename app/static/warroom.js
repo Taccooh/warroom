@@ -278,9 +278,14 @@ document.addEventListener('DOMContentLoaded', function () {
   //    big picture, zoomed in every aircraft.
   var AIR_MODES = ['all', 'low', 'heli', 'mil'];
   var AIR_COL = {all: '#5cc8ff', low: '#ffd45c', heli: '#7dff9a', mil: '#ff7a5c'};
-  var airRenderer = L.canvas({padding: 0.3});
+  // Density cells get their own pane above the wdgwars cells (SVG, overlay pane), so the
+  // aircraft cells win every tap; markers and popups stay above.
+  map.createPane('airPane'); map.getPane('airPane').style.zIndex = 450;
+  var airRenderer = L.canvas({padding: 0.3, pane: 'airPane'});
+  // While an air layer is on, the territory cells step back (see .air-focus in style.css).
+  function airFocus() { map.getContainer().classList.toggle('air-focus', airOn || liveOn); }
   var airLayer = L.layerGroup();
-  var airOn = false, liveOn = false, airMode = 'all', airData = null;
+  var airOn = false, liveOn = false, airMode = 'all', airData = null, airIdx = {};
   try { var am = localStorage.getItem('wr_air_mode'); if (AIR_MODES.indexOf(am) >= 0) airMode = am; } catch (e) {}
   function airView() {
     var b = map.getBounds(), w = b.getWest(), e = b.getEast();
@@ -296,7 +301,7 @@ document.addEventListener('DOMContentLoaded', function () {
     return mode === 'low' ? r[3] : mode === 'heli' ? r[6] : mode === 'mil' ? r[7] : r[3] + r[4] + r[5];
   }
   function renderAir() {
-    airLayer.clearLayers();
+    airLayer.clearLayers(); airIdx = {};
     if (!airOn || !airData) return;
     var g = airData.grid, max = 1, rows = [];
     airData.cells.forEach(function (r) {
@@ -309,13 +314,21 @@ document.addEventListener('DOMContentLoaded', function () {
     rows.forEach(function (x) {
       var r = x[0], la = r[0] * g, lo = r[1] * g, op = 0.06 + 0.5 * Math.log(1 + x[1]) / lm;
       L.rectangle([[la, lo], [la + g, lo + g]], {stroke: false, fillColor: col, fillOpacity: op,
-        renderer: airRenderer})
-        .bindPopup('<b>' + esc(T.air_pop_head) + '</b><br>' +
-          tf(T.air_pop_bands, {low: r[3], mid: r[4], high: r[5]}) + '<br>' +
-          tf(T.air_pop_kinds, {heli: r[6], mil: r[7], ground: r[2]}) + '<br><small>' +
-          tf(T.air_pop_since, {n: airData.samples, d: airData.since}) + '</small>')
-        .addTo(airLayer);
+        renderer: airRenderer, interactive: false}).addTo(airLayer);
+      airIdx[r[0] + '_' + r[1]] = r;
     });
+  }
+  function airCellPopup(r) {
+    var tot = r[2] + r[3] + r[4] + r[5], names = ['ground', 'low', 'mid', 'high'], top = 0;
+    for (var i = 1; i < 4; i++) if (r[2 + i] > r[2 + top]) top = i;
+    var pct = function (n) { return tot ? Math.round(100 * n / tot) + ' %' : '0 %'; };
+    return '<b>' + esc(T.air_pop_head) + '</b><br>' +
+      tf(T.air_pop_total, {n: tot, top: T['air_band_' + names[top]]}) + '<br>' +
+      tf(T.air_pop_bands, {low: r[3], mid: r[4], high: r[5]}) + '<br>' +
+      tf(T.air_pop_kinds, {heli: r[6], mil: r[7], ground: r[2]}) +
+      (r[7] ? '<br>' + tf(T.air_pop_milshare, {p: pct(r[7])}) : '') + '<br><small>' +
+      tf(T.air_pop_since, {n: airData.samples, d: airData.since}) +
+      (airData.grid > 0.06 ? ' · ' + tf(T.air_pop_merged, {km: Math.round(airData.grid * 111)}) : '') + '</small>';
   }
   var loadAir = debounce(function () {
     if (!airOn) return;
@@ -326,6 +339,7 @@ document.addEventListener('DOMContentLoaded', function () {
     airOn = !airOn;
     if (airOn) { airLayer.addTo(map); loadAir(); }
     else { airLayer.clearLayers(); map.removeLayer(airLayer); airData = null; }
+    airFocus();
     reflectLayers();
   }
 
@@ -378,21 +392,50 @@ document.addEventListener('DOMContentLoaded', function () {
     var n = document.getElementById('live-count');
     if (n) n.textContent = liveAc.length ? String(liveAc.length) : '';
   }
+  // [hex, callsign, type, lat, lng, alt, gs, track, kind, t, reg, squawk, vrate, country, cat, ias]
+  var EMERG = {'7500': 'air_sq_7500', '7600': 'air_sq_7600', '7700': 'air_sq_7700'};
   function acPopup(a) {
-    return '<b>' + esc(a[1] || a[0].toUpperCase()) + '</b>' + (a[2] ? ' · ' + esc(a[2]) : '') + '<br>' +
-      (a[5] === null ? '' : a[5] + ' ft') + (a[6] === null ? '' : ' · ' + a[6] + ' kt') +
-      (a[7] === null ? '' : ' · ' + a[7] + '°');
+    var title = a[1] || a[10] || a[0].toUpperCase(), sub = [];
+    if (a[2]) sub.push(esc(a[2]));
+    if (a[10] && a[10] !== title) sub.push(esc(a[10]));
+    if (a[14]) sub.push(esc(T['air_cat_' + a[14]] || a[14]));
+    if (a[8] === 2) sub.push('<b style="color:' + AIR_COL.mil + '">' + esc(T.air_kind_mil) + '</b>');
+    if (a[8] === 1) sub.push(esc(T.air_kind_heli));
+    var rows = [];
+    if (a[5] !== null) rows.push(a[5] + ' ft' + (a[5] >= 6000 ? ' (FL' + Math.round(a[5] / 100) + ')' : '') +
+      ' · ' + Math.round(a[5] * 0.3048) + ' m');
+    if (a[6] !== null) rows.push(a[6] + ' kt · ' + Math.round(a[6] * 1.852) + ' km/h' +
+      (a[15] ? ' (IAS ' + a[15] + ' kt)' : ''));
+    if (a[7] !== null) rows.push(tf(T.air_hdg, {d: a[7]}));
+    if (a[12] !== null && Math.abs(a[12]) >= 100) rows.push((a[12] > 0 ? '↗ ' : '↘ ') +
+      tf(a[12] > 0 ? T.air_climb : T.air_descend, {n: Math.abs(a[12])}));
+    else if (a[12] !== null && a[5] !== null && a[5] > 0) rows.push('→ ' + T.air_level);
+    var h = '<b>' + esc(title) + '</b>' + (sub.length ? '<br>' + sub.join(' · ') : '');
+    if (a[13]) h += '<br>' + esc(a[13]);
+    h += rows.length ? '<br>' + rows.join('<br>') : '';
+    if (a[11] && EMERG[a[11]]) h += '<br><b style="color:#ff5c5c">⚠ ' + a[11] + ' — ' + esc(T[EMERG[a[11]]]) + '</b>';
+    else if (a[11] && a[11] !== '0000') h += '<br>' + esc(T.air_squawk) + ' ' + esc(a[11]);
+    var age = Math.max(0, Math.round(Date.now() / 1000 - a[9]));
+    h += '<br><small>ICAO ' + esc(a[0].toUpperCase()) + ' · ' +
+      tf(T.air_age, {s: age < 90 ? age + ' s' : Math.round(age / 60) + ' min'}) +
+      ' · <a href="https://globe.adsb.lol/?icao=' + encodeURIComponent(a[0]) +
+      '" target="_blank" rel="noopener noreferrer">' + esc(T.air_open) + ' ↗</a></small>';
+    return h;
   }
-  // The canvas ignores pointer events (the map stays draggable), so taps are hit-tested here.
+  // One tap handler for both air layers, so aircraft always win over the cell under them: the
+  // canvas ignores pointer events (the map stays draggable), taps are hit-tested here.
   map.on('click', function (ev) {
-    if (!liveOn) return;
     var best = null, bd = 18 * 18;
-    liveAc.forEach(function (a) {
+    if (liveOn) liveAc.forEach(function (a) {
       if (a._x === undefined) return;
       var dx = a._x - ev.containerPoint.x, dy = a._y - ev.containerPoint.y, d = dx * dx + dy * dy;
       if (d < bd) { bd = d; best = a; }
     });
-    if (best) L.popup().setLatLng(acPos(best, Date.now() / 1000)).setContent(acPopup(best)).openOn(map);
+    if (best) { L.popup().setLatLng(acPos(best, Date.now() / 1000)).setContent(acPopup(best)).openOn(map); return; }
+    if (airOn && airData) {
+      var g = airData.grid, r = airIdx[Math.floor(ev.latlng.lat / g) + '_' + Math.floor(ev.latlng.lng / g)];
+      if (r) L.popup().setLatLng(ev.latlng).setContent(airCellPopup(r)).openOn(map);
+    }
   });
   function pullLive() {
     if (!liveOn) return;
@@ -413,6 +456,7 @@ document.addEventListener('DOMContentLoaded', function () {
       liveCv = liveCtx = null; liveAc = []; liveTrails = {};
       var n = document.getElementById('live-count'); if (n) n.textContent = '';
     }
+    airFocus();
     reflectLayers();
   }
   map.on('move zoom', function () { if (liveOn) drawLive(); });
