@@ -651,7 +651,7 @@ JS = {
     "air_pop_bands": {"en": "Low {low} · mid {mid} · cruise {high}", "de": "Tief {low} · mittel {mid} · Reiseflug {high}"},
     "air_pop_kinds": {"en": "Helicopters {heli} · military {mil} · on ground {ground}",
                       "de": "Hubschrauber {heli} · Militär {mil} · am Boden {ground}"},
-    "air_pop_since": {"en": "{n} samples since {d} (adsb.lol)", "de": "{n} Messungen seit {d} (adsb.lol)"},
+    "air_pop_since": {"en": "{n} samples since {d}", "de": "{n} Messungen seit {d}"},
     # GSM masts: informational overlay of towers logged per cell (they count as
     # ordinary scans since wdgwars reverted the mast-ownership experiment)
     "lyr_masts": {"en": "GSM masts", "de": "GSM-Masten"},

@@ -9,7 +9,7 @@ import time
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Form, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
@@ -40,20 +40,18 @@ async def poll_loop():
         await asyncio.sleep(max(1.0, config.POLL_SECONDS - (time.monotonic() - t0)))
 
 
-async def air_loop():
-    """Air traffic sampler. Its own loop and its own upstream: a slow or dead adsb.lol
-    must never delay the wdgwars poll."""
-    while config.AIR_SECONDS > 0:
+async def _air_cycle(fn, every: int):
+    while True:
         t0 = time.monotonic()
         try:
             conn = db.connect()
             try:
-                log.info("air: %s", await asyncio.to_thread(air.poll, conn))
+                log.info("air %s: %s", fn.__name__, await asyncio.to_thread(fn, conn))
             finally:
                 conn.close()
         except Exception:
-            log.exception("air loop failed")
-        await asyncio.sleep(max(30.0, config.AIR_SECONDS - (time.monotonic() - t0)))
+            log.exception("air %s failed", fn.__name__)
+        await asyncio.sleep(max(30.0, every - (time.monotonic() - t0)))
 
 
 @asynccontextmanager
@@ -64,12 +62,16 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("VAPID-Init fehlgeschlagen")
     task = asyncio.create_task(poll_loop())
-    air_task = asyncio.create_task(air_loop())
+    # Own loops and upstreams: a slow OpenSky / adsb.lol must never delay the wdgwars poll.
+    air_tasks = ([asyncio.create_task(_air_cycle(air.poll_global, config.AIR_SECONDS)),
+                  asyncio.create_task(_air_cycle(air.poll_mil, config.AIR_MIL_SECONDS))]
+                 if config.AIR_SECONDS > 0 else [])
     try:
         yield
     finally:
         task.cancel()
-        air_task.cancel()
+        for t in air_tasks:
+            t.cancel()
 
 
 app = FastAPI(lifespan=lifespan, title="Warroom")
@@ -501,19 +503,45 @@ def friends_positions(conn: sqlite3.Connection = Depends(get_db), user=Depends(c
                          "last_poll": db.kv_get(conn, "last_poll", "0")})
 
 
-# ---- Air traffic (adsb.lol density map) ----
+# ---- Air traffic (worldwide live view + density map) ----
+def _view(s: float, w: float, n: float, e: float):
+    """Clamp a client-supplied map view to something sane."""
+    s, n = max(-90.0, min(s, n)), min(90.0, max(s, n))
+    clamp = lambda x: ((x + 180.0) % 360.0) - 180.0
+    if e - w >= 360.0 or abs(e - w) > 360.0:
+        w, e = -180.0, 180.0
+    return s, clamp(w) if w != -180.0 else w, n, clamp(e) if e != 180.0 else e
+
+
 @app.get("/api/air/cells")
-def air_cells(conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
+def air_cells(s: float, w: float, n: float, e: float,
+              conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
-    return JSONResponse(air.cells(conn), headers={"Cache-Control": "private, max-age=300"})
+    return JSONResponse(air.cells(conn, _view(s, w, n, e)))
 
 
 @app.get("/api/air/now")
-def air_now(conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
+def air_now(s: float, w: float, n: float, e: float, background: BackgroundTasks,
+            conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
-    return JSONResponse(air.now(conn), headers={"Cache-Control": "private, max-age=60"})
+    view = _view(s, w, n, e)
+    clat, clng = (view[0] + view[2]) / 2, ((view[1] + view[3]) / 2 if view[1] <= view[3] else view[1])
+    # Zoomed in on a region (<= ~600 km across): refresh it from adsb.lol after answering.
+    if view[2] - view[0] <= 6.0 and config.AIR_SECONDS > 0:
+        background.add_task(_near_bg, clat, clng)
+    return JSONResponse(air.now(conn, view, (clat, clng)))
+
+
+def _near_bg(lat: float, lng: float):
+    conn = db.connect()
+    try:
+        log.info("air near: %s", air.near(conn, lat, lng))
+    except Exception:
+        log.exception("air near failed")
+    finally:
+        conn.close()
 
 
 # ---- Coverage brush ----

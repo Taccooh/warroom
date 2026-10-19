@@ -93,10 +93,12 @@
         <li><b>OpenStreetMap Overpass</b> — bekommt nur Zell-Koordinaten, nicht
         wer du bist, um Tour-Wegpunkte auf Straßen zu legen. Fragt der Server,
         nicht dein Browser.</li>
-        <li><b>adsb.lol</b> — der Server fragt alle 5 Minuten den offenen ADS-B-Dienst
-        nach den Flugzeugen über Deutschland und zählt sie je Rasterzelle für die
-        Ebene „Flugverkehr“. Es wird nichts über dich gesendet und kein einzelner
-        Flug gespeichert, nur Zähler je Zelle. Daten: adsb.lol (ODbL).</li>
+        <li><b>OpenSky Network und adsb.lol</b> — der Server fragt die offenen
+        ADS-B-Dienste nach Flugzeugen für die Ebene „Flugverkehr“: OpenSky alle paar
+        Minuten für die ganze Welt, adsb.lol für den Umkreis von 200 km um den
+        Kartenausschnitt, den ein Spieler gerade ansieht (nur die Gegend, nie wer
+        du bist). Gespeichert werden Zähler je Rasterzelle und, 40 Minuten lang,
+        die aktuellen Flugzeugpositionen. Daten: The OpenSky Network (opensky-network.org), adsb.lol (ODbL).</li>
         <li><b>OSRM-Routing</b> — bekommt die Tour-Stopps und, sobald du eine
         Position gesetzt hast, <b>deine eigene Position als Startpunkt</b>. Bei
         laufender Führung geht sie live erneut raus, wenn du von der Route
@@ -196,10 +198,11 @@
         <li><b>OpenStreetMap Overpass</b> — gets cell coordinates only, not who
         you are, to snap tour waypoints onto roads. Asked by the server, not by
         your browser.</li>
-        <li><b>adsb.lol</b> — every 5 minutes the server asks the open ADS-B service
-        for the aircraft over Germany and counts them per grid cell for the "Air
-        traffic" layer. Nothing about you is sent and no individual flight is
-        stored, only counters per cell. Data: adsb.lol (ODbL).</li>
+        <li><b>OpenSky Network and adsb.lol</b> — the server asks the open ADS-B services
+        for aircraft for the "Air traffic" layer: OpenSky every few minutes for the whole
+        world, adsb.lol for the 200 km around the map area a player is looking at (the
+        area only, never who you are). What is stored: counters per grid cell and, for
+        40 minutes, the current aircraft positions. Data: The OpenSky Network (opensky-network.org), adsb.lol (ODbL).</li>
         <li><b>OSRM routing</b> — gets the tour stops and, once you have a
         position set, <b>your own position as the start point</b>. During in-app
         guidance that goes out live again whenever you leave the route, or every

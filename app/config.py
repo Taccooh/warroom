@@ -75,12 +75,23 @@ ARCHIVE_KEEP_DAYS = int(os.environ.get("WARROOM_ARCHIVE_KEEP_DAYS", "0"))
 # day the cap simply cut off.
 EVENT_KEEP = int(os.environ.get("WARROOM_EVENT_KEEP", "200"))
 
-# --- Air traffic (adsb.lol) --------------------------------------------------
-# Open ADS-B data, sampled into a density map (see air.py). The point endpoint allows
-# 500 requests/day per IP, so 300 s (288/day) leaves room; AIR_DAILY_MAX is our own cap
-# below that. AIR_SECONDS=0 switches the feature off.
+# --- Air traffic (OpenSky + adsb.lol) -----------------------------------------
+# See air.py. OpenSky = the whole world, scheduled. Anonymous it allows 400 credits/day and
+# a global request costs 4 -> one sample every 16 minutes. With a free OpenSky API client
+# (WARROOM_OPENSKY_ID / _SECRET) the quota is 4000/day -> one every 2 minutes.
+AIR_OS_ID = os.environ.get("WARROOM_OPENSKY_ID", "")
+AIR_OS_SECRET = os.environ.get("WARROOM_OPENSKY_SECRET", "")
+AIR_OS_TOKEN_URL = ("https://auth.opensky-network.org/auth/realms/opensky-network"
+                    "/protocol/openid-connect/token")
+_AIR_CREDS = bool(AIR_OS_ID and AIR_OS_SECRET)
+# Seconds between global samples; 0 switches the whole feature off.
+AIR_SECONDS = int(os.environ.get("WARROOM_AIR_SECONDS", "120" if _AIR_CREDS else "960"))
+# Own cap on OpenSky credits per UTC day, a little under their quota.
+AIR_OS_DAILY = int(os.environ.get("WARROOM_AIR_OS_DAILY", "3800" if _AIR_CREDS else "380"))
+# adsb.lol (military list + the on-demand 200 km queries around a viewer): their limit is
+# 500 requests/day per IP, this is our own cap below it.
 AIR_BASE_URL = os.environ.get("WARROOM_AIR_URL", "https://api.adsb.lol")
-AIR_SECONDS = int(os.environ.get("WARROOM_AIR_SECONDS", "300"))
-AIR_DAILY_MAX = int(os.environ.get("WARROOM_AIR_DAILY_MAX", "400"))
-# "lat,lng,nm;lat,lng,nm" - one 250 nm circle around central Germany covers the country.
-AIR_CIRCLES = os.environ.get("WARROOM_AIR_CIRCLES", "51.2,10.4,250")
+AIR_DAILY_MAX = int(os.environ.get("WARROOM_AIR_DAILY_MAX", "420"))
+AIR_MIL_SECONDS = int(os.environ.get("WARROOM_AIR_MIL_SECONDS", "900"))
+# One on-demand fetch per 1 degree area at most this often.
+AIR_NEAR_TTL = int(os.environ.get("WARROOM_AIR_NEAR_TTL", "120"))

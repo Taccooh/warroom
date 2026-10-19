@@ -269,15 +269,28 @@ document.addEventListener('DOMContentLoaded', function () {
     else { mastsLayer.clearLayers(); map.removeLayer(mastsLayer); }
     if (typeof reflectLayers === 'function') reflectLayers();
   }
-  // ---- Air traffic: density map of where aircraft fly (adsb.lol samples aggregated by
-  // the server, see air.py) plus the latest snapshot as live dots. Data comes from our
-  // own /api/air/*; the page never talks to adsb.lol. Both layers sit in the ◈ popover.
+  // ---- Air traffic, worldwide. Two layers, both fed by our own /api/air/* for the current
+  // map view (the page never talks to the upstream feeds):
+  //  * "Air traffic": density of where aircraft have been seen (merged into coarser cells
+  //    when zoomed out, so the world view stays light).
+  //  * "Aircraft now": plane symbols turned to their track, on ONE canvas, dead-reckoned
+  //    between samples. The server thins them with the zoom level - zoomed out you get the
+  //    big picture, zoomed in every aircraft.
   var AIR_MODES = ['all', 'low', 'heli', 'mil'];
   var AIR_COL = {all: '#5cc8ff', low: '#ffd45c', heli: '#7dff9a', mil: '#ff7a5c'};
   var airRenderer = L.canvas({padding: 0.3});
-  var airLayer = L.layerGroup(), airLive = L.layerGroup();
-  var airOn = false, liveOn = false, airMode = 'all', airData = null, airTimer = null;
+  var airLayer = L.layerGroup();
+  var airOn = false, liveOn = false, airMode = 'all', airData = null;
   try { var am = localStorage.getItem('wr_air_mode'); if (AIR_MODES.indexOf(am) >= 0) airMode = am; } catch (e) {}
+  function airView() {
+    var b = map.getBounds(), w = b.getWest(), e = b.getEast();
+    if (e - w >= 360) { w = -180; e = 180; }
+    else { w = ((w + 180) % 360 + 360) % 360 - 180; e = ((e + 180) % 360 + 360) % 360 - 180; }
+    return 's=' + Math.max(-90, b.getSouth()).toFixed(3) + '&w=' + w.toFixed(3) +
+           '&n=' + Math.min(90, b.getNorth()).toFixed(3) + '&e=' + e.toFixed(3);
+  }
+  function debounce(fn, ms) { var t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; }
+
   // cell row: [i, j, ground, low, mid, high, heli, mil]
   function airVal(r, mode) {
     return mode === 'low' ? r[3] : mode === 'heli' ? r[6] : mode === 'mil' ? r[7] : r[3] + r[4] + r[5];
@@ -285,19 +298,17 @@ document.addEventListener('DOMContentLoaded', function () {
   function renderAir() {
     airLayer.clearLayers();
     if (!airOn || !airData) return;
-    var g = airData.grid, bnd = map.getBounds().pad(0.1), max = 1, rows = [];
+    var g = airData.grid, max = 1, rows = [];
     airData.cells.forEach(function (r) {
       var v = airVal(r, airMode);
       if (!v) return;
       if (v > max) max = v;
-      var la = r[0] * g, lo = r[1] * g;
-      if (la > bnd.getNorth() || la + g < bnd.getSouth() || lo > bnd.getEast() || lo + g < bnd.getWest()) return;
-      rows.push([r, v, la, lo]);
+      rows.push([r, v]);
     });
     var col = AIR_COL[airMode], lm = Math.log(1 + max);
     rows.forEach(function (x) {
-      var r = x[0], op = 0.06 + 0.5 * Math.log(1 + x[1]) / lm;
-      L.rectangle([[x[2], x[3]], [x[2] + g, x[3] + g]], {stroke: false, fillColor: col, fillOpacity: op,
+      var r = x[0], la = r[0] * g, lo = r[1] * g, op = 0.06 + 0.5 * Math.log(1 + x[1]) / lm;
+      L.rectangle([[la, lo], [la + g, lo + g]], {stroke: false, fillColor: col, fillOpacity: op,
         renderer: airRenderer})
         .bindPopup('<b>' + esc(T.air_pop_head) + '</b><br>' +
           tf(T.air_pop_bands, {low: r[3], mid: r[4], high: r[5]}) + '<br>' +
@@ -306,77 +317,107 @@ document.addEventListener('DOMContentLoaded', function () {
         .addTo(airLayer);
     });
   }
-  function loadAir(cb) {
-    fetch('/api/air/cells', {credentials: 'same-origin'}).then(function (r) { return r.json(); })
-      .then(function (d) { if (d && d.cells) { airData = d; if (cb) cb(); } }).catch(function () {});
-  }
+  var loadAir = debounce(function () {
+    if (!airOn) return;
+    fetch('/api/air/cells?' + airView(), {credentials: 'same-origin'}).then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.cells) { airData = d; renderAir(); } }).catch(function () {});
+  }, 400);
   function toggleAir() {
     airOn = !airOn;
-    if (airOn) { airLayer.addTo(map); loadAir(renderAir); }
-    else { airLayer.clearLayers(); map.removeLayer(airLayer); }
+    if (airOn) { airLayer.addTo(map); loadAir(); }
+    else { airLayer.clearLayers(); map.removeLayer(airLayer); airData = null; }
     reflectLayers();
   }
-  // Live aircraft: plane symbols turned to their track, dead-reckoned between samples
-  // (the server only samples every 5 minutes, but a jet covers ~40 km in that time - without
-  // this the planes would stand still and jump). Trails show the recent path.
-  var PLANE_SVG = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 1.5c.9 0 1.5.9 1.5 2v6.2l8.5 5.1v2.1l-8.5-2.3v4.7l2.2 1.7v1.6L12 21.5l-3.7 1.1v-1.6l2.2-1.7v-4.7L2 16.9v-2.1l8.5-5.1V3.5c0-1.1.6-2 1.5-2z" fill="currentColor" stroke="#0b0f14" stroke-width="1.1" stroke-linejoin="round"/></svg>';
-  var HELI_SVG = '<svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="4" fill="currentColor" stroke="#0b0f14" stroke-width="1.1"/><path d="M3 3l18 18M21 3L3 21" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
-  var liveAc = [], liveMarks = {}, liveLast = 0, liveTick = null;
+
+  // ---- live aircraft on one canvas ----
+  var PLANE_PATH = new Path2D('M12 1.5c.9 0 1.5.9 1.5 2v6.2l8.5 5.1v2.1l-8.5-2.3v4.7l2.2 1.7v1.6L12 21.5l-3.7 1.1v-1.6l2.2-1.7v-4.7L2 16.9v-2.1l8.5-5.1V3.5c0-1.1.6-2 1.5-2z');
+  var liveCv = null, liveCtx = null, liveAc = [], liveTrails = {}, liveTick = null, livePull = null;
   function acColor(a) {
     return a[8] === 2 ? AIR_COL.mil : a[8] === 1 ? AIR_COL.heli : a[5] !== null && a[5] < 3000 ? AIR_COL.low : AIR_COL.all;
   }
-  // Position now: sampled position moved along the track for the time since the sample.
+  // Position now: the sampled position moved along the track for the time since it was valid.
   function acPos(a, nowS) {
-    var dt = Math.min(Math.max(nowS - (liveLast - a[9]), 0), 900);   // s since the position was valid
+    var dt = Math.min(Math.max(nowS - a[9], 0), 1200);
     if (!a[6] || a[7] === null || !dt) return [a[3], a[4]];
     var nm = a[6] * dt / 3600, rad = a[7] * Math.PI / 180;
-    return [a[3] + nm * Math.cos(rad) / 60, a[4] + nm * Math.sin(rad) / (60 * Math.cos(a[3] * Math.PI / 180))];
+    return [a[3] + nm * Math.cos(rad) / 60, a[4] + nm * Math.sin(rad) / (60 * Math.max(0.05, Math.cos(a[3] * Math.PI / 180)))];
   }
-  function acIcon(a) {
-    var heli = a[8] === 1;
-    return L.divIcon({className: 'air-plane', iconSize: [22, 22], iconAnchor: [11, 11],
-      html: '<div style="color:' + acColor(a) + ';transform:rotate(' + (heli ? 0 : (a[7] || 0)) + 'deg)">' +
-            (heli ? HELI_SVG : PLANE_SVG) + '</div>'});
+  function sizeLive() {
+    var sz = map.getSize(), dpr = window.devicePixelRatio || 1;
+    liveCv.width = sz.x * dpr; liveCv.height = sz.y * dpr;
+    liveCv.style.width = sz.x + 'px'; liveCv.style.height = sz.y + 'px';
+    liveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function drawLive() {
+    if (!liveCv) return;
+    var sz = map.getSize(), z = map.getZoom(), nowS = Date.now() / 1000;
+    liveCtx.clearRect(0, 0, sz.x, sz.y);
+    var k = z < 4 ? 0.5 : z < 6 ? 0.65 : z < 9 ? 0.85 : 1.1;
+    liveCtx.lineWidth = 1.4;
+    if (z >= 6) liveAc.forEach(function (a) {          // trails only once you can tell them apart
+      var t = liveTrails[a[0]]; if (!t) return;
+      liveCtx.strokeStyle = acColor(a); liveCtx.globalAlpha = 0.5; liveCtx.beginPath();
+      t.forEach(function (p, i) { var q = map.latLngToContainerPoint(p); i ? liveCtx.lineTo(q.x, q.y) : liveCtx.moveTo(q.x, q.y); });
+      var e = map.latLngToContainerPoint(acPos(a, nowS)); liveCtx.lineTo(e.x, e.y); liveCtx.stroke();
+    });
+    liveCtx.globalAlpha = 1; liveCtx.strokeStyle = '#0b0f14'; liveCtx.lineWidth = 1.1 / k;
+    liveAc.forEach(function (a) {
+      var q = map.latLngToContainerPoint(acPos(a, nowS));
+      if (q.x < -20 || q.y < -20 || q.x > sz.x + 20 || q.y > sz.y + 20) return;
+      a._x = q.x; a._y = q.y;                           // kept for tap hit-testing
+      liveCtx.save(); liveCtx.translate(q.x, q.y); liveCtx.scale(k, k);
+      liveCtx.fillStyle = acColor(a);
+      if (a[8] === 1) {                                 // helicopter: rotor disc
+        liveCtx.beginPath(); liveCtx.arc(0, 0, 6, 0, 6.2832); liveCtx.fill(); liveCtx.stroke();
+      } else {
+        liveCtx.rotate((a[7] || 0) * Math.PI / 180); liveCtx.translate(-12, -12);
+        liveCtx.fill(PLANE_PATH); liveCtx.stroke(PLANE_PATH);
+      }
+      liveCtx.restore();
+    });
+    var n = document.getElementById('live-count');
+    if (n) n.textContent = liveAc.length ? String(liveAc.length) : '';
   }
   function acPopup(a) {
     return '<b>' + esc(a[1] || a[0].toUpperCase()) + '</b>' + (a[2] ? ' · ' + esc(a[2]) : '') + '<br>' +
       (a[5] === null ? '' : a[5] + ' ft') + (a[6] === null ? '' : ' · ' + a[6] + ' kt') +
       (a[7] === null ? '' : ' · ' + a[7] + '°');
   }
-  function renderLive(d) {
-    if (!liveOn || !d) { airLive.clearLayers(); liveMarks = {}; return; }
-    // the server samples every 5 min: a repeat of the same sample must not rebuild the layer
-    // (that would close an open popup every minute)
-    if (d.last === liveLast && Object.keys(liveMarks).length) return;
-    airLive.clearLayers(); liveMarks = {};
-    liveAc = d.ac; liveLast = d.last;
-    var nowS = Date.now() / 1000, trails = d.trails || {};
+  // The canvas ignores pointer events (the map stays draggable), so taps are hit-tested here.
+  map.on('click', function (ev) {
+    if (!liveOn) return;
+    var best = null, bd = 18 * 18;
     liveAc.forEach(function (a) {
-      var t = trails[a[0]], pos = acPos(a, nowS), c = acColor(a);
-      if (t) L.polyline(t.concat([pos]), {weight: 1.6, color: c, opacity: 0.55, interactive: false,
-        renderer: airRenderer}).addTo(airLive);
-      liveMarks[a[0]] = L.marker(pos, {icon: acIcon(a), keyboard: false, riseOnHover: true})
-        .bindPopup(function () { return acPopup(a); }).addTo(airLive);
+      if (a._x === undefined) return;
+      var dx = a._x - ev.containerPoint.x, dy = a._y - ev.containerPoint.y, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = a; }
     });
-  }
-  // One-second tick: move every plane to where it has got to since the sample.
-  function tickLive() {
-    var nowS = Date.now() / 1000;
-    liveAc.forEach(function (a) {
-      var m = liveMarks[a[0]]; if (m) m.setLatLng(acPos(a, nowS));
-    });
-  }
+    if (best) L.popup().setLatLng(acPos(best, Date.now() / 1000)).setContent(acPopup(best)).openOn(map);
+  });
   function pullLive() {
-    fetch('/api/air/now', {credentials: 'same-origin'}).then(function (r) { return r.json(); })
-      .then(renderLive).catch(function () {});
+    if (!liveOn) return;
+    fetch('/api/air/now?' + airView(), {credentials: 'same-origin'}).then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.ac && liveOn) { liveAc = d.ac; liveTrails = d.trails || {}; drawLive(); } })
+      .catch(function () {});
   }
+  var pullLiveSoon = debounce(pullLive, 500);
   function toggleLive() {
     liveOn = !liveOn;
-    if (liveOn) { airLive.addTo(map); pullLive(); airTimer = setInterval(pullLive, 60000); liveTick = setInterval(tickLive, 1000); }
-    else { clearInterval(airTimer); clearInterval(liveTick); airLive.clearLayers(); liveMarks = {}; map.removeLayer(airLive); }
+    if (liveOn) {
+      liveCv = document.createElement('canvas'); liveCv.className = 'air-canvas';
+      liveCtx = liveCv.getContext('2d'); map.getContainer().appendChild(liveCv); sizeLive();
+      pullLive(); livePull = setInterval(pullLive, 60000); liveTick = setInterval(drawLive, 1000);
+    } else {
+      clearInterval(livePull); clearInterval(liveTick);
+      if (liveCv) liveCv.remove();
+      liveCv = liveCtx = null; liveAc = []; liveTrails = {};
+      var n = document.getElementById('live-count'); if (n) n.textContent = '';
+    }
     reflectLayers();
   }
-  map.on('moveend', function () { if (airOn) renderAir(); });
+  map.on('move zoom', function () { if (liveOn) drawLive(); });
+  map.on('resize', function () { if (liveOn) { sizeLive(); drawLive(); } });
+  map.on('moveend', function () { if (airOn) loadAir(); if (liveOn) pullLiveSoon(); });
 
   // Virgin cells sit purely on geometry, so some land in lakes/rivers (Lake Erie).
   // Snap the nearest ones to a road via /api/snap; cells with no drivable road
@@ -1272,7 +1313,7 @@ document.addEventListener('DOMContentLoaded', function () {
       '<div class="cov-ctrls"><div class="cov-line"><span>' + esc(T.air_mode) + '</span>' +
         '<button type="button" class="cov-radius" id="air-mode">' + esc(T['air_mode_' + airMode]) + '</button></div></div>' +
       '<button type="button" class="lyr-row" data-layer="live">' +
-      '<span class="lyr-ic">◉</span>' + esc(T.lyr_live) + '</button>';
+      '<span class="lyr-ic">◉</span>' + esc(T.lyr_live) + ' <span id="live-count" class="lyr-count"></span></button>';
     rows += '<div class="lyr-sep"></div>' +
       '<button type="button" class="lyr-row" data-layer="cov"><span class="lyr-ic">▨</span>' + esc(T.lyr_cov) + '</button>' +
       '<div class="cov-ctrls">' +

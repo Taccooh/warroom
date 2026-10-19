@@ -1550,6 +1550,6 @@ body.doc { scroll-behavior: smooth; }
 /* The way in, from the Info tab's chart section */
 .an-open { margin-top: 0.5rem; }
 
-/* Air traffic: plane symbols (rotated inline by track), no Leaflet default box */
-.air-plane { background: none; border: 0; }
-.air-plane div { width: 22px; height: 22px; filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8)); }
+/* Air traffic: one canvas over the map, below the controls; taps are hit-tested in JS */
+.air-canvas { position: absolute; left: 0; top: 0; z-index: 450; pointer-events: none; }
+.lyr-count { margin-left: .4em; opacity: .7; font-size: .85em; }

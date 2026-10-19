@@ -1,22 +1,28 @@
-"""Air traffic layer: where aircraft fly, aggregated from adsb.lol's open ADS-B feed.
+"""Air traffic layer: where aircraft are and where they fly, worldwide.
 
-Why this exists: wdgwars counts aircraft per player but exposes no positions, so a
-"where do planes fly" view cannot come from the players' own scans. adsb.lol publishes
-the same kind of data openly (ODbL), so we sample it ourselves and keep only an
-aggregate: counts per grid cell, split by altitude band and aircraft kind. No
-individual flight history is stored - that keeps the table small (bounded by the
-number of cells) and makes this a density map, not a tracker.
+wdgwars counts aircraft per player but exposes no positions, so this comes from open ADS-B
+data instead. Three sources, each used for what it is good at:
 
-Politeness budget: the point endpoint allows 4/s, 60/min and 500/day per IP. One
-sample = one request (a single 250 nm circle covers Germany), so the default 5-minute
-cadence uses 288/day. The daily counter below stops us well before the cap.
+* OpenSky Network, whole world in one request (~7k aircraft). Sampled on a schedule; this
+  feeds both the live picture and the density map. Anonymous access allows 400 credits a
+  day and a global request costs 4, so the default cadence is ~16 minutes; with free
+  OpenSky API credentials (WARROOM_OPENSKY_ID / _SECRET) it drops to 2 minutes.
+* adsb.lol point query, 108 nm (200 km) around wherever a player is looking. Fresher and
+  with type / helicopter / military flags, but only 500 requests a day per IP, so it runs
+  on demand, is cached per area, and stops at our own daily cap.
+* adsb.lol military list, one request for the whole world.
+
+Only aggregates are kept long-term: counts per grid cell, split by altitude band and
+aircraft kind. Individual positions live for 40 minutes (live view + short trails).
 """
 import json
 import logging
 import math
 import sqlite3
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
@@ -25,171 +31,305 @@ from . import config, db
 log = logging.getLogger("warroom.air")
 
 # Density grid. Coarser than the wdgwars cells on purpose: a corridor is a statistic over
-# thousands of positions, and 0.05 deg (~5.5 km x 3.6 km at 50 N) keeps the whole country
-# at ~30k cells while still resolving approach lanes.
+# thousands of positions, and 0.05 deg (~5.5 km x 3.6 km at 50 N) resolves approach lanes.
 GRID = 0.05
 
 # Altitude bands (ft, barometric). 0 = on the ground (airports), then low / mid / cruise.
 BAND_GROUND, BAND_LOW, BAND_MID, BAND_HIGH = 0, 1, 2, 3
 LOW_FT, HIGH_FT = 3000, 12000
 
-# Aircraft kinds
 KIND_CIVIL, KIND_HELI, KIND_MIL = 0, 1, 2
 
-# Positions older than this are extrapolation noise (receiver lost the aircraft).
-MAX_POS_AGE_S = 15
+MAX_POS_AGE_S = 60      # drop positions older than this when sampling
+KEEP_S = 2400           # live rows and trail points are forgotten after this
+M_TO_FT, MS_TO_KT = 3.28084, 1.94384
 
-# Short trails behind the live aircraft: positions of the last few snapshots, thrown away
-# after TRAIL_S. Not a flight history - just enough to see which way things are moving.
-TRAIL_S = 1800
+NEAR_NM = 108           # 200 km
+NEAR_CELL = 1.0         # degrees: view centres within one cell share a cached fetch
+MAX_VIEW = 2500         # aircraft handed to the client per request
+# Zoomed out, every aircraft would just be one big blob: past THIN_SPAN degrees across the
+# view, keep one aircraft per (span / THIN_CELLS)-degree square - military and helicopters
+# first, then the fastest (cruising airliners show the routes best).
+THIN_SPAN = 8.0
+THIN_CELLS = 34
+TRAIL_SPAN = 20.0   # degrees across the view; wider than this, no trails
+
+_near_lock = threading.Lock()
+_near_done: dict[tuple, float] = {}   # (cell_lat, cell_lng) -> time of last fetch
 
 
-def band_of(alt) -> int:
-    if alt == "ground":
+def band_of(alt_ft, ground=False) -> int:
+    if ground or alt_ft == "ground":
         return BAND_GROUND
     try:
-        ft = float(alt)
+        ft = float(alt_ft)
     except (TypeError, ValueError):
-        return BAND_MID  # no altitude broadcast: count it, but not as low or cruise
+        return BAND_MID  # no altitude broadcast: count it, but neither low nor cruise
     if ft < LOW_FT:
         return BAND_LOW
     return BAND_MID if ft < HIGH_FT else BAND_HIGH
 
 
-def kind_of(ac: dict) -> int:
-    if ac.get("dbFlags") and int(ac["dbFlags"]) & 1:  # bit 0 = military in the readsb DB
-        return KIND_MIL
-    if ac.get("category") == "A7":                    # rotorcraft
-        return KIND_HELI
-    return KIND_CIVIL
+# ---- source parsing: everything is normalised to one row ---------------------------
+# (hex, callsign, type, lat, lng, alt_ft|None, gs_kt|None, track|None, kind, t, ground)
+# t = epoch second at which the position was valid; the client dead-reckons from it.
+
+def _num(v):
+    return int(v) if isinstance(v, (int, float)) else None
 
 
-def _circles() -> list[tuple[float, float, int]]:
-    out = []
-    for part in config.AIR_CIRCLES.split(";"):
+def _row_adsb(ac: dict, now: float):
+    if not ac.get("hex") or "lat" not in ac or "lon" not in ac:
+        return None
+    age = ac.get("seen_pos") or 0
+    if age > MAX_POS_AGE_S:
+        return None
+    alt = ac.get("alt_baro")
+    kind = KIND_CIVIL
+    if ac.get("dbFlags") and int(ac["dbFlags"]) & 1:   # bit 0 = military in the readsb DB
+        kind = KIND_MIL
+    elif ac.get("category") == "A7":                    # rotorcraft
+        kind = KIND_HELI
+    return (ac["hex"], (ac.get("flight") or "").strip()[:12], (ac.get("t") or "")[:8],
+            round(ac["lat"], 4), round(ac["lon"], 4), None if alt == "ground" else _num(alt),
+            _num(ac.get("gs")), _num(ac.get("track")), kind, int(now - age), alt == "ground")
+
+
+def _row_opensky(s: list, mil: set):
+    # [icao24, callsign, country, time_position, last_contact, lon, lat, baro_alt_m,
+    #  on_ground, velocity_ms, true_track, vrate, sensors, geo_alt, squawk, spi, src, category]
+    if s[5] is None or s[6] is None or s[3] is None:
+        return None
+    alt = None if s[7] is None else int(s[7] * M_TO_FT)
+    kind = KIND_MIL if s[0] in mil else KIND_HELI if len(s) > 17 and s[17] == 8 else KIND_CIVIL
+    return (s[0], (s[1] or "").strip()[:12], "", round(s[6], 4), round(s[5], 4), alt,
+            None if s[9] is None else int(s[9] * MS_TO_KT),
+            None if s[10] is None else int(s[10]), kind, int(s[3]), bool(s[8]))
+
+
+# ---- HTTP ------------------------------------------------------------------------------
+
+def _get_json(url: str, headers: dict | None = None, timeout: int = 60):
+    h = {"User-Agent": config.USER_AGENT, "Accept": "application/json"}
+    h.update(headers or {})
+    with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+_token = {"value": "", "until": 0.0}
+
+
+def _opensky_headers() -> dict:
+    """Bearer token from the OAuth2 client-credentials flow when credentials are set;
+    anonymous otherwise. A failed token request falls back to anonymous."""
+    if not (config.AIR_OS_ID and config.AIR_OS_SECRET):
+        return {}
+    if time.time() > _token["until"]:
+        body = urllib.parse.urlencode({
+            "grant_type": "client_credentials", "client_id": config.AIR_OS_ID,
+            "client_secret": config.AIR_OS_SECRET}).encode()
+        req = urllib.request.Request(config.AIR_OS_TOKEN_URL, data=body, headers={
+            "Content-Type": "application/x-www-form-urlencoded", "User-Agent": config.USER_AGENT})
         try:
-            lat, lng, nm = (float(x) for x in part.split(","))
-            out.append((lat, lng, min(250, int(nm))))  # the API caps the radius at 250 nm
-        except ValueError:
-            continue
-    return out
+            with urllib.request.urlopen(req, timeout=30) as r:
+                j = json.loads(r.read().decode("utf-8"))
+            _token["value"], _token["until"] = j["access_token"], time.time() + j.get("expires_in", 600) - 60
+        except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
+            log.warning("opensky token: %s", e)
+            return {}
+    return {"Authorization": "Bearer " + _token["value"]}
 
 
-def fetch(lat: float, lng: float, nm: int) -> list[dict]:
-    req = urllib.request.Request(
-        f"{config.AIR_BASE_URL}/v2/point/{lat}/{lng}/{nm}",
-        headers={"User-Agent": config.USER_AGENT, "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.loads(r.read().decode("utf-8")).get("ac") or []
-
-
-def _budget_left(conn: sqlite3.Connection, n_requests: int) -> bool:
-    """Day counter in kv (UTC). Refuses once today's quota would pass AIR_DAILY_MAX."""
+def _spend(conn: sqlite3.Connection, name: str, cost: int, cap: int) -> bool:
+    """Per-source daily counter in kv (UTC day). False once `cost` would pass `cap`."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    day, used = (db.kv_get(conn, "air_day", "") , int(db.kv_get(conn, "air_used", "0")))
+    day, used = db.kv_get(conn, f"air_{name}_day", ""), int(db.kv_get(conn, f"air_{name}_used", "0"))
     if day != today:
         day, used = today, 0
-    if used + n_requests > config.AIR_DAILY_MAX:
+    if used + cost > cap:
         return False
-    db.kv_set(conn, "air_day", day)
-    db.kv_set(conn, "air_used", used + n_requests)
+    db.kv_set(conn, f"air_{name}_day", day)
+    db.kv_set(conn, f"air_{name}_used", used + cost)
     return True
 
 
-def sample(conn: sqlite3.Connection, aircraft: list[dict]) -> int:
-    """Fold one snapshot into the density table and replace the live list.
-    Returns the number of aircraft counted. Each aircraft counts once per snapshot
-    (de-duplicated by hex, circles may overlap)."""
-    seen: dict[str, dict] = {}
-    for ac in aircraft:
-        hexid = ac.get("hex")
-        if not hexid or "lat" not in ac or "lon" not in ac:
-            continue
-        if (ac.get("seen_pos") or 0) > MAX_POS_AGE_S:
-            continue
-        seen[hexid] = ac
+# ---- storing -----------------------------------------------------------------------------
+
+def _store_live(conn, rows: list) -> None:
+    """Upsert into the live table. A row only replaces an existing one when it is newer,
+    so a fresh on-demand fetch is never overwritten by an older global snapshot."""
+    conn.executemany(
+        "INSERT INTO air_now (hex, callsign, type, lat, lng, alt, gs, track, kind, t) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(hex) DO UPDATE SET "
+        "callsign = CASE WHEN excluded.callsign != '' THEN excluded.callsign ELSE callsign END, "
+        "type = CASE WHEN excluded.type != '' THEN excluded.type ELSE type END, "
+        "lat = excluded.lat, lng = excluded.lng, alt = excluded.alt, gs = excluded.gs, "
+        "track = excluded.track, "
+        "kind = MAX(kind, excluded.kind), t = excluded.t WHERE excluded.t > air_now.t",
+        [r[:10] for r in rows if not r[10]])
+    conn.executemany("INSERT INTO air_trail (hex, ts, lat, lng) VALUES (?,?,?,?)",
+                     [(r[0], r[9], r[3], r[4]) for r in rows if not r[10]])
+
+
+def _prune(conn, now: int) -> None:
+    conn.execute("DELETE FROM air_now WHERE t < ?", (now - KEEP_S,))
+    conn.execute("DELETE FROM air_trail WHERE ts < ?", (now - KEEP_S,))
+
+
+def _count(conn, rows: list) -> None:
     counts: dict[tuple, int] = {}
-    live = []
-    for hexid, ac in seen.items():
-        i, j = math.floor(ac["lat"] / GRID), math.floor(ac["lon"] / GRID)
-        band, kind = band_of(ac.get("alt_baro")), kind_of(ac)
-        counts[(i, j, band, kind)] = counts.get((i, j, band, kind), 0) + 1
-        if band != BAND_GROUND:
-            alt = ac.get("alt_baro")
-            live.append((hexid, (ac.get("flight") or "").strip()[:12], (ac.get("t") or "")[:8],
-                         round(ac["lat"], 4), round(ac["lon"], 4),
-                         int(alt) if isinstance(alt, (int, float)) else None,
-                         int(ac["gs"]) if isinstance(ac.get("gs"), (int, float)) else None,
-                         int(ac["track"]) if isinstance(ac.get("track"), (int, float)) else None,
-                         kind, int(ac.get("seen_pos") or 0)))
+    for r in rows:
+        k = (math.floor(r[3] / GRID), math.floor(r[4] / GRID), band_of(r[5], r[10]), r[8])
+        counts[k] = counts.get(k, 0) + 1
+    conn.executemany(
+        "INSERT INTO air_cells (i, j, band, kind, n) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(i, j, band, kind) DO UPDATE SET n = n + excluded.n",
+        [(*k, n) for k, n in counts.items()])
+
+
+def _mil_set(conn) -> set:
+    return {r[0] for r in conn.execute("SELECT hex FROM air_now WHERE kind = ?", (KIND_MIL,))}
+
+
+# ---- the three feeds -------------------------------------------------------------------
+
+def poll_global(conn: sqlite3.Connection) -> str:
+    """OpenSky, whole world. Feeds the live picture and the density map."""
+    creds = bool(config.AIR_OS_ID and config.AIR_OS_SECRET)
+    if not _spend(conn, "os", 4, config.AIR_OS_DAILY):
+        return "opensky: daily credits used up"
+    try:
+        d = _get_json("https://opensky-network.org/api/states/all?extended=1",
+                      _opensky_headers(), timeout=90)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return f"opensky failed: {e}"
+    mil = _mil_set(conn)
+    rows = [r for s in d.get("states") or [] if (r := _row_opensky(s, mil))]
+    now = int(time.time())
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        conn.executemany(
-            "INSERT INTO air_cells (i, j, band, kind, n) VALUES (?,?,?,?,?) "
-            "ON CONFLICT(i, j, band, kind) DO UPDATE SET n = n + excluded.n",
-            [(*k, n) for k, n in counts.items()])
-        conn.execute("DELETE FROM air_now")
-        conn.executemany(
-            "INSERT INTO air_now (hex, callsign, type, lat, lng, alt, gs, track, kind, age) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)", live)
-        ts = int(time.time())
-        conn.executemany("INSERT INTO air_trail (hex, ts, lat, lng) VALUES (?,?,?,?)",
-                         [(a[0], ts - a[9], a[3], a[4]) for a in live])
-        conn.execute("DELETE FROM air_trail WHERE ts < ?", (ts - TRAIL_S,))
+        _store_live(conn, rows)
+        _count(conn, rows)
+        _prune(conn, now)
         if not db.kv_get(conn, "air_since"):
             db.kv_set(conn, "air_since", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
         db.kv_set(conn, "air_samples", int(db.kv_get(conn, "air_samples", "0")) + 1)
-        db.kv_set(conn, "air_last", int(time.time()))
-    return len(seen)
+        db.kv_set(conn, "air_last", now)
+    return f"{len(rows)} aircraft worldwide ({'account' if creds else 'anonymous'})"
 
 
-def poll(conn: sqlite3.Connection) -> str:
-    """One cycle: fetch every configured circle, merge, store. Never raises for an
-    upstream hiccup - a missed sample just means one point less in the statistic."""
-    circles = _circles()
-    if not circles or config.AIR_SECONDS <= 0:
-        return "off"
-    if not _budget_left(conn, len(circles)):
+def poll_mil(conn: sqlite3.Connection) -> str:
+    """adsb.lol military list: one request, the whole world."""
+    if not _spend(conn, "adsblol", 1, config.AIR_DAILY_MAX):
+        return "adsb.lol: daily budget used up"
+    try:
+        ac = _get_json(f"{config.AIR_BASE_URL}/v2/mil").get("ac") or []
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return f"mil failed: {e}"
+    now = time.time()
+    rows = [r for a in ac if (r := _row_adsb(a, now))]
+    rows = [r[:8] + (KIND_MIL,) + r[9:] for r in rows]
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _store_live(conn, rows)
+    return f"{len(rows)} military"
+
+
+def near(conn: sqlite3.Connection, lat: float, lng: float) -> str:
+    """adsb.lol 200 km around a view centre, for the detail the global feed lacks. Cached
+    per 1 deg cell; shares the daily budget with the military list. Meant to be called in
+    the background after a request - never make a viewer wait for it."""
+    key = (round(lat / NEAR_CELL), round(lng / NEAR_CELL))
+    with _near_lock:
+        if time.time() - _near_done.get(key, 0) < config.AIR_NEAR_TTL:
+            return "cached"
+        _near_done[key] = time.time()
+        if len(_near_done) > 2000:
+            for k in [k for k, v in _near_done.items() if time.time() - v > 3600]:
+                del _near_done[k]
+    if not _spend(conn, "adsblol", 1, config.AIR_DAILY_MAX):
         return "daily budget used up"
-    merged: list[dict] = []
-    for lat, lng, nm in circles:
-        try:
-            merged.extend(fetch(lat, lng, nm))
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            log.warning("adsb.lol %s,%s: %s", lat, lng, e)
-            return f"fetch failed: {e}"
-    return f"{sample(conn, merged)} aircraft"
+    try:
+        ac = _get_json(f"{config.AIR_BASE_URL}/v2/point/{lat:.3f}/{lng:.3f}/{NEAR_NM}").get("ac") or []
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return f"near failed: {e}"
+    now = time.time()
+    rows = [r for a in ac if (r := _row_adsb(a, now))]
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _store_live(conn, rows)
+    return f"{len(rows)} aircraft near {lat:.1f},{lng:.1f}"
 
 
-def cells(conn: sqlite3.Connection) -> dict:
-    """Every cell with its counts as one compact row:
-    [i, j, ground, low, mid, high, heli, mil]. heli and mil are subsets of the band
-    counts (an aircraft is in exactly one band AND one kind), so the client can show
-    'all traffic', 'low flying', 'helicopters' or 'military' from one payload."""
+# ---- reading ---------------------------------------------------------------------------
+
+def cells(conn: sqlite3.Connection, bbox: tuple) -> dict:
+    """Density cells inside the view as compact rows [i, j, ground, low, mid, high, heli,
+    mil]; heli and mil are subsets of the band counts (every sample is one band AND one
+    kind). Zoomed out the cells are merged into coarser ones (k x k blocks, `grid` tells
+    the client the resulting size) so a world view stays a few thousand rows."""
+    s, w, n, e = bbox
+    span = max(n - s, (e - w) if e >= w else (e - w + 360.0))
+    k = 1 if span < 8 else 5 if span < 40 else 20
+    pos = f"(i - ((i % {k}) + {k}) % {k}) / {k}", f"(j - ((j % {k}) + {k}) % {k}) / {k}"
+    if w <= e:
+        lng_sql, lng_args = "j BETWEEN ? AND ?", [math.floor(w / GRID), math.floor(e / GRID)]
+    else:
+        lng_sql, lng_args = "(j >= ? OR j <= ?)", [math.floor(w / GRID), math.floor(e / GRID)]
     rows: dict[tuple, list] = {}
-    for r in conn.execute("SELECT i, j, band, kind, n FROM air_cells"):
-        row = rows.setdefault((r["i"], r["j"]), [r["i"], r["j"], 0, 0, 0, 0, 0, 0])
+    for r in conn.execute(
+            f"SELECT {pos[0]} AS ci, {pos[1]} AS cj, band, kind, SUM(n) AS n FROM air_cells "
+            f"WHERE i BETWEEN ? AND ? AND {lng_sql} GROUP BY ci, cj, band, kind",
+            [math.floor(s / GRID), math.floor(n / GRID), *lng_args]):
+        row = rows.setdefault((r["ci"], r["cj"]), [r["ci"], r["cj"], 0, 0, 0, 0, 0, 0])
         row[2 + r["band"]] += r["n"]
         if r["kind"] == KIND_HELI:
             row[6] += r["n"]
         elif r["kind"] == KIND_MIL:
             row[7] += r["n"]
-    return {"grid": GRID, "since": db.kv_get(conn, "air_since", ""),
+    return {"grid": GRID * k, "since": db.kv_get(conn, "air_since", ""),
             "samples": int(db.kv_get(conn, "air_samples", "0")),
-            "last": int(db.kv_get(conn, "air_last", "0")),
-            "cells": list(rows.values())}
+            "last": int(db.kv_get(conn, "air_last", "0")), "cells": list(rows.values())}
 
 
-def now(conn: sqlite3.Connection) -> dict:
-    """The latest snapshot: [hex, callsign, type, lat, lng, alt, gs, track, kind, age].
-    `age` = seconds the position was already old when sampled; the client adds the time
-    since `last` and dead-reckons from speed and track, so aircraft keep moving between
-    the 5-minute samples. `trails` = recent [lat, lng] points per aircraft, oldest first."""
+def _thin(ac: list, cell: float) -> list:
+    best: dict[tuple, list] = {}
+    for a in ac:
+        key = (math.floor(a[3] / cell), math.floor(a[4] / cell))
+        rank = (a[8] > 0, a[6] or 0)            # (military/heli, ground speed)
+        cur = best.get(key)
+        if cur is None or rank > (cur[8] > 0, cur[6] or 0):
+            best[key] = a
+    return list(best.values())
+
+
+def now(conn: sqlite3.Connection, bbox: tuple, center: tuple) -> dict:
+    """Aircraft inside the view: [hex, callsign, type, lat, lng, alt, gs, track, kind, t].
+    `t` is when the position was valid - the client dead-reckons forward from it. At most
+    MAX_VIEW rows, nearest to the view centre first. `trails` = recent [lat, lng] points
+    per returned aircraft, oldest first."""
+    s, w, n, e = bbox
+    clat, clng = center
+    if w <= e:
+        lng_sql, args = "lng BETWEEN ? AND ?", [s, n, w, e]
+    else:                                  # view across the antimeridian
+        lng_sql, args = "(lng >= ? OR lng <= ?)", [s, n, w, e]
     ac = [list(r) for r in conn.execute(
-        "SELECT hex, callsign, type, lat, lng, alt, gs, track, kind, age FROM air_now")]
+        "SELECT hex, callsign, type, lat, lng, alt, gs, track, kind, t FROM air_now "
+        f"WHERE lat BETWEEN ? AND ? AND {lng_sql}", args)]
+    ac.sort(key=lambda a: (a[3] - clat) ** 2 + ((a[4] - clng + 180) % 360 - 180) ** 2)
+    total = len(ac)
+    span = max(n - s, (e - w) if e >= w else (e - w + 360.0))
+    if span >= THIN_SPAN:
+        ac = _thin(ac, span / THIN_CELLS)
+    ac = ac[:MAX_VIEW]
+    keep = {a[0] for a in ac}
     trails: dict[str, list] = {}
-    for r in conn.execute("SELECT hex, lat, lng FROM air_trail ORDER BY ts"):
-        trails.setdefault(r["hex"], []).append([round(r["lat"], 4), round(r["lng"], 4)])
-    # the newest trail point is the aircraft itself; keep trails only where there is a tail
-    trails = {h: t for h, t in trails.items() if len(t) > 1}
-    return {"last": int(db.kv_get(conn, "air_last", "0")), "ac": ac, "trails": trails}
+    if keep and span < TRAIL_SPAN:   # wide views draw no trails - do not ship them
+        for r in conn.execute(
+                f"SELECT hex, lat, lng FROM air_trail WHERE ts > ? AND lat BETWEEN ? AND ? AND {lng_sql} "
+                "ORDER BY ts", [int(time.time()) - KEEP_S, *args]):
+            if r["hex"] in keep:
+                trails.setdefault(r["hex"], []).append([round(r["lat"], 3), round(r["lng"], 3)])
+    return {"last": int(db.kv_get(conn, "air_last", "0")), "total": total, "ac": ac,
+            "trails": {h: t for h, t in trails.items() if len(t) > 1}}
