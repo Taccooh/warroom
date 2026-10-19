@@ -303,7 +303,9 @@ document.addEventListener('DOMContentLoaded', function () {
       return 'r=200&clat=' + c.lat.toFixed(3) + '&clng=' + c.lng.toFixed(3) + '&mode=' + airMode +
              '&s=0&w=0&n=0&e=0';
     }
-    var b = map.getBounds(), w = b.getWest(), e = b.getEast();
+    // 15 % margin: Leaflet's idea of the map size can lag the visible one (planner sheet, address bar),
+    // and planes just off the edge should already be there when you pan.
+    var b = map.getBounds().pad(0.15), w = b.getWest(), e = b.getEast();
     if (e - w >= 360) { w = -180; e = 180; }
     else { w = ((w + 180) % 360 + 360) % 360 - 180; e = ((e + 180) % 360 + 360) % 360 - 180; }
     return 's=' + Math.max(-90, b.getSouth()).toFixed(3) + '&w=' + w.toFixed(3) +
