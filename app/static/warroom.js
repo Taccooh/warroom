@@ -269,92 +269,42 @@ document.addEventListener('DOMContentLoaded', function () {
     else { mastsLayer.clearLayers(); map.removeLayer(mastsLayer); }
     if (typeof reflectLayers === 'function') reflectLayers();
   }
-  // ---- Air traffic, worldwide. Two layers, both fed by our own /api/air/* for the current
-  // map view (the page never talks to the upstream feeds):
-  //  * "Air traffic": density of where aircraft have been seen (merged into coarser cells
-  //    when zoomed out, so the world view stays light).
-  //  * "Aircraft now": plane symbols turned to their track, on ONE canvas, dead-reckoned
-  //    between samples. The server thins them with the zoom level - zoomed out you get the
-  //    big picture, zoomed in every aircraft.
+  // ---- Air traffic, worldwide: "Aircraft now". Plane symbols turned to their track on ONE
+  // canvas, dead-reckoned between samples. Data comes from our own /api/air/now for the
+  // current map view (the page never talks to the upstream feeds). The server applies the
+  // filter and thins the result with the zoom level: zoomed out you get the big picture,
+  // zoomed in every aircraft.
   var AIR_MODES = ['all', 'low', 'heli', 'mil'];
   var AIR_COL = {all: '#5cc8ff', low: '#ffd45c', heli: '#7dff9a', mil: '#ff7a5c'};
-  // Density cells get their own pane above the wdgwars cells (SVG, overlay pane), so the
-  // aircraft cells win every tap; markers and popups stay above.
-  map.createPane('airPane', map.getPane('rotatePane') || undefined); map.getPane('airPane').style.zIndex = 450;
-  // The plane canvas lives in a map pane just below the popups (700) and markers (600): a
-  // sibling of the map pane would sit above ALL of them and draw planes over popups.
-  map.createPane('livePane', map.getPane('rotatePane') || undefined); map.getPane('livePane').style.zIndex = 460;
-  var airRenderer = L.canvas({padding: 0.3, pane: 'airPane'});
-  // While an air layer is on, the territory cells step back (see .air-focus in style.css).
-  function airFocus() { map.getContainer().classList.toggle('air-focus', airOn || liveOn); }
-  var airLayer = L.layerGroup();
-  var airOn = false, liveOn = false, airMode = 'all', airData = null, airIdx = {};
+  // The plane canvas lives in a map pane just below popups (700) and markers (600): a sibling
+  // of the map pane would sit above ALL of them and draw planes over popups. It goes into the
+  // rotate pane because that is where the popup pane lives - panes in different stacking
+  // contexts cannot be ordered against each other.
+  map.createPane('livePane', map.getPane('rotatePane') || undefined);
+  map.getPane('livePane').style.zIndex = 460;
+  var liveOn = false, airMode = 'all';
   try { var am = localStorage.getItem('wr_air_mode'); if (AIR_MODES.indexOf(am) >= 0) airMode = am; } catch (e) {}
+  // While the aircraft are on, the territory cells (SVG overlay pane) step back: thin and
+  // untouchable, so the planes win every tap (see .air-focus in style.css).
+  function airFocus() { map.getContainer().classList.toggle('air-focus', liveOn); }
   function airView() {
     var b = map.getBounds(), w = b.getWest(), e = b.getEast();
     if (e - w >= 360) { w = -180; e = 180; }
     else { w = ((w + 180) % 360 + 360) % 360 - 180; e = ((e + 180) % 360 + 360) % 360 - 180; }
     return 's=' + Math.max(-90, b.getSouth()).toFixed(3) + '&w=' + w.toFixed(3) +
-           '&n=' + Math.min(90, b.getNorth()).toFixed(3) + '&e=' + e.toFixed(3);
+           '&n=' + Math.min(90, b.getNorth()).toFixed(3) + '&e=' + e.toFixed(3) + '&mode=' + airMode;
   }
   function debounce(fn, ms) { var t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; }
 
-  // cell row: [i, j, ground, low, mid, high, heli, mil]
-  function airVal(r, mode) {
-    return mode === 'low' ? r[3] : mode === 'heli' ? r[6] : mode === 'mil' ? r[7] : r[3] + r[4] + r[5];
-  }
-  function renderAir() {
-    airLayer.clearLayers(); airIdx = {};
-    if (!airOn || !airData) return;
-    var g = airData.grid, max = 1, rows = [];
-    airData.cells.forEach(function (r) {
-      var v = airVal(r, airMode);
-      if (!v) return;
-      if (v > max) max = v;
-      rows.push([r, v]);
-    });
-    var col = AIR_COL[airMode], lm = Math.log(1 + max);
-    rows.forEach(function (x) {
-      var r = x[0], la = r[0] * g, lo = r[1] * g, op = 0.06 + 0.5 * Math.log(1 + x[1]) / lm;
-      L.rectangle([[la, lo], [la + g, lo + g]], {stroke: false, fillColor: col, fillOpacity: op,
-        renderer: airRenderer, interactive: false}).addTo(airLayer);
-      airIdx[r[0] + '_' + r[1]] = r;
-    });
-  }
-  function airCellPopup(r) {
-    var tot = r[2] + r[3] + r[4] + r[5], names = ['ground', 'low', 'mid', 'high'], top = 0;
-    for (var i = 1; i < 4; i++) if (r[2 + i] > r[2 + top]) top = i;
-    var pct = function (n) { return tot ? Math.round(100 * n / tot) + ' %' : '0 %'; };
-    return '<b>' + esc(T.air_pop_head) + '</b><br>' +
-      tf(T.air_pop_total, {n: tot, top: T['air_band_' + names[top]]}) + '<br>' +
-      tf(T.air_pop_bands, {low: r[3], mid: r[4], high: r[5]}) + '<br>' +
-      tf(T.air_pop_kinds, {heli: r[6], mil: r[7], ground: r[2]}) +
-      (r[7] ? '<br>' + tf(T.air_pop_milshare, {p: pct(r[7])}) : '') + '<br><small>' +
-      tf(T.air_pop_since, {n: airData.samples, d: airData.since}) +
-      (airData.grid > 0.06 ? ' · ' + tf(T.air_pop_merged, {km: Math.round(airData.grid * 111)}) : '') + '</small>';
-  }
-  var loadAir = debounce(function () {
-    if (!airOn) return;
-    fetch('/api/air/cells?' + airView(), {credentials: 'same-origin'}).then(function (r) { return r.json(); })
-      .then(function (d) { if (d && d.cells) { airData = d; renderAir(); } }).catch(function () {});
-  }, 400);
-  function toggleAir() {
-    airOn = !airOn;
-    if (airOn) { airLayer.addTo(map); loadAir(); }
-    else { airLayer.clearLayers(); map.removeLayer(airLayer); airData = null; }
-    airFocus();
-    reflectLayers();
-  }
-
-  // ---- live aircraft on one canvas ----
   var PLANE_PATH = new Path2D('M12 1.5c.9 0 1.5.9 1.5 2v6.2l8.5 5.1v2.1l-8.5-2.3v4.7l2.2 1.7v1.6L12 21.5l-3.7 1.1v-1.6l2.2-1.7v-4.7L2 16.9v-2.1l8.5-5.1V3.5c0-1.1.6-2 1.5-2z');
-  var liveCv = null, liveCtx = null, liveAc = [], liveTrails = {}, liveTick = null, livePull = null;
+  var liveCv = null, liveCtx = null, liveAc = [], liveTick = null, livePull = null, liveSeq = 0, liveDone = 0;
   function acColor(a) {
     return a[8] === 2 ? AIR_COL.mil : a[8] === 1 ? AIR_COL.heli : a[5] !== null && a[5] < 3000 ? AIR_COL.low : AIR_COL.all;
   }
-  // Position now: the sampled position moved along the track for the time since it was valid.
-  function acPos(a, nowS) {
-    var dt = Math.min(Math.max(nowS - a[9], 0), 1200);
+  // Position `back` seconds before now (negative = ahead): the sampled position moved along the
+  // track for the time since it was valid. Capped, a stale sample must not run away.
+  function acPos(a, nowS, back) {
+    var dt = Math.min(Math.max(nowS - a[9] - (back || 0), 0), 1200);
     if (!a[6] || a[7] === null || !dt) return [a[3], a[4]];
     var nm = a[6] * dt / 3600, rad = a[7] * Math.PI / 180;
     return [a[3] + nm * Math.cos(rad) / 60, a[4] + nm * Math.sin(rad) / (60 * Math.max(0.05, Math.cos(a[3] * Math.PI / 180)))];
@@ -366,8 +316,8 @@ document.addEventListener('DOMContentLoaded', function () {
     liveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     placeLive();
   }
-  // Panes move with the map while the canvas should stay glued to the viewport: pin it to
-  // the top-left corner of the view in pane coordinates, then draw in container coordinates.
+  // Panes move with the map while the canvas should stay glued to the viewport: pin it to the
+  // top-left corner of the view in pane coordinates, then draw in container coordinates.
   function placeLive() { L.DomUtil.setPosition(liveCv, map.containerPointToLayerPoint([0, 0])); }
   function drawLive() {
     if (!liveCv) return;
@@ -375,20 +325,20 @@ document.addEventListener('DOMContentLoaded', function () {
     var sz = map.getSize(), z = map.getZoom(), nowS = Date.now() / 1000;
     liveCtx.clearRect(0, 0, sz.x, sz.y);
     var k = z < 4 ? 0.5 : z < 6 ? 0.65 : z < 9 ? 0.85 : 1.1;
-    liveCtx.lineWidth = 1.4;
-    if (z >= 6) liveAc.forEach(function (a) {          // trails only once you can tell them apart
-      var t = liveTrails[a[0]]; if (!t) return;
-      liveCtx.strokeStyle = acColor(a); liveCtx.globalAlpha = 0.5; liveCtx.beginPath();
-      t.forEach(function (p, i) { var q = map.latLngToContainerPoint(p); i ? liveCtx.lineTo(q.x, q.y) : liveCtx.moveTo(q.x, q.y); });
-      var e = map.latLngToContainerPoint(acPos(a, nowS)); liveCtx.lineTo(e.x, e.y); liveCtx.stroke();
-    });
-    liveCtx.globalAlpha = 1; liveCtx.strokeStyle = '#0b0f14'; liveCtx.lineWidth = 1.1 / k;
     liveAc.forEach(function (a) {
       var q = map.latLngToContainerPoint(acPos(a, nowS));
-      if (q.x < -20 || q.y < -20 || q.x > sz.x + 20 || q.y > sz.y + 20) return;
+      if (q.x < -40 || q.y < -40 || q.x > sz.x + 40 || q.y > sz.y + 40) return;
       a._x = q.x; a._y = q.y;                           // kept for tap hit-testing
+      // Tail: where it was 2 minutes ago, along the same track - always the same length, so it
+      // never flickers; it only shows which way and how fast the plane is moving.
+      if (z >= 5 && a[6] && a[7] !== null) {
+        var t = map.latLngToContainerPoint(acPos(a, nowS, 120));
+        liveCtx.strokeStyle = acColor(a); liveCtx.globalAlpha = 0.55; liveCtx.lineWidth = 1.6;
+        liveCtx.beginPath(); liveCtx.moveTo(q.x, q.y); liveCtx.lineTo(t.x, t.y); liveCtx.stroke();
+        liveCtx.globalAlpha = 1;
+      }
       liveCtx.save(); liveCtx.translate(q.x, q.y); liveCtx.scale(k, k);
-      liveCtx.fillStyle = acColor(a);
+      liveCtx.fillStyle = acColor(a); liveCtx.strokeStyle = '#0b0f14'; liveCtx.lineWidth = 1.1 / k;
       if (a[8] === 1) {                                 // helicopter: rotor disc
         liveCtx.beginPath(); liveCtx.arc(0, 0, 6, 0, 6.2832); liveCtx.fill(); liveCtx.stroke();
       } else {
@@ -430,28 +380,29 @@ document.addEventListener('DOMContentLoaded', function () {
       '" target="_blank" rel="noopener noreferrer">' + esc(T.air_open) + ' ↗</a></small>';
     return h;
   }
-  // One tap handler for both air layers, so aircraft always win over the cell under them: the
-  // canvas ignores pointer events (the map stays draggable), taps are hit-tested here.
+  // The canvas ignores pointer events (the map stays draggable), so taps are hit-tested here.
   map.on('click', function (ev) {
+    if (!liveOn) return;
     var best = null, bd = 18 * 18;
-    if (liveOn) liveAc.forEach(function (a) {
+    liveAc.forEach(function (a) {
       if (a._x === undefined) return;
       var dx = a._x - ev.containerPoint.x, dy = a._y - ev.containerPoint.y, d = dx * dx + dy * dy;
       if (d < bd) { bd = d; best = a; }
     });
-    if (best) { L.popup().setLatLng(acPos(best, Date.now() / 1000)).setContent(acPopup(best)).openOn(map); return; }
-    if (airOn && airData) {
-      var g = airData.grid, r = airIdx[Math.floor(ev.latlng.lat / g) + '_' + Math.floor(ev.latlng.lng / g)];
-      if (r) L.popup().setLatLng(ev.latlng).setContent(airCellPopup(r)).openOn(map);
-    }
+    if (best) L.popup().setLatLng(acPos(best, Date.now() / 1000)).setContent(acPopup(best)).openOn(map);
   });
   function pullLive() {
     if (!liveOn) return;
+    var seq = ++liveSeq;
     fetch('/api/air/now?' + airView(), {credentials: 'same-origin'}).then(function (r) { return r.json(); })
-      .then(function (d) { if (d && d.ac && liveOn) { liveAc = d.ac; liveTrails = d.trails || {}; drawLive(); } })
-      .catch(function () {});
+      .then(function (d) {
+        // Answers can overtake each other while zooming: only ever apply a newer one than
+        // the last applied, otherwise a slow zoomed-out reply wipes the zoomed-in planes.
+        if (!d || !d.ac || !liveOn || seq < liveDone) return;
+        liveDone = seq; liveAc = d.ac; drawLive();
+      }).catch(function () {});
   }
-  var pullLiveSoon = debounce(pullLive, 500);
+  var pullLiveSoon = debounce(pullLive, 250);
   function toggleLive() {
     liveOn = !liveOn;
     if (liveOn) {
@@ -461,7 +412,7 @@ document.addEventListener('DOMContentLoaded', function () {
     } else {
       clearInterval(livePull); clearInterval(liveTick);
       if (liveCv) liveCv.remove();
-      liveCv = liveCtx = null; liveAc = []; liveTrails = {};
+      liveCv = liveCtx = null; liveAc = [];
       var n = document.getElementById('live-count'); if (n) n.textContent = '';
     }
     airFocus();
@@ -469,7 +420,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   map.on('move zoom', function () { if (liveOn) drawLive(); });
   map.on('resize', function () { if (liveOn) { sizeLive(); drawLive(); } });
-  map.on('moveend', function () { if (airOn) loadAir(); if (liveOn) pullLiveSoon(); });
+  map.on('moveend zoomend', function () { if (liveOn) pullLiveSoon(); });
 
   // Virgin cells sit purely on geometry, so some land in lakes/rivers (Lake Erie).
   // Snap the nearest ones to a road via /api/snap; cells with no drivable road
@@ -1360,12 +1311,10 @@ document.addEventListener('DOMContentLoaded', function () {
       '<span class="lyr-ic">⊚</span>' + esc(T.lyr_rings) + '</button>';
     rows += '<button type="button" class="lyr-row" data-layer="masts">' +
       '<span class="lyr-ic">📡</span>' + esc(T.lyr_masts) + '</button>';
-    rows += '<button type="button" class="lyr-row" data-layer="air">' +
-      '<span class="lyr-ic">✈</span>' + esc(T.lyr_air) + '</button>' +
+    rows += '<button type="button" class="lyr-row" data-layer="live">' +
+      '<span class="lyr-ic">◉</span>' + esc(T.lyr_live) + ' <span id="live-count" class="lyr-count"></span></button>' +
       '<div class="cov-ctrls"><div class="cov-line"><span>' + esc(T.air_mode) + '</span>' +
-        '<button type="button" class="cov-radius" id="air-mode">' + esc(T['air_mode_' + airMode]) + '</button></div></div>' +
-      '<button type="button" class="lyr-row" data-layer="live">' +
-      '<span class="lyr-ic">◉</span>' + esc(T.lyr_live) + ' <span id="live-count" class="lyr-count"></span></button>';
+        '<button type="button" class="cov-radius" id="air-mode">' + esc(T['air_mode_' + airMode]) + '</button></div></div>';
     rows += '<div class="lyr-sep"></div>' +
       '<button type="button" class="lyr-row" data-layer="cov"><span class="lyr-ic">▨</span>' + esc(T.lyr_cov) + '</button>' +
       '<div class="cov-ctrls">' +
@@ -1385,7 +1334,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function reflectLayers() {
     var box = document.getElementById('layers-box');
     if (!box) return;
-    var st = {virgin: virginOn, rings: ringsOn, masts: mastsOn, air: airOn, live: liveOn, cov: covOn};
+    var st = {virgin: virginOn, rings: ringsOn, masts: mastsOn, live: liveOn, cov: covOn};
     box.querySelectorAll('.lyr-row').forEach(function (row) {
       row.classList.toggle('on', !!st[row.dataset.layer]);
     });
@@ -1408,7 +1357,6 @@ document.addEventListener('DOMContentLoaded', function () {
       if (l === 'virgin') toggleVirgin();
       else if (l === 'rings') toggleRings();
       else if (l === 'masts') toggleMasts();
-      else if (l === 'air') toggleAir();
       else if (l === 'live') toggleLive();
       else if (l === 'cov') toggleCoverage();
     });
@@ -1417,7 +1365,7 @@ document.addEventListener('DOMContentLoaded', function () {
     airMode = AIR_MODES[(AIR_MODES.indexOf(airMode) + 1) % AIR_MODES.length];
     try { localStorage.setItem('wr_air_mode', airMode); } catch (e) {}
     this.textContent = T['air_mode_' + airMode];
-    renderAir();
+    pullLive();
   });
   document.getElementById('cov-radius').addEventListener('click', function () {
     var i = COV_RADII.indexOf(recRadius);

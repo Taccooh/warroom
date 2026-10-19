@@ -522,7 +522,7 @@ def air_cells(s: float, w: float, n: float, e: float,
 
 
 @app.get("/api/air/now")
-def air_now(s: float, w: float, n: float, e: float, background: BackgroundTasks,
+def air_now(s: float, w: float, n: float, e: float, background: BackgroundTasks, mode: str = "all",
             conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
     if not user:
         return JSONResponse({"error": "auth"}, status_code=401)
@@ -531,7 +531,7 @@ def air_now(s: float, w: float, n: float, e: float, background: BackgroundTasks,
     # Zoomed in on a region (<= ~600 km across): refresh it from adsb.lol after answering.
     if view[2] - view[0] <= 6.0 and config.AIR_SECONDS > 0:
         background.add_task(_near_bg, clat, clng)
-    return JSONResponse(air.now(conn, view, (clat, clng)))
+    return JSONResponse(air.now(conn, view, (clat, clng), mode))
 
 
 def _near_bg(lat: float, lng: float):

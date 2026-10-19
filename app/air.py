@@ -13,7 +13,7 @@ data instead. Three sources, each used for what it is good at:
 * adsb.lol military list, one request for the whole world.
 
 Only aggregates are kept long-term: counts per grid cell, split by altitude band and
-aircraft kind. Individual positions live for 40 minutes (live view + short trails).
+aircraft kind. Individual positions live for 40 minutes (live view only; no trails).
 """
 import json
 import logging
@@ -41,7 +41,7 @@ LOW_FT, HIGH_FT = 3000, 12000
 KIND_CIVIL, KIND_HELI, KIND_MIL = 0, 1, 2
 
 MAX_POS_AGE_S = 60      # drop positions older than this when sampling
-KEEP_S = 2400           # live rows and trail points are forgotten after this
+KEEP_S = 2400           # live rows are forgotten after this
 M_TO_FT, MS_TO_KT = 3.28084, 1.94384
 
 NEAR_NM = 108           # 200 km
@@ -52,7 +52,6 @@ MAX_VIEW = 2500         # aircraft handed to the client per request
 # first, then the fastest (cruising airliners show the routes best).
 THIN_SPAN = 8.0
 THIN_CELLS = 34
-TRAIL_SPAN = 20.0   # degrees across the view; wider than this, no trails
 
 _near_lock = threading.Lock()
 _near_done: dict[tuple, float] = {}   # (cell_lat, cell_lng) -> time of last fetch
@@ -190,13 +189,11 @@ def _store_live(conn, rows: list) -> None:
         "track = excluded.track, "
         "kind = MAX(kind, excluded.kind), t = excluded.t WHERE excluded.t > air_now.t",
         [r[:10] + r[11:] for r in rows if not r[10]])
-    conn.executemany("INSERT INTO air_trail (hex, ts, lat, lng) VALUES (?,?,?,?)",
-                     [(r[0], r[9], r[3], r[4]) for r in rows if not r[10]])
 
 
 def _prune(conn, now: int) -> None:
     conn.execute("DELETE FROM air_now WHERE t < ?", (now - KEEP_S,))
-    conn.execute("DELETE FROM air_trail WHERE ts < ?", (now - KEEP_S,))
+    conn.execute("DELETE FROM air_trail WHERE ts < ?", (now - KEEP_S,))  # leftovers of the old trails
 
 
 def _count(conn, rows: list) -> None:
@@ -326,12 +323,15 @@ def _thin(ac: list, cell: float) -> list:
     return list(best.values())
 
 
-def now(conn: sqlite3.Connection, bbox: tuple, center: tuple) -> dict:
+MODES = {"all": "", "low": " AND alt IS NOT NULL AND alt < 3000",
+         "heli": f" AND kind = {KIND_HELI}", "mil": f" AND kind = {KIND_MIL}"}
+
+
+def now(conn: sqlite3.Connection, bbox: tuple, center: tuple, mode: str = "all") -> dict:
     """Aircraft inside the view: [hex, callsign, type, lat, lng, alt, gs, track, kind, t,
     registration, squawk, vertical rate ft/min, country, category key, indicated airspeed].
     `t` is when the position was valid - the client dead-reckons forward from it. At most
-    MAX_VIEW rows, nearest to the view centre first. `trails` = recent [lat, lng] points
-    per returned aircraft, oldest first."""
+    MAX_VIEW rows, nearest to the view centre first."""
     s, w, n, e = bbox
     clat, clng = center
     if w <= e:
@@ -342,20 +342,12 @@ def now(conn: sqlite3.Connection, bbox: tuple, center: tuple) -> dict:
         "SELECT hex, callsign, type, lat, lng, alt, gs, track, kind, t, "
         "COALESCE(reg, ''), COALESCE(squawk, ''), vrate, COALESCE(country, ''), COALESCE(cat, ''), ias "
         "FROM air_now "
-        f"WHERE lat BETWEEN ? AND ? AND {lng_sql}", args)]
+        f"WHERE lat BETWEEN ? AND ? AND {lng_sql}{MODES.get(mode, '')}", args)]
     ac.sort(key=lambda a: (a[3] - clat) ** 2 + ((a[4] - clng + 180) % 360 - 180) ** 2)
     total = len(ac)
     span = max(n - s, (e - w) if e >= w else (e - w + 360.0))
-    if span >= THIN_SPAN:
+    # the rare kinds are never thinned: all helicopters / all military fit on the screen
+    if span >= THIN_SPAN and mode in ("all", "low"):
         ac = _thin(ac, span / THIN_CELLS)
     ac = ac[:MAX_VIEW]
-    keep = {a[0] for a in ac}
-    trails: dict[str, list] = {}
-    if keep and span < TRAIL_SPAN:   # wide views draw no trails - do not ship them
-        for r in conn.execute(
-                f"SELECT hex, lat, lng FROM air_trail WHERE ts > ? AND lat BETWEEN ? AND ? AND {lng_sql} "
-                "ORDER BY ts", [int(time.time()) - KEEP_S, *args]):
-            if r["hex"] in keep:
-                trails.setdefault(r["hex"], []).append([round(r["lat"], 3), round(r["lng"], 3)])
-    return {"last": int(db.kv_get(conn, "air_last", "0")), "total": total, "ac": ac,
-            "trails": {h: t for h, t in trails.items() if len(t) > 1}}
+    return {"last": int(db.kv_get(conn, "air_last", "0")), "total": total, "ac": ac}
