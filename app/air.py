@@ -39,6 +39,10 @@ KIND_CIVIL, KIND_HELI, KIND_MIL = 0, 1, 2
 # Positions older than this are extrapolation noise (receiver lost the aircraft).
 MAX_POS_AGE_S = 15
 
+# Short trails behind the live aircraft: positions of the last few snapshots, thrown away
+# after TRAIL_S. Not a flight history - just enough to see which way things are moving.
+TRAIL_S = 1800
+
 
 def band_of(alt) -> int:
     if alt == "ground":
@@ -117,7 +121,7 @@ def sample(conn: sqlite3.Connection, aircraft: list[dict]) -> int:
                          int(alt) if isinstance(alt, (int, float)) else None,
                          int(ac["gs"]) if isinstance(ac.get("gs"), (int, float)) else None,
                          int(ac["track"]) if isinstance(ac.get("track"), (int, float)) else None,
-                         kind))
+                         kind, int(ac.get("seen_pos") or 0)))
     with conn:
         conn.execute("BEGIN IMMEDIATE")
         conn.executemany(
@@ -126,8 +130,12 @@ def sample(conn: sqlite3.Connection, aircraft: list[dict]) -> int:
             [(*k, n) for k, n in counts.items()])
         conn.execute("DELETE FROM air_now")
         conn.executemany(
-            "INSERT INTO air_now (hex, callsign, type, lat, lng, alt, gs, track, kind) "
-            "VALUES (?,?,?,?,?,?,?,?,?)", live)
+            "INSERT INTO air_now (hex, callsign, type, lat, lng, alt, gs, track, kind, age) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)", live)
+        ts = int(time.time())
+        conn.executemany("INSERT INTO air_trail (hex, ts, lat, lng) VALUES (?,?,?,?)",
+                         [(a[0], ts - a[9], a[3], a[4]) for a in live])
+        conn.execute("DELETE FROM air_trail WHERE ts < ?", (ts - TRAIL_S,))
         if not db.kv_get(conn, "air_since"):
             db.kv_set(conn, "air_since", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
         db.kv_set(conn, "air_samples", int(db.kv_get(conn, "air_samples", "0")) + 1)
@@ -173,7 +181,15 @@ def cells(conn: sqlite3.Connection) -> dict:
 
 
 def now(conn: sqlite3.Connection) -> dict:
-    """The latest snapshot: [hex, callsign, type, lat, lng, alt, gs, track, kind]."""
+    """The latest snapshot: [hex, callsign, type, lat, lng, alt, gs, track, kind, age].
+    `age` = seconds the position was already old when sampled; the client adds the time
+    since `last` and dead-reckons from speed and track, so aircraft keep moving between
+    the 5-minute samples. `trails` = recent [lat, lng] points per aircraft, oldest first."""
     ac = [list(r) for r in conn.execute(
-        "SELECT hex, callsign, type, lat, lng, alt, gs, track, kind FROM air_now")]
-    return {"last": int(db.kv_get(conn, "air_last", "0")), "ac": ac}
+        "SELECT hex, callsign, type, lat, lng, alt, gs, track, kind, age FROM air_now")]
+    trails: dict[str, list] = {}
+    for r in conn.execute("SELECT hex, lat, lng FROM air_trail ORDER BY ts"):
+        trails.setdefault(r["hex"], []).append([round(r["lat"], 4), round(r["lng"], 4)])
+    # the newest trail point is the aircraft itself; keep trails only where there is a tail
+    trails = {h: t for h, t in trails.items() if len(t) > 1}
+    return {"last": int(db.kv_get(conn, "air_last", "0")), "ac": ac, "trails": trails}
