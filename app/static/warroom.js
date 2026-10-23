@@ -427,13 +427,27 @@ document.addEventListener('DOMContentLoaded', function () {
         liveDone = seq; liveAc = d.ac; liveTotal = d.total || d.ac.length; drawLive(); drawCircle();
       }).catch(function () {});
   }
-  // The 200 km scope shows its edge: a dashed ring around the centre.
+  // The 200 km scope shows its edge: a dashed ring around the centre. It is a line through points
+  // 200 km out (great circle, the same distance the server measures), NOT an L.circle: Leaflet
+  // clips lines to the view but draws a circle whole. Zoomed in close the circle was a million
+  // pixels across, and dashing it (200,000+ dashes on every redraw, i.e. on every pan, zoom and
+  // heading-up turn) froze phones - with none of it on screen.
+  function ringPoints(c, m) {
+    var d = m / 6371000, la = c.lat * Math.PI / 180, lo = c.lng * Math.PI / 180, pts = [];
+    for (var i = 0; i <= 720; i++) {                      // every half degree, closed
+      var b = i * Math.PI / 360,
+          la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(b)),
+          lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
+      pts.push([la2 * 180 / Math.PI, lo2 * 180 / Math.PI]);
+    }
+    return pts;
+  }
   function drawCircle() {
     if (airCircle) { map.removeLayer(airCircle); airCircle = null; }
     if (!liveOn || airScope !== 'r200') return;
     var c = airCentre();
-    airCircle = L.circle(c, {radius: 200000, color: '#5cc8ff', weight: 1.5, opacity: 0.8, dashArray: '6 8',
-      fill: false, interactive: false}).addTo(map);
+    airCircle = L.polyline(ringPoints(c, 200000), {color: '#5cc8ff', weight: 1.5, opacity: 0.8, dashArray: '6 8',
+      interactive: false}).addTo(map);
     if (!airFit) { airFit = true; map.fitBounds(airCircle.getBounds(), {padding: [10, 10]}); }
   }
   function setScope(sc) {
@@ -854,6 +868,15 @@ document.addEventListener('DOMContentLoaded', function () {
   var followZoomIn = false, zooming = false;
   map.on('zoomstart', function () { zooming = true; });
   map.on('zoomend moveend', function () { zooming = false; });
+  // While following, every zoom gesture zooms around the map centre - your position - the way
+  // navigation apps do. Around the fingers it slid your dot away until the next fix yanked the
+  // map back. Leaflet (and leaflet-rotate's pinch handler) read these options per gesture.
+  var zoomOpts = {touchZoom: map.options.touchZoom, doubleClickZoom: map.options.doubleClickZoom,
+                  scrollWheelZoom: map.options.scrollWheelZoom};
+  function setFollow(on) {
+    follow = on;
+    Object.keys(zoomOpts).forEach(function (k) { map.options[k] = on && zoomOpts[k] ? 'center' : zoomOpts[k]; });
+  }
   var here = document.getElementById('here');
   function freshTag() {
     var mins = Math.floor((Date.now() - dataAt) / 60000);
@@ -919,11 +942,11 @@ document.addEventListener('DOMContentLoaded', function () {
         iconAnchor: [9, 9], html: '<span></span>'}), zIndexOffset: 1000}).addTo(map);
       meCircle = L.circle(ll, {radius: acc, color: '#3b82f6', weight: 1, fillOpacity: 0.08}).addTo(map);
     } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(acc); }
-    if (follow) {
-      if (followZoomIn) { followZoomIn = false; map.setView(ll, Math.max(map.getZoom(), 13)); }
-      else if (!zooming) map.setView(ll, map.getZoom());
-      if (rotateOn) applyHeading(p, lat, lng);
+    if (follow && !zooming) {           // mid-zoom Leaflet would drop the request: the next fix does it
+      map.setView(ll, followZoomIn ? Math.max(map.getZoom(), 13) : map.getZoom());
+      followZoomIn = false;
     }
+    if (follow && rotateOn) applyHeading(p, lat, lng);
     updateHere(lat, lng);
     maybePush(lat, lng);
     navUpdate(lat, lng);
@@ -1058,9 +1081,9 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!watchId) {
       watchId = navigator.geolocation.watchPosition(onPos, onPosErr,
         {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
-      follow = true; followZoomIn = true; btn.classList.add('active'); setRotate(true);
+      setFollow(true); followZoomIn = true; btn.classList.add('active'); setRotate(true);
     } else {
-      follow = !follow; btn.classList.toggle('active', follow);
+      setFollow(!follow); btn.classList.toggle('active', follow);
       setRotate(follow);
       if (follow && meMarker) map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 13));
       else if (follow) followZoomIn = true;
@@ -1092,7 +1115,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   function setManualPos(lat, lng) {
     if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-    follow = false; setRotate(false);   // manual pin → north-up, no live heading
+    setFollow(false); setRotate(false);   // manual pin → north-up, no live heading
     var lb = document.getElementById('loc-btn'); if (lb) lb.classList.remove('active');
     var ll = [lat, lng];
     if (!meMarker) {
@@ -1339,7 +1362,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!watchId) {   // recording implies GPS follow — start it like the ◎ button does
       watchId = navigator.geolocation.watchPosition(onPos, onPosErr,
         {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
-      follow = true; followZoomIn = true; setRotate(true); var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
+      setFollow(true); followZoomIn = true; setRotate(true); var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
     }
     recOn = true; covLast = null;
     try { localStorage.setItem('wr_cov_rec', '1'); } catch (e) {}   // survive reload/close -> auto-resume
@@ -2373,7 +2396,7 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('tour-go').textContent = T.tour_stop_nav;
     if (!watchId && navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition(onPos, onPosErr, {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
-      follow = true; followZoomIn = true; var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
+      setFollow(true); followZoomIn = true; var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
     }
     if (follow) setRotate(true);   // turn-by-turn wants heading-up too
     var mp = myPos(); if (mp) navUpdate(mp.lat, mp.lng);
