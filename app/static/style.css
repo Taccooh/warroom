@@ -1559,3 +1559,31 @@ body.doc { scroll-behavior: smooth; }
    is not enough: the paths must be switched off one by one. */
 .air-focus .leaflet-overlay-pane svg, .air-focus .leaflet-overlay-pane svg path { pointer-events: none !important; }
 .lyr-count { margin-left: .4em; opacity: .7; font-size: .85em; }
+.air-finder-btn { flex: 1; color: var(--gold); border-color: var(--gold-dim); }
+
+/* Aircraft finder: full-screen camera-style view, drawn on one canvas over the camera picture.
+   Every element with its own display also needs its [hidden] rule (the attribute alone loses). */
+.finder { position: fixed; inset: 0; z-index: 3000; background: #05080c; overflow: hidden;
+  touch-action: none; user-select: none; -webkit-user-select: none; }
+.finder[hidden] { display: none; }
+.finder-video, .finder-cv { position: absolute; inset: 0; width: 100%; height: 100%; }
+.finder-video { object-fit: cover; }
+.finder-video[hidden] { display: none; }
+.finder-top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: .5rem;
+  padding: calc(env(safe-area-inset-top) + .55rem) .8rem 1.4rem;
+  background: linear-gradient(rgba(5, 8, 12, .85), rgba(5, 8, 12, 0)); }
+.finder-title { flex: 1; font-family: var(--display); color: var(--gold); font-size: 1.3rem; letter-spacing: .02em; }
+.finder-btn { width: 2.7rem; height: 2.7rem; border: 1px solid var(--edge); background: rgba(14, 19, 27, .82);
+  color: var(--text); font-size: 1.15rem; clip-path: var(--notch); cursor: pointer; }
+.finder-btn.off { opacity: .4; }
+.finder-msg { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: min(82%, 22rem);
+  text-align: center; color: var(--text); background: rgba(5, 8, 12, .78); padding: .75rem 1rem;
+  clip-path: var(--notch); line-height: 1.4; }
+.finder-msg[hidden] { display: none; }
+.finder-card { position: absolute; left: .8rem; right: .8rem; bottom: calc(env(safe-area-inset-bottom) + .8rem);
+  padding: .65rem .9rem; background: rgba(10, 14, 21, .86); border: 1px solid var(--edge); color: var(--text);
+  font-size: .88rem; line-height: 1.38; clip-path: var(--notch); max-height: 38vh; overflow: auto; }
+.finder-card.locked { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold-dim); }
+.finder-card a { color: var(--gold); }
+.finder-card small { color: var(--muted); }
+body.wr-finder { overflow: hidden; }

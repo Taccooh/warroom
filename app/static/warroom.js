@@ -485,6 +485,310 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 
+  // ---- Aircraft finder: hold the phone up and see where the aircraft are in the sky ----
+  // A camera-style view (the live camera picture when allowed, a drawn sky otherwise) with
+  // every aircraft within 200 km placed where it is in the sky: the direction from the phone's
+  // full orientation (compass and tilt), the height above the horizon from altitude, distance
+  // and the curve of the earth. Arrows at the edge lead to the nearest ones out of view; the
+  // one in the centre locks and shows its details. Everything runs here in the browser - the
+  // camera picture never leaves the phone.
+  var FD_VFOV = 64;                  // degrees across the screen height (phone main camera, cover-fitted)
+  var FD_REARTH = 6371000 * 4 / 3;   // earth radius with standard refraction: drop of the horizon
+  var fd = null;                     // finder state while open
+  function fdDot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+  function fdNorm(a) { var l = Math.sqrt(fdDot(a, a)) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+  // Device orientation (W3C: R = Rz(alpha) Rx(beta) Ry(gamma), world = East-North-Up) turned
+  // into the screen's right and up and the back camera's forward direction, in world terms.
+  // The full rotation is used, never alpha alone: held upright (where the finder lives) alpha
+  // and gamma trade places from one event to the next, only their combination is stable.
+  function fdBasis(alpha, beta, gamma, scr) {
+    var d = Math.PI / 180, ca = Math.cos(alpha * d), sa = Math.sin(alpha * d), cb = Math.cos(beta * d),
+        sb = Math.sin(beta * d), cg = Math.cos(gamma * d), sg = Math.sin(gamma * d);
+    var x = [ca * cg - sa * sb * sg, sa * cg + ca * sb * sg, -cb * sg],   // device x (right edge)
+        y = [-sa * cb, ca * cb, sb],                                        // device y (top edge)
+        z = [ca * sg + sa * sb * cg, sa * sg - ca * sb * cg, cb * cg];      // out of the screen
+    var cs = Math.cos(scr * d), ss = Math.sin(scr * d);                    // landscape turns the screen
+    return {right: [cs * x[0] - ss * y[0], cs * x[1] - ss * y[1], cs * x[2] - ss * y[2]],
+            up: [ss * x[0] + cs * y[0], ss * x[1] + cs * y[1], ss * x[2] + cs * y[2]],
+            fwd: [-z[0], -z[1], -z[2]]};
+  }
+  function fdOrtho(b) {
+    var f = fdNorm(b.fwd), r = b.right, k = fdDot(r, f);
+    r = fdNorm([r[0] - k * f[0], r[1] - k * f[1], r[2] - k * f[2]]);
+    var u = b.up, ku = fdDot(u, f), kr = fdDot(u, r);
+    u = fdNorm([u[0] - ku * f[0] - kr * r[0], u[1] - ku * f[1] - kr * r[1], u[2] - ku * f[2] - kr * r[2]]);
+    return {right: r, up: u, fwd: f};
+  }
+  function fdOrient(e) {
+    if (!fd || e.beta == null || e.gamma == null) return;
+    var alpha;
+    if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading) && e.alpha != null) {
+      // iOS: alpha counts from wherever the phone pointed at start, the compass heading gives
+      // the offset to north. Learnt while the phone is not near upright (see fdBasis).
+      var off = e.alpha + e.webkitCompassHeading;
+      if (fd.iosOff == null) fd.iosOff = off;
+      else if (Math.abs(e.beta) < 65) fd.iosOff += 0.1 * angDiff(off, fd.iosOff);
+      alpha = e.alpha - fd.iosOff;
+    } else if (e.absolute === true && e.alpha != null) {
+      alpha = e.alpha;
+    } else return;                       // relative-only orientation: no north, useless here
+    var scr = 0;
+    try { scr = (screen.orientation && screen.orientation.angle) || window.orientation || 0; } catch (x) {}
+    fd.target = fdBasis(alpha, e.beta, e.gamma, scr);   // fdFrame eases the view towards it
+  }
+  // Where an aircraft is in the sky seen from p: unit vector East-North-Up, distance, elevation.
+  function fdSky(a, p, nowS, ahead) {
+    var pos = acPos(a, nowS, -(ahead || 0)), q = {lat: pos[0], lng: pos[1]};
+    var d = hav(p, q) * 1000, b = bearing(p, q) * Math.PI / 180;
+    var el = Math.atan2(a[5] * 0.3048 - (p.alt || 0) - d * d / (2 * FD_REARTH), d);
+    return {v: [Math.cos(el) * Math.sin(b), Math.cos(el) * Math.cos(b), Math.sin(el)], km: d / 1000,
+            el: el * 180 / Math.PI};
+  }
+  function fdPull() {
+    var p = fd && (fd.pos || myPos());
+    if (!p) return;
+    fd.pulled = true;
+    fetch('/api/air/now?r=200&clat=' + p.lat.toFixed(3) + '&clng=' + p.lng.toFixed(3) + '&mode=all&s=0&w=0&n=0&e=0',
+          {credentials: 'same-origin'}).then(function (r) { return r.json(); })
+      .then(function (d) { if (fd && d && d.ac) fd.ac = d.ac; }).catch(function () {});
+  }
+  function fdCamera(on) {
+    var v = fd.video;
+    if (fd.stream) { fd.stream.getTracks().forEach(function (t) { t.stop(); }); fd.stream = null; }
+    fd.cam = false; v.srcObject = null; v.hidden = true;
+    fd.el.querySelector('#finder-cam').classList.toggle('off', !on);
+    if (!on || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}}, audio: false})
+      .then(function (s) {
+        if (!fd) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
+        fd.stream = s; v.srcObject = s; v.hidden = false; fd.cam = true;
+        var pl = v.play(); if (pl && pl.catch) pl.catch(function () {});
+      }).catch(function () { if (fd) fd.el.querySelector('#finder-cam').classList.add('off'); });
+  }
+  function fdMsg(s) {
+    var m = fd.el.querySelector('#finder-msg');
+    if (m.textContent !== s) m.textContent = s;
+    m.hidden = !s;
+  }
+  // No camera: a drawn sky, the ground below the true horizon. The horizon is where a view
+  // ray has no upward part, which on screen is a straight line - also with the phone rolled.
+  function fdSkyBg(c, W, H, B, f) {
+    var g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0b1a2e'); g.addColorStop(1, '#1b3550');
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+    if (!B) return;
+    var side = function (x, y) { return B.fwd[2] * f + (x - W / 2) * B.right[2] - (y - H / 2) * B.up[2]; };
+    var pts = [[0, 0], [W, 0], [W, H], [0, H]], poly = [];
+    for (var i = 0; i < 4; i++) {
+      var p = pts[i], q = pts[(i + 1) % 4], sp = side(p[0], p[1]), sq = side(q[0], q[1]);
+      if (sp < 0) poly.push(p);
+      if ((sp < 0) !== (sq < 0)) { var t = sp / (sp - sq); poly.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]); }
+    }
+    if (poly.length < 3) return;
+    c.fillStyle = '#0a0d10'; c.beginPath(); c.moveTo(poly[0][0], poly[0][1]);
+    for (i = 1; i < poly.length; i++) c.lineTo(poly[i][0], poly[i][1]);
+    c.closePath(); c.fill();
+  }
+  function fdFrame() {
+    if (!fd) return;
+    fd.raf = requestAnimationFrame(fdFrame);
+    var cv = fd.cv, dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = cv.clientHeight;
+    if (!W || !H) return;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    }
+    var c = fd.ctx, now = Date.now(), nowS = now / 1000, cx = W / 2, cy = H / 2;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+    // The sensor jitters, the view must not: ease towards the latest reading once per frame
+    // (per frame, not per event - some phones only send when the value changes).
+    if (fd.target && !fd.basis) fd.basis = {right: fd.target.right.slice(), up: fd.target.up.slice(), fwd: fd.target.fwd.slice()};
+    else if (fd.target) ['right', 'up', 'fwd'].forEach(function (k) {
+      for (var i = 0; i < 3; i++) fd.basis[k][i] += 0.25 * (fd.target[k][i] - fd.basis[k][i]);
+    });
+    var B = fd.basis ? fdOrtho(fd.basis) : null, f = cy / Math.tan(FD_VFOV * Math.PI / 360);
+    if (!fd.cam) fdSkyBg(c, W, H, B, f);
+    var p = fd.pos || myPos();
+    if (!p) { fdMsg(T.finder_wait_pos); return; }
+    if (!B) { fdMsg(now - fd.opened > 5000 ? T.finder_no_compass : T.finder_wait_compass); return; }
+    fdMsg('');
+    function proj(v) {
+      var X = fdDot(v, B.right), Y = fdDot(v, B.up), Z = fdDot(v, B.fwd);
+      return {X: X, Y: Y, Z: Z, x: cx + X / Z * f, y: cy - Y / Z * f};
+    }
+    function onScreen(q, m) { return q.Z > 0.1 && q.x > -m && q.x < W + m && q.y > -m && q.y < H + m; }
+    // horizon with compass scale: a tick every 15 degrees, a label every 45
+    var dirs = T.finder_dirs.split(','), prev = null, az, r, q, q2;
+    c.lineWidth = 1.4; c.strokeStyle = 'rgba(232,182,76,.8)';
+    c.beginPath();
+    for (az = 0; az <= 360; az += 2) {
+      r = az * Math.PI / 180; q = proj([Math.sin(r), Math.cos(r), 0]);
+      if (q.Z > 0.15) { if (prev) c.lineTo(q.x, q.y); else c.moveTo(q.x, q.y); prev = q; } else prev = null;
+    }
+    c.stroke();
+    c.font = '700 14px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (az = 0; az < 360; az += 15) {
+      r = az * Math.PI / 180; q = proj([Math.sin(r), Math.cos(r), 0]);
+      if (!onScreen(q, 20)) continue;
+      var big = az % 45 === 0, e2 = (big ? 2.2 : 1.1) * Math.PI / 180;
+      q2 = proj([Math.cos(e2) * Math.sin(r), Math.cos(e2) * Math.cos(r), Math.sin(e2)]);
+      c.beginPath(); c.moveTo(q.x, q.y); c.lineTo(q2.x, q2.y); c.stroke();
+      if (big) {
+        var e3 = 4 * Math.PI / 180, q3 = proj([Math.cos(e3) * Math.sin(r), Math.cos(e3) * Math.cos(r), Math.sin(e3)]);
+        c.fillStyle = 'rgba(5,8,12,.55)'; c.fillRect(q3.x - 16, q3.y - 10, 32, 20);
+        c.fillStyle = az === 0 ? '#ff8d92' : '#e8b64c'; c.fillText(dirs[az / 45], q3.x, q3.y);
+      }
+    }
+    // aircraft: sky position for each, nearest first
+    var list = [];
+    fd.ac.forEach(function (a) {
+      if (a[5] == null) return;
+      var s = fdSky(a, p, nowS);
+      if (s.km > 210 || s.el < -1) return;
+      s.a = a; s.q = proj(s.v); list.push(s);
+    });
+    list.sort(function (m, n) { return m.km - n.km; });
+    var inView = list.filter(function (s) { return onScreen(s.q, 30); });
+    var lock = null, best = Math.pow(Math.min(W, H) * 0.18, 2);
+    inView.forEach(function (s) {
+      var dx = s.q.x - cx, dy = s.q.y - cy;
+      if (dx * dx + dy * dy < best) { best = dx * dx + dy * dy; lock = s; }
+    });
+    var pulse = (now % 1600) / 1600, placed = [];
+    // Labels must not pile up (two aircraft in the same direction): shift a box down until free.
+    function freeY(x, y, w, h) {
+      for (var k = 0; k < 6; k++, y += h + 3) {
+        if (!placed.some(function (r) { return x < r[0] + r[2] && r[0] < x + w && y < r[1] + r[3] && r[1] < y + h; })) break;
+      }
+      placed.push([x, y, w, h]);
+      return y;
+    }
+    // reticle in the centre
+    c.strokeStyle = lock ? 'rgba(255,209,94,.95)' : 'rgba(217,224,232,.55)'; c.lineWidth = 1.5;
+    c.beginPath(); c.arc(cx, cy, 22, 0, 6.2832); c.stroke();
+    c.beginPath(); c.moveTo(cx - 32, cy); c.lineTo(cx - 14, cy); c.moveTo(cx + 14, cy); c.lineTo(cx + 32, cy);
+    c.moveTo(cx, cy - 32); c.lineTo(cx, cy - 14); c.moveTo(cx, cy + 14); c.lineTo(cx, cy + 32); c.stroke();
+    // in view: far ones first so the near ones end up on top; labels for the nearest dozen
+    inView.slice().reverse().forEach(function (s) {
+      var a = s.a, col = acColor(a), k = Math.max(0.75, Math.min(1.7, 1.7 - s.km / 120));
+      var ahead = proj(fdSky(a, p, nowS, 60).v), ang = Math.atan2(ahead.x - s.q.x, -(ahead.y - s.q.y));
+      c.globalAlpha = 0.5 * (1 - pulse); c.strokeStyle = col; c.lineWidth = 2;
+      c.beginPath(); c.arc(s.q.x, s.q.y, 12 * k + 16 * pulse, 0, 6.2832); c.stroke(); c.globalAlpha = 1;
+      c.save(); c.translate(s.q.x, s.q.y); c.scale(k, k);
+      c.fillStyle = col; c.strokeStyle = '#0b0f14'; c.lineWidth = 1.2 / k;
+      if (a[8] === 1) { c.beginPath(); c.arc(0, 0, 7, 0, 6.2832); c.fill(); c.stroke(); }
+      else { c.rotate(ang); c.translate(-12, -12); c.fill(PLANE_PATH); c.stroke(PLANE_PATH); }
+      c.restore();
+      if (s === lock || inView.indexOf(s) < 12) {
+        var name = a[1] || a[10] || a[0].toUpperCase(),
+            sub = Math.round(s.km) + ' km · ' + Math.round(a[5] * 0.3048).toLocaleString() + ' m';
+        c.font = '700 13px system-ui, sans-serif'; c.textAlign = 'left';
+        var w = Math.max(c.measureText(name).width, c.measureText(sub).width) + 10, lx = s.q.x + 16 * k,
+            ly = freeY(lx - 4, s.q.y - 24, w, 34) + 10;
+        c.fillStyle = 'rgba(5,8,12,.62)'; c.fillRect(lx - 4, ly - 10, w, 34);
+        c.fillStyle = '#fff'; c.fillText(name, lx, ly);
+        c.font = '12px system-ui, sans-serif'; c.fillStyle = 'rgba(217,224,232,.85)'; c.fillText(sub, lx, ly + 15);
+      }
+    });
+    if (lock) {   // turning dashes around the locked aircraft
+      c.save(); c.translate(lock.q.x, lock.q.y); c.rotate(now / 600);
+      c.strokeStyle = '#ffd15e'; c.lineWidth = 2.5; c.setLineDash([9, 7]);
+      c.beginPath(); c.arc(0, 0, 30, 0, 6.2832); c.stroke(); c.restore();
+    }
+    // out of view: arrows at the edge to the four nearest, pointing the way to turn
+    // (all arrows first, then their labels, so no arrow covers a label)
+    var edge = list.filter(function (s) { return !onScreen(s.q, 30); }).slice(0, 4).map(function (s, i) {
+      var ang = Math.atan2(s.q.X, s.q.Y), dx = Math.sin(ang), dy = -Math.cos(ang), m = 44;
+      var t = Math.min(dx > 0 ? (W - m - cx) / dx : dx < 0 ? (m - cx) / dx : Infinity,
+                       dy > 0 ? (H - m - 70 - cy) / dy : dy < 0 ? (m + 60 - cy) / dy : Infinity);
+      var ex = cx + dx * t, ey = cy + dy * t, bob = 5 * Math.sin(now / 260 + i);
+      c.save(); c.translate(ex + dx * bob, ey + dy * bob); c.rotate(ang);
+      c.fillStyle = acColor(s.a); c.strokeStyle = '#0b0f14'; c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(0, -15); c.lineTo(11, 8); c.lineTo(0, 3); c.lineTo(-11, 8); c.closePath();
+      c.fill(); c.stroke(); c.restore();
+      return {s: s, x: ex - dx * 34, y: ey - dy * 30};
+    });
+    c.font = '700 12px system-ui, sans-serif'; c.textAlign = 'center';
+    edge.forEach(function (e) {
+      var lbl = (e.s.a[1] || e.s.a[0].toUpperCase()) + ' · ' + Math.round(e.s.km) + ' km';
+      var lw = c.measureText(lbl).width + 10, lx2 = Math.max(lw / 2 + 4, Math.min(W - lw / 2 - 4, e.x)),
+          ly2 = freeY(lx2 - lw / 2, Math.max(70, Math.min(H - 90, e.y)) - 9, lw, 18) + 9;
+      c.fillStyle = 'rgba(5,8,12,.62)'; c.fillRect(lx2 - lw / 2, ly2 - 9, lw, 18);
+      c.fillStyle = '#fff'; c.fillText(lbl, lx2, ly2);
+    });
+    // card: details of the locked aircraft, otherwise the count and how to use it
+    var lockHex = lock ? lock.a[0] : null;
+    if (lockHex !== fd.lockHex || now - fd.cardAt > 1000) {
+      if (lockHex && lockHex !== fd.lockHex && navigator.vibrate) { try { navigator.vibrate(25); } catch (x) {} }
+      fd.lockHex = lockHex; fd.cardAt = now;
+      var card = fd.el.querySelector('#finder-card');
+      card.classList.toggle('locked', !!lock);
+      card.innerHTML = lock ? acPopup(lock.a) + '<br><b>' + esc(tf(T.finder_where,
+          {km: Math.round(lock.km), d: Math.round(lock.el)})) + '</b>'
+        : esc(list.length ? tf(T.finder_count, {n: list.length}) : T.finder_none) + '<br><small>' + esc(T.finder_hint) + '</small>';
+    }
+  }
+  function buildFinder() {
+    var el = document.createElement('div');
+    el.id = 'finder'; el.className = 'finder'; el.hidden = true;
+    el.innerHTML = '<video class="finder-video" playsinline muted autoplay hidden></video>' +
+      '<canvas class="finder-cv"></canvas>' +
+      '<div class="finder-top"><span class="finder-title">' + esc(T.finder_title) + '</span>' +
+      '<button type="button" class="finder-btn" id="finder-cam" title="' + esc(T.finder_cam) + '" aria-label="' +
+        esc(T.finder_cam) + '">📷</button>' +
+      '<button type="button" class="finder-btn" id="finder-close" title="' + esc(T.finder_close) + '" aria-label="' +
+        esc(T.finder_close) + '">✕</button></div>' +
+      '<div class="finder-msg" id="finder-msg" hidden></div>' +
+      '<div class="finder-card" id="finder-card"></div>';
+    document.body.appendChild(el);
+    el.querySelector('#finder-close').addEventListener('click', closeFinder);
+    el.querySelector('#finder-cam').addEventListener('click', function () {
+      if (!fd) return;
+      var on = !fd.stream;
+      try { localStorage.setItem('wr_finder_cam', on ? '1' : '0'); } catch (e) {}
+      fdCamera(on);
+    });
+    return el;
+  }
+  function openFinder() {
+    if (fd) return;
+    var el = document.getElementById('finder') || buildFinder();
+    fd = {el: el, cv: el.querySelector('.finder-cv'), video: el.querySelector('.finder-video'), ac: [],
+          basis: null, iosOff: null, pos: null, opened: Date.now(), lockHex: undefined, cardAt: 0};
+    fd.ctx = fd.cv.getContext('2d');
+    el.hidden = false; document.body.classList.add('wr-finder');
+    // iOS asks for the motion sensors once, and only from a tap - this one
+    var DOE = window.DeviceOrientationEvent, attach = function () {
+      window.addEventListener('deviceorientationabsolute', fdOrient, true);
+      window.addEventListener('deviceorientation', fdOrient, true);
+    };
+    if (DOE && typeof DOE.requestPermission === 'function') {
+      DOE.requestPermission().then(function (s) { if (s === 'granted') attach(); }).catch(function () {});
+    } else attach();
+    var camOn = true;
+    try { camOn = localStorage.getItem('wr_finder_cam') !== '0'; } catch (e) {}
+    fdCamera(camOn);
+    if (navigator.geolocation) fd.watch = navigator.geolocation.watchPosition(function (g) {
+      if (!fd) return;
+      fd.pos = {lat: g.coords.latitude, lng: g.coords.longitude, alt: g.coords.altitude || 0};
+      if (!fd.pulled) fdPull();
+    }, function () {}, {enableHighAccuracy: true, maximumAge: 5000, timeout: 20000});
+    fdPull(); fd.pullT = setInterval(fdPull, 10000);
+    fd.raf = requestAnimationFrame(fdFrame);
+  }
+  function closeFinder() {
+    if (!fd) return;
+    cancelAnimationFrame(fd.raf); clearInterval(fd.pullT);
+    if (fd.watch != null) navigator.geolocation.clearWatch(fd.watch);
+    window.removeEventListener('deviceorientationabsolute', fdOrient, true);
+    window.removeEventListener('deviceorientation', fdOrient, true);
+    if (fd.stream) fd.stream.getTracks().forEach(function (t) { t.stop(); });
+    fd.video.srcObject = null;
+    fd.el.hidden = true; document.body.classList.remove('wr-finder');
+    fd = null;
+  }
+  // Leaving the app (or locking the phone) closes it: no camera running in the background.
+  document.addEventListener('visibilitychange', function () { if (document.hidden) closeFinder(); });
+
   // Virgin cells sit purely on geometry, so some land in lakes/rivers (Lake Erie).
   // Snap the nearest ones to a road via /api/snap; cells with no drivable road
   // (water/forest) come back null → drop them from virginCells. This runs once on load
@@ -1400,7 +1704,9 @@ document.addEventListener('DOMContentLoaded', function () {
       '<div class="cov-ctrls"><div class="cov-line"><span>' + esc(T.air_scope) + '</span>' +
         '<button type="button" class="cov-radius" id="air-scope">' + esc(T['air_scope_' + airScope]) + '</button></div>' +
       '<div class="cov-line"><span>' + esc(T.air_mode) + '</span>' +
-        '<button type="button" class="cov-radius" id="air-mode">' + esc(T['air_mode_' + airMode]) + '</button></div></div>';
+        '<button type="button" class="cov-radius" id="air-mode">' + esc(T['air_mode_' + airMode]) + '</button></div>' +
+      '<div class="cov-line"><button type="button" class="cov-radius air-finder-btn" id="air-finder">' +
+        esc(T.air_finder) + '</button></div></div>';
     rows += '<div class="lyr-sep"></div>' +
       '<button type="button" class="lyr-row" data-layer="cov"><span class="lyr-ic">▨</span>' + esc(T.lyr_cov) + '</button>' +
       '<div class="cov-ctrls">' +
@@ -1449,6 +1755,10 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   document.getElementById('air-scope').addEventListener('click', function () {
     setScope(airScope === 'world' ? 'r200' : 'world');
+  });
+  document.getElementById('air-finder').addEventListener('click', function () {
+    document.getElementById('layers-box').hidden = true;
+    openFinder();
   });
   document.getElementById('air-mode').addEventListener('click', function () {
     airMode = AIR_MODES[(AIR_MODES.indexOf(airMode) + 1) % AIR_MODES.length];

@@ -676,6 +676,23 @@ JS = {
     "air_cat_uav": {"en": "drone (UAV)", "de": "Drohne (UAV)"},
     "air_cat_space": {"en": "space vehicle", "de": "Raumfahrzeug"},
     "air_cat_vehicle": {"en": "ground vehicle", "de": "Bodenfahrzeug"},
+    # Aircraft finder: camera-style view, aircraft placed in the sky by phone orientation
+    "air_finder": {"en": "🔭 Aircraft finder", "de": "🔭 Flugzeug-Finder"},
+    "finder_title": {"en": "Aircraft finder", "de": "Flugzeug-Finder"},
+    "finder_hint": {"en": "Hold the phone up to the sky. The arrows lead to the nearest aircraft.",
+                    "de": "Halte das Handy in den Himmel. Die Pfeile führen zu den nächsten Flugzeugen."},
+    "finder_wait_pos": {"en": "Waiting for your position…", "de": "Warte auf deine Position…"},
+    "finder_wait_compass": {"en": "Waiting for the compass… If it stays stuck, move the phone in a figure eight.",
+                            "de": "Warte auf den Kompass… Bleibt es hängen: Handy in einer Acht bewegen."},
+    "finder_no_compass": {"en": "No compass on this device — the finder needs one.",
+                          "de": "Dieses Gerät hat keinen Kompass – den braucht der Finder."},
+    "finder_cam_off": {"en": "Camera off — drawn sky", "de": "Kamera aus – gezeichneter Himmel"},
+    "finder_cam": {"en": "Camera on/off", "de": "Kamera an/aus"},
+    "finder_close": {"en": "Close", "de": "Schließen"},
+    "finder_count": {"en": "{n} aircraft within 200 km", "de": "{n} Flugzeuge im 200-km-Umkreis"},
+    "finder_none": {"en": "No aircraft within 200 km right now.", "de": "Gerade kein Flugzeug im 200-km-Umkreis."},
+    "finder_where": {"en": "{km} km away · {d}° above the horizon", "de": "{km} km entfernt · {d}° über dem Horizont"},
+    "finder_dirs": {"en": "N,NE,E,SE,S,SW,W,NW", "de": "N,NO,O,SO,S,SW,W,NW"},
     # GSM masts: informational overlay of towers logged per cell (they count as
     # ordinary scans since wdgwars reverted the mast-ownership experiment)
     "lyr_masts": {"en": "GSM masts", "de": "GSM-Masten"},
