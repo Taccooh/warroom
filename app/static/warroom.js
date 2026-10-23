@@ -907,32 +907,36 @@ document.addEventListener('DOMContentLoaded', function () {
     here.className = cls;
     here.innerHTML = html + freshTag();   // append the data-freshness segment
   }
-  // GPS course finding. A bearing from consecutive 1-s fixes at low speed is
-  // GPS jitter pointing anywhere, so the anchor-fix method only trusts a
-  // direction after >12 m of real movement (or the GPS heading field above
-  // ~3 km/h). When the device compass is active the GPS course only CALIBRATES
-  // the sensor's mount offset; otherwise it drives the heading directly.
+  // GPS course finding. Standing still - indoors, at a light, parked - GPS wanders by tens
+  // of meters, and a bearing between two such fixes points anywhere. It used to count as a
+  // course from 12 m on: with the phone lying still pointing at 60 deg the map swung between
+  // 35 and 111. A course now needs real movement: the receiver's own heading (Doppler, only
+  // reported while moving), or a displacement well beyond the fix's own uncertainty.
+  // When the device compass is active the GPS course only CALIBRATES the sensor's mount
+  // offset, and only from the receiver's heading; otherwise it drives the heading directly.
   var headAnchor = null;
   function gpsCourse(p, lat, lng) {
-    var here2 = {lat: lat, lng: lng}, spd = p.coords.speed;
-    if (typeof p.coords.heading === 'number' && !isNaN(p.coords.heading)
-        && spd != null && spd > 0.8) { headAnchor = here2; return p.coords.heading; }
-    if (!headAnchor) { headAnchor = here2; return null; }
-    if (hav(headAnchor, here2) > 0.012) {
-      var b = bearing(headAnchor, here2); headAnchor = here2; return b;
+    var here2 = {lat: lat, lng: lng}, c = p.coords, spd = c.speed;
+    if (typeof c.heading === 'number' && !isNaN(c.heading) && spd != null && spd > 1.5) {
+      headAnchor = here2; return {deg: c.heading, receiver: true};
+    }
+    if (!headAnchor || (spd != null && spd < 0.5)) { headAnchor = here2; return null; }   // not moving
+    if (hav(headAnchor, here2) * 1000 > Math.max(25, 3 * (c.accuracy || 50))) {
+      var b = bearing(headAnchor, here2); headAnchor = here2; return {deg: b, receiver: false};
     }
     return null;
   }
   function applyHeading(p, lat, lng) {
     var course = gpsCourse(p, lat, lng);
-    if (course == null) return;
+    if (!course) return;
     if (sensorActive && sensorHeading != null) {
+      if (!course.receiver) return;   // the compass alone beats a course pieced together from fixes
       // slowly align the smooth sensor signal to the real travel direction
-      var off = angDiff(course, sensorHeading);
+      var off = angDiff(course.deg, sensorHeading);
       headOffset = headOffsetSet ? (headOffset + 0.3 * angDiff(off, headOffset)) : off;
       headOffsetSet = true;
     } else {
-      setTarget(course);   // no compass → GPS drives the rotation
+      setTarget(course.deg);   // no compass → GPS drives the rotation
     }
   }
   function onPos(p) {
