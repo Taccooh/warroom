@@ -346,6 +346,9 @@ document.addEventListener('DOMContentLoaded', function () {
     var sz = map.getSize(), z = map.getZoom(), nowS = Date.now() / 1000;
     liveCtx.clearRect(0, 0, sz.x, sz.y);
     var k = z < 4 ? 0.5 : z < 6 ? 0.65 : z < 9 ? 0.85 : 1.1;
+    // Heading-up turns the map but not this canvas: positions come out of
+    // latLngToContainerPoint already turned, a symbol's angle has to add the bearing itself.
+    var brg = map.getBearing ? map.getBearing() : 0;
     liveAc.forEach(function (a) {
       var q = map.latLngToContainerPoint(acPos(a, nowS));
       if (q.x < -40 || q.y < -40 || q.x > sz.x + 40 || q.y > sz.y + 40) return;
@@ -363,7 +366,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (a[8] === 1) {                                 // helicopter: rotor disc
         liveCtx.beginPath(); liveCtx.arc(0, 0, 6, 0, 6.2832); liveCtx.fill(); liveCtx.stroke();
       } else {
-        liveCtx.rotate((a[7] || 0) * Math.PI / 180); liveCtx.translate(-12, -12);
+        liveCtx.rotate(((a[7] || 0) + brg) * Math.PI / 180); liveCtx.translate(-12, -12);
         liveCtx.fill(PLANE_PATH); liveCtx.stroke(PLANE_PATH);
       }
       liveCtx.restore();
