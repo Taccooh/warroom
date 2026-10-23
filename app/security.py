@@ -42,10 +42,15 @@ _CSP_DIRECTIVES = {
 _CSP = "; ".join(f"{k} {v}" for k, v in _CSP_DIRECTIVES.items()) + ";"
 
 # geolocation: GPS follow mode on the battle map + crew position sharing.
+# accelerometer/gyroscope/magnetometer: the phone compass that turns the map heading-up and
+# aims the aircraft finder. Chrome withholds deviceorientation(absolute) events from a page
+# whose policy blocks these three - so with them blocked heading-up silently fell back to
+# the GPS course alone, on every Android phone.
+# camera: the aircraft finder's live picture (stays in the browser, never uploaded).
 # fullscreen: the full-screen map view. Everything else is unused → blocked.
 _PERMISSIONS_POLICY = (
-    "camera=(), microphone=(), payment=(), usb=(), magnetometer=(), "
-    "gyroscope=(), accelerometer=(), geolocation=(self), fullscreen=(self)"
+    "camera=(self), microphone=(), payment=(), usb=(), magnetometer=(self), "
+    "gyroscope=(self), accelerometer=(self), geolocation=(self), fullscreen=(self)"
 )
 
 # Harmless (and ignored) over plain HTTP in local dev; meaningful once the
