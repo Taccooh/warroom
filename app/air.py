@@ -7,13 +7,20 @@ data instead. Three sources, each used for what it is good at:
   feeds both the live picture and the density map. Anonymous access allows 400 credits a
   day and a global request costs 4, so the default cadence is ~16 minutes; with free
   OpenSky API credentials (WARROOM_OPENSKY_ID / _SECRET) it drops to 2 minutes.
-* adsb.lol point query, 108 nm (200 km) around wherever a player is looking. Fresher and
-  with type / helicopter / military flags, but only 500 requests a day per IP, so it runs
-  on demand, is cached per area, and stops at our own daily cap.
+* Area query, 140 nm (259 km) around wherever a player is looking: adsb.fi (one request a
+  second, no daily cap), adsb.lol as the fallback (500 requests a day per IP, stops at our
+  own daily cap). Fresher and with type / helicopter / military flags; runs on demand and
+  is cached per area.
 * adsb.lol military list, one request for the whole world.
 
 Only aggregates are kept long-term: counts per grid cell, split by altitude band and
-aircraft kind. Individual positions live for 40 minutes (live view only; no trails).
+aircraft kind. Individual positions live for 40 minutes at most (live view only; no trails).
+
+The live table only holds aircraft that are still in the air. Each feed answers with a
+complete picture of what it covers, so its next answer is also evidence of absence: what it
+no longer lists has landed, switched off or left, and its row goes instead of being
+dead-reckoned onwards. An aircraft reported on the ground goes too. Without this, a plane
+that touched down kept "flying" past the runway at approach speed for 20 minutes.
 """
 import json
 import logging
@@ -44,9 +51,13 @@ MAX_POS_AGE_S = 60      # drop positions older than this when sampling
 KEEP_S = 2400           # live rows are forgotten after this
 M_TO_FT, MS_TO_KT = 3.28084, 1.94384
 
-NEAR_NM = 125           # 200 km plus a margin: the fetch centre is snapped to a 0.5 deg grid
+NEAR_NM = 140           # 259 km. The fetch centre is snapped to a 0.5 deg grid (up to ~40 km off the
+                        # viewer), so this still covers the whole 200 km scope plus ABSENT_MARGIN_KM
 NEAR_CELL = 0.5         # degrees: view centres within one cell share a cached fetch
 RADIUS_KM = 200.0       # the 200 km scope
+ABSENT_MARGIN_KM = 20   # rim of an area query where a missing aircraft proves nothing (our positions
+                        # there are estimates, the feed's circle edge is its own)
+SRC_GLOBAL, SRC_AREA, SRC_MIL = 0, 1, 2   # air_now.src: which feed wrote the row last
 MAX_VIEW = 4000         # aircraft handed to the client per request
 # Thinning: with up to THIN_MIN aircraft in the view every one is shown, however far out. Past
 # that, keep one aircraft per (span / THIN_CELLS)-degree square - military and helicopters
@@ -112,10 +123,13 @@ def _row_adsb(ac: dict, now: float):
             _CAT_ADSB.get(ac.get("category") or "", ""), _num(ac.get("ias")))
 
 
-def _row_opensky(s: list, mil: set):
+def _row_opensky(s: list, mil: set, t_resp: float):
     # [icao24, callsign, country, time_position, last_contact, lon, lat, baro_alt_m,
     #  on_ground, velocity_ms, true_track, vrate, sensors, geo_alt, squawk, spi, src, category]
-    if s[5] is None or s[6] is None or s[3] is None:
+    # OpenSky keeps listing an aircraft for minutes after its last position (seen: a plane
+    # still "airborne" 5 minutes after the other feeds had it on the ground). A position that
+    # old is dropped, same rule as for adsb.lol.
+    if s[5] is None or s[6] is None or s[3] is None or t_resp - s[3] > MAX_POS_AGE_S:
         return None
     alt = None if s[7] is None else int(s[7] * M_TO_FT)
     kind = KIND_MIL if s[0] in mil else KIND_HELI if len(s) > 17 and s[17] == 8 else KIND_CIVIL
@@ -174,12 +188,15 @@ def _spend(conn: sqlite3.Connection, name: str, cost: int, cap: int) -> bool:
 
 # ---- storing -----------------------------------------------------------------------------
 
-def _store_live(conn, rows: list) -> None:
+def _store_live(conn, rows: list, src: int, now: int) -> None:
     """Upsert into the live table. A row only replaces an existing one when it is newer,
-    so a fresh on-demand fetch is never overwritten by an older global snapshot."""
+    so a fresh on-demand fetch is never overwritten by an older global snapshot. An aircraft
+    reported on the ground has landed (or not left yet): its row goes - the last airborne
+    position would otherwise keep flying on at approach speed past the runway."""
     conn.executemany(
         "INSERT INTO air_now (hex, callsign, type, lat, lng, alt, gs, track, kind, t, "
-        "reg, squawk, vrate, country, cat, ias) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "reg, squawk, vrate, country, cat, ias, src, upd) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(hex) DO UPDATE SET "
         # text a feed does not carry (OpenSky has no registration, adsb.lol no country)
         # must not wipe what the other one told us
@@ -191,8 +208,10 @@ def _store_live(conn, rows: list) -> None:
         "squawk = excluded.squawk, vrate = excluded.vrate, ias = COALESCE(excluded.ias, ias), "
         "lat = excluded.lat, lng = excluded.lng, alt = excluded.alt, gs = excluded.gs, "
         "track = excluded.track, "
-        "kind = MAX(kind, excluded.kind), t = excluded.t WHERE excluded.t > air_now.t",
-        [r[:10] + r[11:] for r in rows if not r[10]])
+        "kind = MAX(kind, excluded.kind), t = excluded.t, src = excluded.src, upd = excluded.upd "
+        "WHERE excluded.t > air_now.t",
+        [r[:10] + r[11:] + (src, now) for r in rows if not r[10]])
+    conn.executemany("DELETE FROM air_now WHERE hex = ? AND t < ?", [(r[0], r[9]) for r in rows if r[10]])
 
 
 def _prune(conn, now: int) -> None:
@@ -228,18 +247,26 @@ def poll_global(conn: sqlite3.Connection) -> str:
     except (urllib.error.URLError, OSError, ValueError) as e:
         return f"opensky failed: {e}"
     mil = _mil_set(conn)
-    rows = [r for s in d.get("states") or [] if (r := _row_opensky(s, mil))]
     now = int(time.time())
+    rows = [r for s in d.get("states") or [] if (r := _row_opensky(s, mil, d.get("time") or now))]
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        _store_live(conn, rows)
+        prev, prev_n = int(db.kv_get(conn, "air_last", "0")), int(db.kv_get(conn, "air_last_n", "0"))
+        _store_live(conn, rows, SRC_GLOBAL, now)
         _count(conn, rows)
+        # The whole world in one answer: a row nothing has confirmed since the previous sample
+        # is gone. Military-list rows answer to their own list. A sample far smaller than the
+        # last one is a hiccup upstream, not evidence.
+        gone = 0
+        if prev and len(rows) >= prev_n // 2:
+            gone = conn.execute("DELETE FROM air_now WHERE upd <= ? AND src != ?", (prev, SRC_MIL)).rowcount
         _prune(conn, now)
         if not db.kv_get(conn, "air_since"):
             db.kv_set(conn, "air_since", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
         db.kv_set(conn, "air_samples", int(db.kv_get(conn, "air_samples", "0")) + 1)
         db.kv_set(conn, "air_last", now)
-    return f"{len(rows)} aircraft worldwide ({'account' if creds else 'anonymous'})"
+        db.kv_set(conn, "air_last_n", len(rows))
+    return f"{len(rows)} aircraft worldwide ({'account' if creds else 'anonymous'}), {gone} gone"
 
 
 def poll_mil(conn: sqlite3.Connection) -> str:
@@ -253,36 +280,77 @@ def poll_mil(conn: sqlite3.Connection) -> str:
     now = time.time()
     rows = [r for a in ac if (r := _row_adsb(a, now))]
     rows = [r[:8] + (KIND_MIL,) + r[9:] for r in rows]
+    listed = {r[0] for r in rows}
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        _store_live(conn, rows)
-    return f"{len(rows)} military"
+        _store_live(conn, rows, SRC_MIL, int(now))
+        # Same rule as the global sample, for the rows only this list vouches for.
+        gone = []
+        if len(rows) >= int(db.kv_get(conn, "air_mil_n", "0")) // 2:
+            gone = [(h,) for (h,) in conn.execute("SELECT hex FROM air_now WHERE src = ?", (SRC_MIL,))
+                    if h not in listed]
+            conn.executemany("DELETE FROM air_now WHERE hex = ?", gone)
+        db.kv_set(conn, "air_mil_n", len(rows))
+    return f"{len(rows)} military, {len(gone)} gone"
 
 
-def _fetch_area(conn: sqlite3.Connection, lat: float, lng: float) -> list:
+def _fetch_area(conn: sqlite3.Connection, lat: float, lng: float) -> list | None:
     """Raw aircraft around a point: adsb.fi first (no daily cap), adsb.lol as the fallback
-    (counted against its daily budget). Empty list when both fail."""
+    (counted against its daily budget). None when both fail - a failed query is not an
+    empty sky, and only a real answer may remove anything."""
     with _fi_lock:                      # serialise: the open API wants one request a second
         wait = 1.1 - (time.time() - _fi_last[0])
         if wait > 0:
             time.sleep(wait)
         _fi_last[0] = time.time()
         try:
-            d = _get_json(f"{config.AIR_FI_URL}/v2/lat/{lat:.3f}/lon/{lng:.3f}/dist/{NEAR_NM}", timeout=30)
-            return d.get("aircraft") or d.get("ac") or []
-        except (urllib.error.URLError, OSError, ValueError) as e:
+            ac = _get_json(f"{config.AIR_FI_URL}/v2/lat/{lat:.3f}/lon/{lng:.3f}/dist/{NEAR_NM}",
+                           timeout=30).get("aircraft")
+            if isinstance(ac, list):
+                return ac
+            log.warning("adsb.fi: answer without an aircraft list")
+        except (urllib.error.URLError, OSError, ValueError, AttributeError) as e:
             log.warning("adsb.fi: %s", e)
     if not _spend(conn, "adsblol", 1, config.AIR_DAILY_MAX):
-        return []
+        return None
     try:
-        return _get_json(f"{config.AIR_BASE_URL}/v2/point/{lat:.3f}/{lng:.3f}/{NEAR_NM}").get("ac") or []
-    except (urllib.error.URLError, OSError, ValueError) as e:
+        ac = _get_json(f"{config.AIR_BASE_URL}/v2/point/{lat:.3f}/{lng:.3f}/{NEAR_NM}").get("ac")
+        if isinstance(ac, list):
+            return ac
+        log.warning("adsb.lol: answer without an aircraft list")
+    except (urllib.error.URLError, OSError, ValueError, AttributeError) as e:
         log.warning("adsb.lol: %s", e)
-        return []
+    return None
+
+
+def _forget_absent(conn: sqlite3.Connection, listed: set, clat: float, clng: float, now: float) -> int:
+    """An area answer lists every aircraft its network hears inside the circle. A row we hold
+    that is drawn well inside it, is not listed and has no position from within the answer's
+    own window is gone: landed with the transponder off, or never there. Rows only the
+    military list vouches for stay (adsb.lol hears a few that adsb.fi does not). An answer far
+    smaller than what was just confirmed in the same circle is a hiccup, not evidence."""
+    r_km = NEAR_NM * 1.852 - ABSENT_MARGIN_KM
+    dlat = r_km / 111.0 + PAD_DEG
+    dlng = dlat / max(0.05, math.cos(math.radians(min(89.0, abs(clat) + dlat))))
+    inside, recent = [], 0
+    for r in conn.execute("SELECT hex, lat, lng, gs, track, t, src FROM air_now "
+                          "WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?",
+                          (clat - dlat, clat + dlat, clng - dlng, clng + dlng)):
+        la, lo = _extrap([r["hex"], 0, 0, r["lat"], r["lng"], 0, r["gs"], r["track"], 0, r["t"]], now)
+        if _km(clat, clng, la, lo) > r_km:
+            continue
+        if now - r["t"] <= 300:
+            recent += 1
+        if r["hex"] not in listed and r["src"] != SRC_MIL and r["t"] < now - MAX_POS_AGE_S:
+            inside.append((r["hex"],))
+    if len(listed) < recent // 2:
+        return 0
+    conn.executemany("DELETE FROM air_now WHERE hex = ?", inside)
+    return len(inside)
 
 
 def near(conn: sqlite3.Connection, lat: float, lng: float) -> str:
-    """Complete picture around a point (~230 km), for the detail the global feed lacks.
+    """Complete picture around a point (~260 km), for the detail the global feed lacks.
     The centre is snapped to a 0.5 deg grid and cached for AIR_NEAR_TTL seconds, so viewers
     in the same area share one fetch. Zoomed-in views call it in the background; the 200 km
     scope calls it and waits."""
@@ -294,14 +362,17 @@ def near(conn: sqlite3.Connection, lat: float, lng: float) -> str:
         if len(_near_done) > 4000:
             for k in [k for k, v in _near_done.items() if time.time() - v > 3600]:
                 del _near_done[k]
-    ac = _fetch_area(conn, key[0] * NEAR_CELL, key[1] * NEAR_CELL)
+    clat, clng = key[0] * NEAR_CELL, key[1] * NEAR_CELL
+    ac = _fetch_area(conn, clat, clng)
+    if ac is None:
+        return f"area query failed near {lat:.1f},{lng:.1f}"
     now = time.time()
     rows = [r for a in ac if (r := _row_adsb(a, now))]
-    if rows:
-        with conn:
-            conn.execute("BEGIN IMMEDIATE")
-            _store_live(conn, rows)
-    return f"{len(rows)} aircraft near {lat:.1f},{lng:.1f}"
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _store_live(conn, rows, SRC_AREA, int(now))
+        gone = _forget_absent(conn, {a.get("hex") for a in ac}, clat, clng, now)
+    return f"{len(rows)} aircraft near {lat:.1f},{lng:.1f}, {gone} gone"
 
 
 # ---- reading ---------------------------------------------------------------------------

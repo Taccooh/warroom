@@ -24,6 +24,9 @@ services:
       WARROOM_TZ: ${WARROOM_TZ:-Europe/Berlin}
       WARROOM_ARCHIVE_HOURS: ${WARROOM_ARCHIVE_HOURS:-1}
       WARROOM_ARCHIVE_KEEP_DAYS: ${WARROOM_ARCHIVE_KEEP_DAYS:-0}
+      # Optional free OpenSky API client: worldwide air samples every 2 minutes instead of 16.
+      WARROOM_OPENSKY_ID: ${WARROOM_OPENSKY_ID:-}
+      WARROOM_OPENSKY_SECRET: ${WARROOM_OPENSKY_SECRET:-}
     volumes:
       - ./data:/app/data
 

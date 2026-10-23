@@ -276,11 +276,13 @@ document.addEventListener('DOMContentLoaded', function () {
   // zoomed in every aircraft.
   var AIR_MODES = ['all', 'low', 'heli', 'mil'];
   var AIR_COL = {all: '#5cc8ff', low: '#ffd45c', heli: '#7dff9a', mil: '#ff7a5c'};
-  // The plane canvas lives in a map pane just below popups (700) and markers (600): a sibling
-  // of the map pane would sit above ALL of them and draw planes over popups. It goes into the
-  // rotate pane because that is where the popup pane lives - panes in different stacking
-  // contexts cannot be ordered against each other.
-  map.createPane('livePane', map.getPane('rotatePane') || undefined);
+  // The plane canvas lives in a map pane just below markers (600) and popups (700): a sibling
+  // of the map pane would sit above ALL of them and draw planes over popups. With
+  // leaflet-rotate those live in the norotatePane, which also sits above the rotating
+  // territory cells - so the canvas goes there. It must NOT go into the rotatePane: that one
+  // turns with heading-up, and a canvas drawn in screen coordinates would turn a second time
+  // (planes 300 px off at 30 degrees, off screen at 90).
+  map.createPane('livePane', map.getPane('norotatePane') || undefined);
   map.getPane('livePane').style.zIndex = 460;
   var liveOn = false, airMode = 'all', airScope = 'world', airCircle = null, airFit = false, airCFix = null;
   try { var am = localStorage.getItem('wr_air_mode'); if (AIR_MODES.indexOf(am) >= 0) airMode = am; } catch (e) {}
@@ -335,8 +337,9 @@ document.addEventListener('DOMContentLoaded', function () {
     placeLive();
   }
   // Panes move with the map while the canvas should stay glued to the viewport: pin it to the
-  // top-left corner of the view in pane coordinates, then draw in container coordinates.
-  function placeLive() { L.DomUtil.setPosition(liveCv, map.containerPointToLayerPoint([0, 0])); }
+  // top-left corner of the view, then draw in container coordinates. The pane does not rotate,
+  // so the offset is the map pane's alone (containerPointToLayerPoint would add the bearing).
+  function placeLive() { L.DomUtil.setPosition(liveCv, map._getMapPanePos().multiplyBy(-1)); }
   function drawLive() {
     if (!liveCv) return;
     placeLive();
@@ -454,7 +457,7 @@ document.addEventListener('DOMContentLoaded', function () {
     airFocus();
     reflectLayers();
   }
-  map.on('move zoom', function () { if (liveOn) drawLive(); });
+  map.on('move zoom rotate', function () { if (liveOn) drawLive(); });
   map.on('resize', function () { if (liveOn) { sizeLive(); drawLive(); } });
   map.on('moveend zoomend', function () {
     if (!liveOn) return;
@@ -842,6 +845,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ---- Follow mode: own live position + "you are here" context ----
   var meMarker = null, meCircle = null, follow = false, watchId = null;
+  // Following brings the zoom in to street level ONCE, when it starts (followZoomIn). After
+  // that the zoom belongs to the user: zooming out to see the area (or the 200 km air scope)
+  // must survive the next fix instead of snapping back. A fix that lands mid-gesture waits.
+  var followZoomIn = false, zooming = false;
+  map.on('zoomstart', function () { zooming = true; });
+  map.on('zoomend moveend', function () { zooming = false; });
   var here = document.getElementById('here');
   function freshTag() {
     var mins = Math.floor((Date.now() - dataAt) / 60000);
@@ -908,7 +917,8 @@ document.addEventListener('DOMContentLoaded', function () {
       meCircle = L.circle(ll, {radius: acc, color: '#3b82f6', weight: 1, fillOpacity: 0.08}).addTo(map);
     } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(acc); }
     if (follow) {
-      map.setView(ll, Math.max(map.getZoom(), 13));
+      if (followZoomIn) { followZoomIn = false; map.setView(ll, Math.max(map.getZoom(), 13)); }
+      else if (!zooming) map.setView(ll, map.getZoom());
       if (rotateOn) applyHeading(p, lat, lng);
     }
     updateHere(lat, lng);
@@ -1045,11 +1055,12 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!watchId) {
       watchId = navigator.geolocation.watchPosition(onPos, onPosErr,
         {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
-      follow = true; btn.classList.add('active'); setRotate(true);
+      follow = true; followZoomIn = true; btn.classList.add('active'); setRotate(true);
     } else {
       follow = !follow; btn.classList.toggle('active', follow);
       setRotate(follow);
       if (follow && meMarker) map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 13));
+      else if (follow) followZoomIn = true;
     }
     void btn.offsetWidth;  // otherwise iOS paints class changes on Leaflet controls only on the next reflow
   });
@@ -1325,7 +1336,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!watchId) {   // recording implies GPS follow — start it like the ◎ button does
       watchId = navigator.geolocation.watchPosition(onPos, onPosErr,
         {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
-      follow = true; setRotate(true); var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
+      follow = true; followZoomIn = true; setRotate(true); var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
     }
     recOn = true; covLast = null;
     try { localStorage.setItem('wr_cov_rec', '1'); } catch (e) {}   // survive reload/close -> auto-resume
@@ -2359,7 +2370,7 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('tour-go').textContent = T.tour_stop_nav;
     if (!watchId && navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition(onPos, onPosErr, {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000});
-      follow = true; var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
+      follow = true; followZoomIn = true; var lb = document.getElementById('loc-btn'); if (lb) lb.classList.add('active');
     }
     if (follow) setRotate(true);   // turn-by-turn wants heading-up too
     var mp = myPos(); if (mp) navUpdate(mp.lat, mp.lng);

@@ -40,11 +40,14 @@ CREATE TABLE IF NOT EXISTS air_cells (
     n INTEGER NOT NULL,
     PRIMARY KEY (i, j, band, kind)
 );
--- The latest snapshot, replaced every sample.
+-- Aircraft in the air right now, one row each. src = which feed wrote the row last
+-- (0 OpenSky, 1 area query, 2 military list), upd = when; a feed's next complete
+-- snapshot removes what it no longer lists (air.py).
 CREATE TABLE IF NOT EXISTS air_now (
     hex TEXT PRIMARY KEY, callsign TEXT, type TEXT, lat REAL, lng REAL,
     alt INTEGER, gs INTEGER, track INTEGER, kind INTEGER, t INTEGER NOT NULL DEFAULT 0,
-    reg TEXT, squawk TEXT, vrate INTEGER, country TEXT, cat TEXT, ias INTEGER
+    reg TEXT, squawk TEXT, vrate INTEGER, country TEXT, cat TEXT, ias INTEGER,
+    src INTEGER NOT NULL DEFAULT 0, upd INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_air_now_pos ON air_now(lat, lng);
 -- Recent positions per aircraft, for the trails (pruned in air.sample).
@@ -308,7 +311,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     _add_col(conn, "users", "last_seen", "TEXT")
     _add_col(conn, "air_now", "t", "INTEGER NOT NULL DEFAULT 0")
     for col, decl in (("reg", "TEXT"), ("squawk", "TEXT"), ("vrate", "INTEGER"),
-                      ("country", "TEXT"), ("cat", "TEXT"), ("ias", "INTEGER")):
+                      ("country", "TEXT"), ("cat", "TEXT"), ("ias", "INTEGER"),
+                      ("src", "INTEGER NOT NULL DEFAULT 0"), ("upd", "INTEGER NOT NULL DEFAULT 0")):
         _add_col(conn, "air_now", col, decl)
     _add_col(conn, "gang_snap", "ap_count", "INTEGER")
     _add_col(conn, "gang_snap", "member_count", "INTEGER")

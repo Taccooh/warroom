@@ -19,3 +19,7 @@ services:
       # - WARROOM_PLANNER_LIMIT=25000
       # - WARROOM_MAX_USERS=30
       # - WARROOM_TZ=Europe/Berlin
+      # Free OpenSky API client (opensky-network.org, account page, "API client"): the
+      # worldwide air traffic picture then refreshes every 2 minutes instead of every 16.
+      # - WARROOM_OPENSKY_ID=...
+      # - WARROOM_OPENSKY_SECRET=...
