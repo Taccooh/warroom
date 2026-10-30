@@ -544,6 +544,32 @@ document.addEventListener('DOMContentLoaded', function () {
     return {v: [Math.cos(el) * Math.sin(b), Math.cos(el) * Math.cos(b), Math.sin(el)], km: d / 1000,
             el: el * 180 / Math.PI};
   }
+  // Sun and moon azimuth/elevation (low-precision almanac formulas: sun ~0.01, moon ~0.3 degrees,
+  // moon corrected for parallax). Returns {v, az, el} for each.
+  function fdBodies(p, nowS) {
+    var d = Math.PI / 180, n = nowS / 86400 - 10957.5, T = n / 36525, eps = (23.439 - 4e-7 * n) * d,
+        sn = function (x) { return Math.sin(x * d); }, cs = function (x) { return Math.cos(x * d); };
+    var g = (357.528 + 0.9856003 * n) * d, lamS = (280.46 + 0.9856474 * n + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * d;
+    var lamM = (218.32 + 481267.881 * T + 6.29 * sn(135 + 477198.87 * T) - 1.27 * sn(259.3 - 413335.36 * T) +
+                0.66 * sn(235.7 + 890534.22 * T) + 0.21 * sn(269.9 + 954397.74 * T) - 0.19 * sn(357.5 + 35999.05 * T) -
+                0.11 * sn(186.5 + 966404.03 * T)) * d,
+        betM = (5.13 * sn(93.3 + 483202.02 * T) + 0.28 * sn(228.2 + 960400.89 * T) - 0.28 * sn(318.3 + 6003.15 * T) -
+                0.17 * sn(217.6 - 407332.21 * T)) * d,
+        parM = 0.9508 + 0.0518 * cs(135 + 477198.87 * T) + 0.0095 * cs(259.3 - 413335.36 * T) +
+               0.0078 * cs(235.7 + 890534.22 * T) + 0.0028 * cs(269.9 + 954397.74 * T);
+    var gst = 280.46061837 + 360.98564736629 * n;
+    function at(lam, bet, par) {
+      var x = Math.cos(bet) * Math.cos(lam), y = Math.cos(eps) * Math.cos(bet) * Math.sin(lam) - Math.sin(eps) * Math.sin(bet),
+          z = Math.sin(eps) * Math.cos(bet) * Math.sin(lam) + Math.cos(eps) * Math.sin(bet),
+          ra = Math.atan2(y, x), dec = Math.asin(z), H = (gst + p.lng) * d - ra, phi = p.lat * d;
+      var el = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H)),
+          az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi)) + Math.PI;
+      if (par) el -= par * d * Math.cos(el);
+      return {v: [Math.cos(el) * Math.sin(az), Math.cos(el) * Math.cos(az), Math.sin(el)],
+              az: (az / d + 360) % 360, el: el / d};
+    }
+    return {sun: at(lamS, 0, 0), moon: at(lamM, betM, parM)};
+  }
   function fdPull() {
     var p = fd && (fd.pos || myPos());
     if (!p) return;
@@ -638,6 +664,25 @@ document.addEventListener('DOMContentLoaded', function () {
         c.fillStyle = az === 0 ? '#ff8d92' : '#e8b64c'; c.fillText(dirs[az / 45], q3.x, q3.y);
       }
     }
+    // The sun is the one thing in the sky whose place is known without any data feed: if its
+    // disc does not sit on the real sun in the camera picture, compass/tilt/field of view are
+    // off - not the aircraft data.
+    var bod = fdBodies(p, nowS), sun = bod.sun, moon = bod.moon;
+    [[sun, '#ffd15e', T.finder_sun], [moon, '#cfe3ff', T.finder_moon]].forEach(function (o) {
+      if (o[0].el < -2) return;
+      var sq = proj(o[0].v);
+      if (!onScreen(sq, 30)) return;
+      c.strokeStyle = o[1]; c.lineWidth = 2; c.beginPath(); c.arc(sq.x, sq.y, 16, 0, 6.2832); c.stroke();
+      c.beginPath(); c.moveTo(sq.x - 24, sq.y); c.lineTo(sq.x - 20, sq.y); c.moveTo(sq.x + 20, sq.y); c.lineTo(sq.x + 24, sq.y);
+      c.moveTo(sq.x, sq.y - 24); c.lineTo(sq.x, sq.y - 20); c.moveTo(sq.x, sq.y + 20); c.lineTo(sq.x, sq.y + 24); c.stroke();
+      c.font = '700 12px system-ui, sans-serif'; c.textAlign = 'center'; c.fillStyle = o[1];
+      c.fillText(o[2], sq.x, sq.y + 36);
+    });
+    // what the sensors say, to judge the picture by
+    var hd = (Math.atan2(B.fwd[0], B.fwd[1]) * 180 / Math.PI + 360) % 360, pt = Math.asin(Math.max(-1, Math.min(1, B.fwd[2]))) * 180 / Math.PI;
+    c.font = '11px system-ui, sans-serif'; c.textAlign = 'left'; c.fillStyle = 'rgba(217,224,232,.75)';
+    c.fillText(tf(T.finder_diag, {h: Math.round(hd), t: Math.round(pt), a: fd.acc == null ? '?' : Math.round(fd.acc),
+      sa: Math.round(sun.az), se: Math.round(sun.el), ma: Math.round(moon.az), me: Math.round(moon.el)}), 10, H - 8);
     // aircraft: sky position for each, nearest first
     var list = [];
     fd.ac.forEach(function (a) {
@@ -770,6 +815,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (navigator.geolocation) fd.watch = navigator.geolocation.watchPosition(function (g) {
       if (!fd) return;
       fd.pos = {lat: g.coords.latitude, lng: g.coords.longitude, alt: g.coords.altitude || 0};
+      fd.acc = g.coords.accuracy;
       if (!fd.pulled) fdPull();
     }, function () {}, {enableHighAccuracy: true, maximumAge: 5000, timeout: 20000});
     fdPull(); fd.pullT = setInterval(fdPull, 10000);
