@@ -213,6 +213,15 @@ def _num(x):
         return None
 
 
+def _holder(x):
+    """A cell holder's wdgwars user id, or None. wdgwars deliberately stopped naming
+    holders in the member-territories feed (2026-10-28) and sends user_id 0 instead:
+    that is "not disclosed", never a player - so it must not be stored, tallied or
+    shown as one."""
+    n = _num(x)
+    return n if n else None
+
+
 def refresh_footprint(conn, client: Wdg, user_id: int, glat: float, glng: float) -> bool:
     """Build the player's footprint from /api/me/cells: server-aggregated per-cell AP
     counts, uncapped, already the exact ownership-engine number (BLE and filtered
@@ -298,7 +307,7 @@ def diff_territory(conn, lookup: dict, glat, glng, user_id: int, my_gid,
         cla, clo = grid.center(i, j, glat, glng)
         new[k] = {"i": i, "j": j, "lat": cla, "lng": clo,
                   "gid": _num(c.get("gang_id")), "gang": c.get("gang"),
-                  "uid": _num(c.get("user_id")), "count": _num(c.get("count")),
+                  "uid": _holder(c.get("user_id")), "count": _num(c.get("count")),
                   "color": c.get("color"), "towers": _num(c.get("towers")) or 0}
     # add own unoccupied footprint cells — but ONLY if they lie within the turf
     # (near an anchor); isolated stray cells thus stay out entirely
@@ -609,7 +618,7 @@ def _tally(cell: dict, players: dict, gangs: dict) -> None:
     None while wdgwars fogs enemy strength during an event — count the cell, add
     no strength, rather than dropping the player from the sample entirely."""
     aps = _num(cell.get("count")) or 0
-    pid = _num(cell.get("user_id"))
+    pid = _holder(cell.get("user_id"))
     gid = _num(cell.get("gang_id"))
     gang = cell.get("gang")
     if pid is not None:
