@@ -1120,6 +1120,7 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
 .about-body li { margin: 0.35rem 0; }
 .about-body code { color: var(--gold); font-family: var(--mono); font-size: 0.85em; }
 .about-body b { color: var(--gold-bright); font-weight: 600; }
+.about-body a { color: var(--gold); }
 
 /* ---- Crew / friends ---- */
 .share-box {

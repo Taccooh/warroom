@@ -30,6 +30,26 @@ those files, not the AGPL of this repository.
 - Map tiles and road data © [OpenStreetMap](https://www.openstreetmap.org/copyright)
   contributors, ODbL. Road snapping uses the public Overpass API.
 
+## Aircraft data (air traffic layer)
+
+Not vendored: the server fetches it at runtime, so an instance that runs the
+layer uses these services under their terms. `WARROOM_AIR_SECONDS=0` switches
+the layer off entirely.
+
+- **adsb.fi** open data — https://adsb.fi — terms at
+  https://github.com/adsbfi/opendata: personal, non-commercial use only; cite
+  adsb.fi with a link to its home page; 1 request per second.
+- **adsb.lol** — https://adsb.lol — data under the Open Database License
+  (ODbL 1.0).
+- **The OpenSky Network** — https://opensky-network.org — terms at
+  https://opensky-network.org/about/terms-of-use (licensed for non-profit
+  research and education; contact OpenSky for commercial use of live data).
+  Cited as they ask: Matthias Schäfer, Martin Strohmeier, Vincent Lenders, Ivan
+  Martinovic and Matthias Wilhelm. "Bringing Up OpenSky: A Large-scale ADS-B
+  Sensor Network for Research". In Proceedings of the 13th IEEE/ACM
+  International Symposium on Information Processing in Sensor Networks (IPSN),
+  pages 83-94, April 2014.
+
 ## Python dependencies
 
 Installed from PyPI at build time (see `requirements.txt`): FastAPI (MIT),
