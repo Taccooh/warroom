@@ -137,6 +137,10 @@ def _nearest_in_cell(ways: list[dict], s, w, n, e, clat, clng,
         if types is not None and hw not in types:
             continue
         for p in el.get("geometry") or []:
+            # Overpass can put null into a way's geometry (a node it cannot resolve);
+            # one such point used to abort the whole road drip with an AttributeError.
+            if not p:
+                continue
             la, lo = p.get("lat"), p.get("lon")
             if la is None or lo is None:
                 continue
