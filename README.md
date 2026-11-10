@@ -32,7 +32,8 @@ https://warroom.mechanics-toolbox.org/about
   ever reports the present: your own history over weeks, who gained and lost
   ground in the last 24 h / 48 h / 7 days, the gang table with movement, and who
   actually holds cells inside your turf. Charts are server-rendered SVG, so the
-  page draws with JavaScript off
+  page draws with JavaScript off. The per-player parts need wdgwars to name cell
+  holders, which it stopped doing on 2026-10-28 — see [Reading a cell](#reading-a-cell)
 - **Crew** — friends and opt-in live position sharing (auto-expires, no history)
 - EN/DE, installable as PWA, works on phone and desktop
 
@@ -247,6 +248,13 @@ that a `wr_session` cookie was actually set.
 
 Either way, all endpoints answer `401` without valid credentials.
 
+**Send a `User-Agent` of your own.** warroom does not filter by user agent, but a
+proxy in front of it may: the hosted instance sits behind Cloudflare, which turns
+away Python's default (`Python-urllib/3.x`) with a `403` before the request ever
+reaches warroom. Any identifier of your own passes — `my-script/1.0` is enough,
+there is no need to pose as curl. So a `403` comes from the proxy, a `401` from
+warroom.
+
 The examples below use a shell variable for the header:
 
 ```bash
@@ -255,7 +263,7 @@ AUTH="Authorization: Bearer wr_xxxxxxxx"
 
 | Endpoint | Returns |
 |----------|---------|
-| `GET /api/state` | Where you stand now: `meta`, `counts`, `cells` (every cell in your turf with its holder, strength and your own APs), `planer`, `events` |
+| `GET /api/state` | Where you stand now: `meta`, `counts`, `cells` (every cell in your turf with its gang, strength and your own APs — and its holder where wdgwars still names one), `planer`, `events` |
 | `GET /api/stats` | Your own measured history, one row per poll: APs, credits, gang rank and points |
 | `GET /api/players` | Standings from the latest sample; `?q=` searches by name, `?id=` gives one player's current state and history |
 | `GET /api/gangs` | Leaderboard from the latest sample; with `?name=` the history of one gang |
@@ -307,12 +315,27 @@ Three questions that look alike and are not:
 - **`held`** — `true` only when *you personally* hold the cell. This is the one
   `status` cannot answer.
 - **`status: "mine"`** — your **gang** holds it, which usually is not you. Measured
-  on the hosted instance: of 31,687 gang cells, players held 16,260 themselves —
-  barely half.
+  on the hosted instance in August 2026: of 31,687 gang cells, players held 16,260
+  themselves — barely half.
 
 `owner` carries the holder's wdgwars id (also in the planner as `o`), so you can
 see *who* to beat, not just which gang. `meta.wdg_user_id` is your own id in the
 same space, if you want to compare yourself.
+
+**Since 2026-10-28 wdgwars no longer names cell holders.** The territory feed
+sends user id `0` instead; the only holder it still names is the account whose API
+key made the request. warroom reads `0` as *not disclosed* and returns
+`owner: null` (releases before v1.9.0 pass the `0` through — treat it the same).
+Gang and strength still arrive, so `status`, `count` and `gap` work as before.
+What changed:
+
+- **`owner`** is `null` on practically every cell, and the `names` table below
+  shrinks with it.
+- **`held`** depends on whose key fetches the feed. warroom fetches it once per
+  cycle, with the first account whose key works — the oldest one, in practice. On
+  a single-user instance that is you, and `held` is as good as ever. On a shared
+  instance it is right for that one account only: everyone else gets
+  `held: false` on every cell, which there means *not disclosed*, not *not yours*.
 
 Names for those ids come with the response as **`names`**, a `{id: username}`
 lookup table covering everyone appearing in `cells` and `planer`. It is one table
@@ -361,8 +384,15 @@ curl -H "$AUTH" '…/api/players?q=nightowl'
   "gang":"Example Gang","gang_id":42,"cells":4233,"aps":327700}]}
 ```
 
-`?id=` adds a `current` block (gang, cells, APs as of the latest sample) and a
-`registration` block next to the history.
+`?id=` adds a `current` block (gang, cells, APs as of the latest sample that
+contains the player, dated by its `ts`) and a `registration` block next to the
+history.
+
+Since the feed stopped naming holders (see [Reading a cell](#reading-a-cell)),
+`gang`, `cells` and `aps` come back `null` from `?q=` for everyone except the
+account whose key fetches the feed. The search still resolves a name to its id,
+and `?id=` still returns what was last known — check `current.ts` for how old
+that is.
 
 **Dating an account.** wdgwars does not report when someone signed up, but ids are
 handed out sequentially and every gang member list carries a `joined_at`. So if a
@@ -394,11 +424,20 @@ is still returned, just without figures.
 
 The wdgwars feed is a snapshot that overwrites itself — it tells you who holds a
 cell right now, never how that changed. Since the poller fetches the **global**
-feed every cycle anyway (every player's cells, with owner and AP count), warroom
-samples it every `WARROOM_ARCHIVE_HOURS` into `player_snap` and `gang_snap`.
-That turns "is this rival gaining on me?" into a query.
+feed every cycle anyway (every gang cell with its strength and, until 2026-10-28,
+its holder), warroom samples it every `WARROOM_ARCHIVE_HOURS` into `player_snap`
+and `gang_snap`. That turns "is this rival gaining on me?" into a query.
 
-Four things worth knowing, because the numbers are easy to misread:
+Five things worth knowing, because the numbers are easy to misread:
+
+- **Per-player history ends on 2026-10-28 for almost everyone.** That evening
+  (UTC) wdgwars stopped naming cell holders in the feed — see
+  [Reading a cell](#reading-a-cell). Since then `player_snap` only gains rows for
+  the account whose key fetches the feed: `/api/players` lists that one player,
+  and every other history stops there. The gang series runs on, because `cells`
+  and `aps` are counted per gang and need no holder — except `players`, which
+  counted distinct holders and now reads 0 or 1. For individual players, the
+  [boards](#leaderboards-and-names) are the series that still moves.
 
 - `player_id` is the **wdgwars** user id from the feed, not a warroom account.
 - `cells` is what a player **controls**. The feed names one owner per cell, so a
@@ -412,7 +451,7 @@ Four things worth knowing, because the numbers are easy to misread:
   memory is gone; history starts the day you switch it on.
 
 ```bash
-# Rivals by ground held, right now
+# Standings from the latest sample (since 2026-10-28: the feed account only)
 curl -H "$AUTH" 'https://your-instance/api/players?limit=20'
 # How one player developed over the last week
 curl -H "$AUTH" 'https://your-instance/api/players?id=4711&since=2026-08-21 00:00:00'
@@ -455,7 +494,9 @@ on points while controlling fewer cells than the one below it.
 `/api/gangs` also carries the gang's official `ap_count` and `member_count`. Those
 are the real totals; `aps` and `players` beside them only cover what the feed
 shows (controlled cells, owners seen) and are systematically lower. Both are
-`null` outside the top 50 — that leaderboard is capped, the feed is not.
+`null` outside the top 50 — that leaderboard is capped, the feed is not. Since
+2026-10-28 `players` no longer counts anything useful (holders are not named any
+more); `member_count` is the figure to use.
 
 ## License
 
