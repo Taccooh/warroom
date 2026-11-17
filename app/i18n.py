@@ -631,6 +631,9 @@ JS = {
     # honest framing: air-distance proxy, not real road km — the score stays
     # internal, rows keep showing only real gap + distance
     "sort_worth": {"en": "Worth the drive", "de": "Lohnt die Fahrt"},
+    # Desktop fold of the gang filter chips (client-rendered toggle)
+    "chips_more": {"en": "+ {n} more gangs", "de": "+ {n} weitere Gangs"},
+    "chips_less": {"en": "Show fewer", "de": "Weniger zeigen"},
     # Own-colour switch in the Info tab (button label carries the current state)
     "mycol_gold": {"en": "Gold", "de": "Gold"},
     "mycol_raw": {"en": "Original", "de": "Original"},

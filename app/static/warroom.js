@@ -166,22 +166,34 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var rects = [];
   var cellLayer = L.layerGroup().addTo(map);
+  // Two looks for the same cell. Zoomed out, a cell is a few pixels and has to be
+  // a solid patch of colour to be seen at all. Zoomed in (NEAR_ZOOM and up) the
+  // same fill lies over the streets you are trying to read - your own ground
+  // above all, which is most of what is on screen near home. So from there on
+  // the fill thins out and the border carries the colour instead.
+  var NEAR_ZOOM = 13;
+  function cellStyle(c, own, near) {
+    var lead = c.status === 'enemy' && c.gap === 0, free = c.status === 'free';
+    // Enemies in their real gang color (CHAOS vs BWM distinguishable), free cold
+    var fill = c.status === 'enemy' ? (c.color || COLOR.enemy)
+      : c.status === 'mine' ? own : COLOR.free;
+    return {
+      color: lead ? '#ffd15e' : fill, weight: (lead ? 2 : 1) + (near && !free ? 1 : 0),
+      opacity: free ? 0.6 : 0.9, fillColor: fill,
+      fillOpacity: free ? (near ? 0.07 : 0.12) : (near ? 0.17 : 0.4), dashArray: free ? '3' : null
+    };
+  }
+  var cellsNear = false;
   function renderCells() {
     cellLayer.clearLayers();
     rects = [];
     cellByKey = {};
     cells.forEach(function (c) { cellByKey[c.i + '_' + c.j] = c; });
     var own = ownColor();
+    cellsNear = map.getZoom() >= NEAR_ZOOM;
     cells.forEach(function (c) {
-      var lead = c.status === 'enemy' && c.gap === 0;
-      // Enemies in their real gang color (CHAOS vs BWM distinguishable), free cold
-      var fill = c.status === 'enemy' ? (c.color || COLOR.enemy)
-        : c.status === 'mine' ? own : COLOR.free;
-      var r = L.rectangle(c.b, {
-        color: lead ? '#ffd15e' : fill, weight: lead ? 2 : 1,
-        opacity: c.status === 'free' ? 0.6 : 0.9, fillColor: fill,
-        fillOpacity: c.status === 'free' ? 0.12 : 0.4, dashArray: c.status === 'free' ? '3' : null
-      }).addTo(cellLayer);
+      var r = L.rectangle(c.b, cellStyle(c, own, cellsNear)).addTo(cellLayer);
+      r._cell = c;
       var label = c.status === 'mine' ? T.gang_your
         : c.status === 'enemy' ? (c.count == null ? tf(T.gang_here, {g: esc(c.gang)})
                                                    : tf(T.gang_holds, {g: esc(c.gang), n: c.count}))
@@ -205,7 +217,63 @@ document.addEventListener('DOMContentLoaded', function () {
         '" data-label="' + label.replace(/<[^>]*>/g, '').replace(/"/g, '&quot;') + '">' + T.tour_add_pin + '</button>');
       rects.push(r);
     });
+    labelCells();
   }
+
+  // ---- Numbers in the cells ----
+  // The colour says WHOSE a cell is; whether it is worth the drive took a tap on
+  // every single one. From LABEL_ZOOM on each cell on screen carries the one
+  // number that decides it:
+  //   your gang's cell   the holder's strength - what an attacker has to beat,
+  //                      so a small number is a cell that falls easily
+  //   enemy cell         the APs you are short ("-12"), or a tick where you are
+  //                      already ahead and one drive-by flips it
+  // No number where there is none to give: fogged strength stays blank rather
+  // than showing a guess. Only cells in view get a label, so the cost follows
+  // the screen, not the size of the turf.
+  var LABEL_ZOOM = 12, LABEL_MAX = 600;
+  var labelLayer = L.layerGroup().addTo(map);
+  function kfmt(n) {
+    return n >= 10000 ? Math.round(n / 1000) + 'k'
+         : n >= 1000 ? (Math.round(n / 100) / 10) + 'k' : String(n);
+  }
+  function cellLabel(c) {
+    if (c.status === 'mine') {
+      var n = c.count != null ? c.count : c.my_aps;
+      return n ? {txt: kfmt(n), cls: 'mine' + (n < 10 ? ' thin' : '')} : null;
+    }
+    if (c.status === 'enemy' && c.gap != null) {
+      return c.gap === 0 ? {txt: '✓', cls: 'lead'} : {txt: '−' + kfmt(c.gap), cls: 'enemy'};
+    }
+    return null;
+  }
+  function labelCells() {
+    labelLayer.clearLayers();
+    var z = map.getZoom();
+    if (z < LABEL_ZOOM) return;
+    var vb = map.getBounds().pad(0.1), out = [];
+    for (var k = 0; k < cells.length; k++) {
+      var c = cells[k], la = (c.i + 0.5) * grid.lat, lo = (c.j + 0.5) * grid.lng;
+      if (!vb.contains([la, lo])) continue;
+      var lb = cellLabel(c);
+      if (lb) out.push([la, lo, lb]);
+      if (out.length > LABEL_MAX) return;   // a wall of numbers helps nobody
+    }
+    var size = z >= 14 ? ' z14' : z >= 13 ? ' z13' : '';
+    out.forEach(function (o) {
+      L.marker([o[0], o[1]], {interactive: false, keyboard: false, zIndexOffset: -1000,
+        icon: L.divIcon({className: 'cell-lbl ' + o[2].cls + size, iconSize: [0, 0],
+                         html: '<span>' + esc(o[2].txt) + '</span>'})}).addTo(labelLayer);
+    });
+  }
+  map.on('moveend', debounce(labelCells, 120));
+  map.on('zoomend', function () {
+    var near = map.getZoom() >= NEAR_ZOOM;
+    if (near === cellsNear) return;
+    cellsNear = near;
+    var own = ownColor();
+    rects.forEach(function (r) { r.setStyle(cellStyle(r._cell, own, near)); });
+  });
   renderCells();
 
   // ---- Virgin land: never-scanned cells. Separate layer, toggled via chip —
@@ -870,18 +938,112 @@ document.addEventListener('DOMContentLoaded', function () {
   function fitAll() {
     if (rects.length) map.fitBounds(L.featureGroup(rects).getBounds(), {padding: [30, 30]});
   }
+  // ---- Where the map opens ----
+  // In this order: a deep link, the view this device last had, the turf. relayout()
+  // re-runs fitInitial while the layout settles; the first touch anywhere (or a
+  // position fix) sets viewLocked and ends that, so the map never jumps away
+  // from under a finger.
+  var viewLocked = false;
+  var hasFocus = !!(DATA.focus && isFinite(DATA.focus.lat) && isFinite(DATA.focus.lng));
+  function lockView() { viewLocked = true; }
+  ['pointerdown', 'wheel', 'keydown'].forEach(function (ev) {
+    document.addEventListener(ev, lockView, {capture: true, passive: true});
+  });
+  function savedView() {
+    try {
+      var v = JSON.parse(localStorage.getItem('wr_view') || 'null');
+      if (v && isFinite(v.lat) && isFinite(v.lng) && isFinite(v.z) &&
+          Math.abs(v.lat) <= 90 && Math.abs(v.lng) <= 180 && v.z >= 2 && v.z <= 18) return v;
+    } catch (e) {}
+    return null;
+  }
+  map.on('moveend', debounce(function () {
+    var c = map.getCenter();
+    try {
+      localStorage.setItem('wr_view', JSON.stringify(
+        {lat: +c.lat.toFixed(5), lng: +c.lng.toFixed(5), z: map.getZoom()}));
+    } catch (e) {}
+  }, 600));
+  // Where most of your APs sit: the AP-weighted median of your cells in the main
+  // theatre. A median, because one long drive leaves a thin trail of cells that
+  // drags a mean (and any bounding box) hundreds of kilometres off the ground
+  // you actually hold.
+  function homeCentre() {
+    var b = theatres.length ? theatres[0].bounds : null, pts = [], total = 0;
+    cells.forEach(function (c) {
+      if (!c.my_aps) return;
+      var la = (c.i + 0.5) * grid.lat, lo = (c.j + 0.5) * grid.lng;
+      if (b && (la < b[0][0] || la > b[1][0] || lo < b[0][1] || lo > b[1][1])) return;
+      pts.push([la, lo, c.my_aps]); total += c.my_aps;
+    });
+    if (!pts.length) return null;
+    function wmed(k) {
+      pts.sort(function (x, y) { return x[k] - y[k]; });
+      var acc = 0;
+      for (var n = 0; n < pts.length; n++) { acc += pts[n][2]; if (acc * 2 >= total) return pts[n][k]; }
+      return pts[pts.length - 1][k];
+    }
+    return [wmed(0), wmed(1)];
+  }
   function fitInitial() {
+    if (viewLocked) return;
     // A deep link names ONE cell (?lat=&lng=, e.g. from the trends page's
     // exposed list). Fitting the whole turf instead is the one view in which a
     // single cell cannot be seen, so the focus wins over the default fit.
-    if (DATA.focus && isFinite(DATA.focus.lat) && isFinite(DATA.focus.lng)) {
+    if (hasFocus) {
       map.setView([DATA.focus.lat, DATA.focus.lng], 14);
       return;
     }
-    if (theatres.length) map.fitBounds(theatres[0].bounds, {padding: [30, 30]});
-    else fitAll();
+    var v = savedView();
+    if (v) { map.setView([v.lat, v.lng], v.z); return; }
+    if (theatres.length) {
+      // One road trip stretches a turf across half a continent, and fitted whole,
+      // the ground you fight over is a few pixels. Then open on home instead.
+      var home = map.getBoundsZoom(theatres[0].bounds) < 10 ? homeCentre() : null;
+      if (home) map.setView(home, 11);
+      else map.fitBounds(theatres[0].bounds, {padding: [30, 30]});
+    } else fitAll();
   }
   fitInitial();
+
+  // ---- Start where you are, if the browser may already tell ----
+  // Only when the location permission is ALREADY granted, so opening the app
+  // never raises a prompt. One coarse fix, used for exactly two things on this
+  // device: where the map opens and what the planner measures distances from.
+  // It is deliberately NOT a position in the sense of myPos(): it sets no
+  // marker, is never shared with the crew and never goes out as a route start -
+  // all of that still takes the follow button or a pin, as /about says.
+  var approxPos = null, approxOk = false, approxAskedAt = 0;
+  function approxRef() {
+    return approxPos ? {lat: approxPos.lat, lng: approxPos.lng} : null;
+  }
+  function askApprox(centre) {
+    approxAskedAt = Date.now();
+    navigator.geolocation.getCurrentPosition(function (p) {
+      // A desktop "position" from the IP address can be a city off - worse than none.
+      if (!(p.coords.accuracy <= 2000)) return;
+      var first = !approxPos;
+      approxPos = {lat: p.coords.latitude, lng: p.coords.longitude, at: Date.now()};
+      if (centre && first && !viewLocked && !hasFocus && !meMarker) {
+        viewLocked = true;
+        map.setView([approxPos.lat, approxPos.lng], 12);
+      }
+      if (!meMarker) plRender();
+    }, function () {}, {enableHighAccuracy: false, maximumAge: 300000, timeout: 8000});
+  }
+  // Called wherever the planner is rebuilt: keeps the fix from going stale on a
+  // drive without ever running a GPS watch nobody asked for.
+  function refreshApprox() {
+    if (!approxOk || meMarker || document.visibilityState !== 'visible') return;
+    if (Date.now() - approxAskedAt > 120000) askApprox(false);
+  }
+  if (navigator.geolocation && navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({name: 'geolocation'}).then(function (st) {
+      if (st.state !== 'granted') return;
+      approxOk = true;
+      askApprox(true);
+    }).catch(function () {});
+  }
   // Filter water cells out of the target/tour list even without a layer toggle.
   snapVirginWater();
 
@@ -914,8 +1076,10 @@ document.addEventListener('DOMContentLoaded', function () {
   var plShown = PL_PAGE;
   var plRef = null;      // reference point of the most recently computed distances
 
+  // Distances are measured from where you are: the live position (follow or pin),
+  // else the coarse start fix, else - with no position at all - the map centre.
   function plRef_() {
-    return myPos() || (map ? {lat: map.getCenter().lat, lng: map.getCenter().lng} : null);
+    return myPos() || approxRef() || (map ? {lat: map.getCenter().lat, lng: map.getCenter().lng} : null);
   }
 
   // All candidates as data: enemy + free (from the server) and virgin land (all cells).
@@ -993,7 +1157,8 @@ document.addEventListener('DOMContentLoaded', function () {
   function plRender() {
     var list = document.getElementById('pl-list');
     if (!list) return;
-    var gps = myPos();
+    refreshApprox();
+    var gps = myPos() || approxRef();   // rows only show a distance that starts at YOU
     var ref = plRef_();
     plRef = ref;
 
@@ -1090,6 +1255,37 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   paintSort(document.getElementById('pl-sort'));
 
+  // ---- Gang chips on the desktop: two rows, then "N more" ----
+  // On the desktop the chip rail wraps instead of scrolling (no swipe there). That
+  // is right for a handful of gangs; a big turf borders thirty, and thirty wrapped
+  // chips pushed the very list they filter down to three visible rows. Folded,
+  // the rail keeps two rows and says how many it is holding back. The markup is
+  // replaced by every applyLive swap, so this runs again after each one - and
+  // whenever the planner becomes visible, because a hidden rail measures as 0.
+  var chipsOpen = false;
+  function foldChips() {
+    var box = document.getElementById('pl-filters');
+    if (!box) return;
+    var old = document.getElementById('pl-chips-more');
+    if (old) old.remove();
+    box.classList.remove('fold');
+    box.style.maxHeight = '';
+    var first = box.querySelector('.pl-chip');
+    if (!first || !first.offsetHeight || !window.matchMedia('(min-width: 1000px)').matches) return;
+    var gap = parseFloat(getComputedStyle(box).rowGap) || 5;
+    var limit = 2 * first.offsetHeight + gap, top0 = first.offsetTop, held = 0;
+    box.querySelectorAll('.pl-chip').forEach(function (c) { if (c.offsetTop - top0 >= limit) held++; });
+    if (!held) return;
+    if (!chipsOpen) { box.classList.add('fold'); box.style.maxHeight = (limit + 1) + 'px'; }
+    var b = document.createElement('button');
+    b.type = 'button'; b.id = 'pl-chips-more'; b.className = 'pl-chips-more';
+    b.textContent = chipsOpen ? T.chips_less : tf(T.chips_more, {n: held});
+    box.insertAdjacentElement('afterend', b);
+  }
+  document.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('#pl-chips-more')) { chipsOpen = !chipsOpen; foldChips(); }
+  });
+
   // ---- Bottom sheet: the panel snaps between peek/half/full (UI redesign step 4) ----
   // Tap-to-cycle only (drag physics deferred). The MAP tab lowers to peek; content
   // tabs raise a peeked sheet to half. Snap height changes the map container size, so
@@ -1135,7 +1331,7 @@ document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.tabc').forEach(function (c) { c.hidden = c.dataset.tabc !== name; });
     if (currentSnap === 'peek') setSnap('half');
     else { renderTabsActive(); invalidateSoon(); }
-    if (name === 'planer') maybeCoach();
+    if (name === 'planer') { maybeCoach(); foldChips(); }
     if (name === 'waechter') markWatcherSeen();   // opening the tab clears the count
   }
   document.querySelectorAll('.tab').forEach(function (t) {
@@ -1936,6 +2132,7 @@ document.addEventListener('DOMContentLoaded', function () {
             var all = document.querySelector('.pl-chip[data-filter="all"]');
             if (all) all.classList.add('on');
           }
+          foldChips();   // fresh markup: the desktop fold has to be put back
           plRender();   // plShown stays: whoever clicked "more" keeps their list
         }
 
@@ -1961,7 +2158,7 @@ document.addEventListener('DOMContentLoaded', function () {
       .then(function () { applying = false; });
   }
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible') loadFriends();
+    if (document.visibilityState === 'visible') { loadFriends(); refreshApprox(); }
   });
 
   var lastPush = 0;
@@ -2953,9 +3150,9 @@ document.addEventListener('DOMContentLoaded', function () {
   // refit once the layout has settled (several times, up to window.load).
   // On first build the map is still on the start view (Atlantic) — the distances
   // therefore have to be pulled along once it is fitted to the turf.
-  function relayout() { map.invalidateSize(); fitInitial(); plRefresh(); }
+  function relayout() { map.invalidateSize(); fitInitial(); plRefresh(); foldChips(); }
   setTimeout(relayout, 250);
   setTimeout(relayout, 900);
   window.addEventListener('load', relayout);
-  window.addEventListener('resize', function () { map.invalidateSize(); });
+  window.addEventListener('resize', function () { map.invalidateSize(); foldChips(); });
 });

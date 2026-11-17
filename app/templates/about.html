@@ -92,8 +92,11 @@
       <ul>
         <li><b>OpenStreetMap-Kacheln</b> — die Karte lädt dein Browser direkt von
         <code>tile.openstreetmap.org</code>. Dort ist damit sichtbar, welchen
-        Kartenausschnitt du ansiehst (im Folgen-Modus also ungefähr, wo du bist),
-        plus deine IP.</li>
+        Kartenausschnitt du ansiehst, plus deine IP. Im Folgen-Modus ist das
+        ungefähr dort, wo du bist — ebenso beim Öffnen, falls du dem Browser die
+        Standortfreigabe für Warroom schon erteilt hast: dann startet die Karte
+        an deinem Standort. Dieser Start-Standort bleibt im Browser; an den
+        Warroom-Server oder ans Routing geht er nicht.</li>
         <li><b>OpenStreetMap Overpass</b> — bekommt nur Zell-Koordinaten, nicht
         wer du bist, um Tour-Wegpunkte auf Straßen zu legen. Fragt der Server,
         nicht dein Browser.</li>
@@ -208,8 +211,11 @@
       <ul>
         <li><b>OpenStreetMap tiles</b> — your browser loads the map itself
         straight from <code>tile.openstreetmap.org</code>. That shows them which
-        part of the map you are looking at (in follow mode, roughly where you
-        are), plus your IP.</li>
+        part of the map you are looking at, plus your IP. In follow mode that is
+        roughly where you are — and so it is on opening, if you have already
+        allowed your browser to give Warroom your location: the map then starts
+        where you are. That start fix stays in the browser; it is not sent to
+        the Warroom server or to routing.</li>
         <li><b>OpenStreetMap Overpass</b> — gets cell coordinates only, not who
         you are, to snap tour waypoints onto roads. Asked by the server, not by
         your browser.</li>

@@ -653,6 +653,35 @@ body.wr-setloc .stage { grid-column: 1 / -1; }
   font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap;
 }
 .pl-chip b { color: var(--text); font-family: var(--mono); font-weight: 700; }
+/* A gang name longer than the sidebar is cut with an ellipsis instead of pushing
+   the chip (and its count) out of the panel. */
+.pl-chip { max-width: 100%; }
+.pl-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Desktop fold (warroom.js foldChips): two rows of chips, the rest behind a
+   "N more" toggle. The height comes from the script, which measures the rows. */
+.pl-chips.fold { overflow: hidden; padding-bottom: 0; }
+/* Numbers in the map cells (warroom.js labelCells). A zero-size marker with the
+   text centred on it; no pointer events, so a tap still reaches the cell below. */
+.cell-lbl { pointer-events: none; }
+.cell-lbl span {
+  position: absolute; transform: translate(-50%, -50%); white-space: nowrap;
+  font-family: var(--mono); font-weight: 700; font-size: 10px; line-height: 1;
+  color: var(--text);
+  text-shadow: 0 0 3px #000, 0 0 3px #000, 0 1px 2px #000;
+}
+.cell-lbl.z13 span { font-size: 12px; }
+.cell-lbl.z14 span { font-size: 14px; }
+.cell-lbl.mine span { color: var(--gold-bright); }
+.cell-lbl.mine.thin span { color: #ffd9a0; text-decoration: underline dotted; }
+.cell-lbl.enemy span { color: #ff9ea6; }
+.cell-lbl.lead span { color: #ffd15e; font-size: 1.25em; }
+.pl-chips-more {
+  display: block; margin: 0.3rem 0 0.4rem; padding: 0.2rem 0.5rem;
+  background: none; border: 1px dashed var(--edge); border-radius: 0;
+  color: var(--muted); font-size: 0.7rem; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer;
+}
+.pl-chips-more:hover { border-color: var(--gold-soft); color: var(--gold-bright); }
 .pl-chip:hover { border-color: var(--gold-soft); }
 .pl-chip.on {
   border-color: var(--gold); color: var(--gold-bright);
