@@ -199,6 +199,7 @@ toolchain.
 | `WARROOM_DRIP_WORKERS`| `3`     | Parallel road-snap workers, each leading with a different Overpass mirror |
 | `WARROOM_ARCHIVE_HOURS` | `1`   | Hours between history samples; `0` disables the archive ([HTTP API](#http-api)) |
 | `WARROOM_ARCHIVE_KEEP_DAYS` | `0` | Retention for the archive in days; `0` keeps everything |
+| `WARROOM_CELL_LOG`    | `1`     | Keep the [cell ownership log](#the-cell-ownership-log) (which gang held which cell, as changes); `0` disables it |
 | `WARROOM_AIR_SECONDS` | `960` (`120` with OpenSky account) | Seconds between worldwide OpenSky samples for the air traffic layer; `0` disables it |
 | `WARROOM_OPENSKY_ID` / `_SECRET` | *(none)* | Optional free OpenSky API client; lifts the quota from 400 to 4000 credits/day |
 | `WARROOM_AIR_DAILY_MAX` | `420` | Own cap on adsb.lol requests per UTC day (military list, and the 200 km queries when adsb.fi fails; their limit is 500/day per IP). adsb.fi, tried first for area queries, is paced at 1 request/s and has no daily cap |
@@ -456,6 +457,25 @@ curl -H "$AUTH" 'https://your-instance/api/players?limit=20'
 # How one player developed over the last week
 curl -H "$AUTH" 'https://your-instance/api/players?id=4711&since=2026-08-21 00:00:00'
 ```
+
+### The cell ownership log
+
+The archive keeps totals per gang; it never kept *where* a gang stood. The
+poller therefore also writes down **which gang holds which cell**, as changes:
+a row in `cell_log` says "from this moment on, cell (i, j) belongs to this gang"
+(`NULL` = the cell left the feed). The first run writes every cell once as the
+baseline, after that only what moved. `cell_log_samples` records every look at a changed feed, so a quiet
+hour and a missed one stay distinguishable, and `gang_names` keeps name and
+colour for gangs that later disband.
+
+Nothing reads this yet. It is the raw material for a map time-lapse, collected
+ahead of the feature because, like the archive, it **cannot be backfilled**: the
+replay will reach back exactly as far as this has been running on your instance.
+There is no endpoint for it so far; one will come with the time-lapse.
+
+A feed that suddenly lists less than 80 % of the previous cells is treated as a
+broken reply and skipped rather than logged as a mass loss — unless it stays
+that small three feeds in a row. `WARROOM_CELL_LOG=0` switches the log off.
 
 ### Leaderboards and names
 

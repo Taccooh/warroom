@@ -769,6 +769,89 @@ def _write_archive(conn, players: dict, gangs: dict, gctx: dict) -> None:
              len(players), len(gangs), n_names, ts)
 
 
+def log_cells(conn, lookup: dict, glat: float, glng: float) -> dict:
+    """Append what changed in the feed to the cell ownership log (db.py: cell_log).
+
+    The feed only ever says who holds a cell NOW. Diffing each new feed against
+    the last one seen and keeping the differences is what lets a map be replayed
+    later - and it has to happen here, while the feed is in memory: a change that
+    is not written down in the cycle it shows up in cannot be recovered.
+
+    Rows are changes, not snapshots: a cell that keeps its gang writes nothing,
+    however often its strength moves. The first run writes every cell once (the
+    baseline everything after it is read against)."""
+    new: dict = {}
+    names: dict = {}
+    for c in lookup.values():
+        gid = _num(c.get("gang_id"))
+        if gid is None:
+            gid = 0             # held, but the feed gave no id - not "nobody"
+        new[grid.cell_index(c["lat"], c["lng"], glat, glng)] = (gid, _num(c.get("count")))
+        if gid and c.get("gang"):
+            names[gid] = (c["gang"], c.get("color"))
+
+    old = {(r[0], r[1]): r[2] for r in conn.execute("SELECT i, j, gang_id FROM cell_now")}
+    grid_now = f"{glat}_{glng}"
+    # A different cell size means i/j address different ground: the stored state
+    # cannot be compared with this feed at all. Start over with a new baseline;
+    # the old rows stay readable through the grid kept with their samples.
+    regrid = bool(old) and db.kv_get(conn, "cell_log_grid") != grid_now
+    if regrid:
+        log.warning("Zell-Log: Raster geaendert (%s), neue Basis", grid_now)
+        old = {}
+    baseline = not old
+
+    if old and len(new) < len(old) * config.CELL_LOG_SHRINK:
+        # A network error is not a finding, and neither is half a feed.
+        streak = int(db.kv_get(conn, "cell_log_shrunk", 0) or 0) + 1
+        if streak < config.CELL_LOG_SHRINK_SAMPLES:
+            db.kv_set(conn, "cell_log_shrunk", streak)
+            log.warning("Zell-Log: Feed nennt nur %d Zellen statt %d, Sample "
+                        "uebersprungen (%d/%d)", len(new), len(old), streak,
+                        config.CELL_LOG_SHRINK_SAMPLES)
+            return {"cells": len(new), "changes": 0, "skipped": True}
+        log.warning("Zell-Log: Feed bleibt bei %d Zellen statt %d, wird uebernommen",
+                    len(new), len(old))
+
+    # One timestamp for the whole sample, and never one that an earlier sample
+    # already used: (i, j, ts) is the key, and a clock stepping back must not
+    # make a new change overwrite an old one.
+    last = conn.execute("SELECT MAX(ts) FROM cell_log_samples").fetchone()[0] or 0
+    ts = max(int(time.time()), last + 1)
+    rows, ups, gone = [], [], []
+    for (i, j), (gid, cnt) in new.items():
+        if (i, j) not in old or old[(i, j)] != gid:
+            rows.append((i, j, ts, gid, cnt))
+            ups.append((i, j, gid))
+    for (i, j) in old.keys() - new.keys():
+        rows.append((i, j, ts, None, None))
+        gone.append((i, j))
+
+    with _write_txn(conn):
+        if regrid:
+            conn.execute("DELETE FROM cell_now")
+        conn.executemany("INSERT OR REPLACE INTO cell_log (i, j, ts, gang_id, count) "
+                         "VALUES (?,?,?,?,?)", rows)
+        conn.executemany("INSERT OR REPLACE INTO cell_now (i, j, gang_id) VALUES (?,?,?)", ups)
+        conn.executemany("DELETE FROM cell_now WHERE i = ? AND j = ?", gone)
+        conn.execute("INSERT INTO cell_log_samples (ts, cells, changes, baseline, grid_lat, "
+                     "grid_lng) VALUES (?,?,?,?,?,?)",
+                     (ts, len(new), len(rows), 1 if baseline else 0, glat, glng))
+        # Rename or recolour wins, but an unchanged gang writes nothing.
+        conn.executemany(
+            "INSERT INTO gang_names (gang_id, gang, color) VALUES (?,?,?) "
+            "ON CONFLICT(gang_id) DO UPDATE SET gang = excluded.gang, color = excluded.color, "
+            "seen_at = datetime('now') "
+            "WHERE gang IS NOT excluded.gang OR color IS NOT excluded.color",
+            [(gid, g, col) for gid, (g, col) in names.items()])
+        db.kv_set(conn, "cell_log_grid", grid_now)
+        db.kv_set(conn, "cell_log_shrunk", 0)
+    if rows:
+        log.info("Zell-Log: %d Zellen, %d Aenderungen%s", len(new), len(rows),
+                 " (Basis)" if baseline else "")
+    return {"cells": len(new), "changes": len(rows), "baseline": baseline}
+
+
 def poll_all(conn, only_user_id: int | None = None) -> dict:
     """only_user_id: first poll of a freshly registered user. Restricting the run
     to that one user keeps registration from racing the 5-minute cycle across
@@ -812,6 +895,16 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
             log.exception("Archiv-Sample nicht geschrieben")
     feed_sig = sig.hexdigest()
     feed_changed = feed_sig != db.kv_get(conn, "feed_sig")
+    # The ownership log reads the lookup that exists anyway. Regular cycles only:
+    # the first poll of a new user runs beside the cycle and would write the same
+    # sample a second time. An unchanged feed cannot hold a change - except on
+    # the very first run, which owes the baseline whether the feed moved or not.
+    if (config.CELL_LOG and only_user_id is None
+            and (feed_changed or not db.kv_get(conn, "cell_log_grid"))):
+        try:
+            log_cells(conn, lookup, glat, glng)
+        except Exception:
+            log.exception("Zell-Log nicht geschrieben")
     total_events = 0
     total_skipped = 0
     team_cache: dict = {}

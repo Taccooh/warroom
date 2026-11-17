@@ -1187,3 +1187,64 @@ def board_wall(conn, uid: int, board: str = "cells", limit: int = 12) -> dict:
             (now, me))}
     return {"board": board, "rows": rows, "ts": now, "since": then,
             "mine": mine, "boards": BOARDS}
+
+
+def cell_replay(conn, i0: int, i1: int, j0: int, j1: int,
+                since: int | None = None, until: int | None = None) -> dict:
+    """Who held the cells of one index box, and how that changed - the read side
+    of the ownership log (db.py: cell_log), shaped for a map time-lapse.
+
+    `start` is the state at `since`: every cell in the box that was held then.
+    `changes` are the rows after it in time order, to be applied on top; a
+    gang_id of None takes the cell off the map. `samples` says when the feed was
+    looked at, so a player can tell a quiet hour from a missed one.
+
+    The state at any time is the rows from the last BASELINE sample up to then -
+    never anything older, because a baseline is written when the cell size
+    changed and older rows address different ground. A baseline inside the
+    window is flagged in `samples`; the map has to be cleared at that point
+    before its rows are applied."""
+    i0, i1 = min(i0, i1), max(i0, i1)
+    j0, j1 = min(j0, j1), max(j0, j1)
+    first = conn.execute("SELECT MIN(ts) FROM cell_log_samples WHERE baseline = 1").fetchone()[0]
+    empty = {"since": since, "until": until, "grid": None, "start": [], "changes": [],
+             "samples": [], "gangs": {}}
+    if first is None:
+        return empty
+    last = conn.execute("SELECT MAX(ts) FROM cell_log_samples").fetchone()[0]
+    until = last if until is None else min(until, last)
+    # Before the first baseline there is nothing to show; start there instead of
+    # answering with an empty map that looks like "nobody held anything".
+    since = first if since is None else max(since, first)
+    if since > until:
+        return {**empty, "since": since, "until": until}
+    base = conn.execute(
+        "SELECT ts, grid_lat, grid_lng FROM cell_log_samples "
+        "WHERE baseline = 1 AND ts <= ? ORDER BY ts DESC LIMIT 1", (since,)).fetchone()
+    state: dict = {}
+    changes = []
+    for r in conn.execute(
+            "SELECT i, j, ts, gang_id, count FROM cell_log "
+            "WHERE i BETWEEN ? AND ? AND j BETWEEN ? AND ? AND ts BETWEEN ? AND ? "
+            "ORDER BY ts", (i0, i1, j0, j1, base["ts"], until)):
+        if r["ts"] <= since:
+            if r["gang_id"] is None:
+                state.pop((r["i"], r["j"]), None)
+            else:
+                state[(r["i"], r["j"])] = r["gang_id"]
+        else:
+            changes.append([r["ts"], r["i"], r["j"], r["gang_id"], r["count"]])
+    samples = [[r["ts"], r["changes"], r["baseline"]] for r in conn.execute(
+        "SELECT ts, changes, baseline FROM cell_log_samples WHERE ts > ? AND ts <= ? "
+        "ORDER BY ts", (since, until))]
+    ids = {g for g in state.values() if g} | {c[3] for c in changes if c[3]}
+    gangs = {}
+    if ids:
+        marks = ",".join("?" * len(ids))
+        gangs = {r["gang_id"]: {"gang": r["gang"], "color": r["color"]} for r in conn.execute(
+            f"SELECT gang_id, gang, color FROM gang_names WHERE gang_id IN ({marks})",
+            tuple(ids))}
+    return {"since": since, "until": until,
+            "grid": {"lat": base["grid_lat"], "lng": base["grid_lng"]},
+            "start": [[i, j, g] for (i, j), g in sorted(state.items())],
+            "changes": changes, "samples": samples, "gangs": gangs}

@@ -265,6 +265,55 @@ CREATE TABLE IF NOT EXISTS board_snap (
     PRIMARY KEY (ts, board, rank)
 );
 CREATE INDEX IF NOT EXISTS idx_board_snap ON board_snap(board, player_id, ts DESC);
+-- Cell ownership history, the raw material for a map time-lapse. The archive
+-- above keeps TOTALS per gang; nothing kept WHERE a gang stood, so "show me how
+-- this front moved over the last month" had no data behind it. Like the archive
+-- it cannot be backfilled, which is why it is written long before anything
+-- reads it.
+-- Three tables, global like the feed they come from (no user_id anywhere):
+--   cell_now          the feed as last seen - only there so the next sample can
+--                     be diffed against it without replaying the whole log.
+--   cell_log          one row per CHANGE: from `ts` on, cell (i, j) belongs to
+--                     gang_id. NULL = the cell left the feed (nobody's; the feed
+--                     carries gang territory only). 0 = held, gang id missing.
+--                     `count` is the holder's strength at that moment - kept on
+--                     changes only, it is not a strength history.
+--   cell_log_samples  one row per look at a changed feed, also when nothing
+--                     moved: without it a missed hour and a quiet hour look the
+--                     same. `baseline` = 1 marks a sample that wrote the WHOLE
+--                     state (first run, or after the grid changed); the state at
+--                     any time T is the rows from the last baseline <= T up to T.
+--                     The grid is stored per sample because i/j only mean
+--                     something together with the cell size they were cut with.
+CREATE TABLE IF NOT EXISTS cell_now (
+    i INTEGER NOT NULL, j INTEGER NOT NULL,
+    gang_id INTEGER,
+    PRIMARY KEY (i, j)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS cell_log (
+    i INTEGER NOT NULL, j INTEGER NOT NULL,
+    ts INTEGER NOT NULL,          -- unix seconds; every row of a sample shares it
+    gang_id INTEGER,
+    count INTEGER,
+    PRIMARY KEY (i, j, ts)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_cell_log_ts ON cell_log(ts);
+CREATE TABLE IF NOT EXISTS cell_log_samples (
+    ts       INTEGER PRIMARY KEY,
+    cells    INTEGER NOT NULL,    -- cells in the feed at this sample
+    changes  INTEGER NOT NULL,    -- rows it added to cell_log
+    baseline INTEGER NOT NULL DEFAULT 0,
+    grid_lat REAL NOT NULL, grid_lng REAL NOT NULL
+);
+-- What a gang_id in cell_log was called and coloured. A growing cache like
+-- player_names: a gang that disbands vanishes from the feed, and its old cells
+-- would replay as a bare number in no colour.
+CREATE TABLE IF NOT EXISTS gang_names (
+    gang_id INTEGER PRIMARY KEY,
+    gang    TEXT,
+    color   TEXT,
+    seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Web push: one row per device (endpoint). lang = language of the device at subscribe time.
 CREATE TABLE IF NOT EXISTS push_subs (
     endpoint   TEXT PRIMARY KEY,

@@ -19,6 +19,9 @@ services:
       # - WARROOM_PLANNER_LIMIT=25000
       # - WARROOM_MAX_USERS=30
       # - WARROOM_TZ=Europe/Berlin
+      # Cell ownership log (which gang held which cell, for the map time-lapse).
+      # On by default and not backfillable; 0 switches it off.
+      # - WARROOM_CELL_LOG=1
       # Free OpenSky API client (opensky-network.org, account page, "API client"): the
       # worldwide air traffic picture then refreshes every 2 minutes instead of every 16.
       # - WARROOM_OPENSKY_ID=...

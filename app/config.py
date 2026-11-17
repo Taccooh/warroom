@@ -68,6 +68,18 @@ ARCHIVE_HOURS = float(os.environ.get("WARROOM_ARCHIVE_HOURS", "1"))
 # consistent with the rest of the app — see /about, nothing here expires on its
 # own). Set it if disk matters more than long-range history.
 ARCHIVE_KEEP_DAYS = int(os.environ.get("WARROOM_ARCHIVE_KEEP_DAYS", "0"))
+# Cell ownership log (db.py: cell_log) - which gang held which cell, written as
+# changes whenever the feed moved. It is what a map time-lapse replays, and like
+# the archive it only exists from the day it is switched on. Costs no upstream
+# request and a few MB a month; 0 turns it off.
+CELL_LOG = os.environ.get("WARROOM_CELL_LOG", "1") != "0"
+# A feed that suddenly lists far fewer cells than the last one is treated as a
+# broken reply, not as a mass loss of territory: logging it would write every
+# missing cell as "lost" and the next good feed as "retaken". Below this share
+# of the previous size the sample is skipped - unless it stays that small for
+# CELL_LOG_SHRINK_SAMPLES feeds in a row, which is what a real reset looks like.
+CELL_LOG_SHRINK = 0.8
+CELL_LOG_SHRINK_SAMPLES = 3
 
 # Watcher events kept per user. The log is a rolling window, not an archive:
 # noisier scopes produce more events, and nothing here is meant to grow without
