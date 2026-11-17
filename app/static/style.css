@@ -356,6 +356,33 @@ path.cell-picked {
 /* display:block above outranks the UA [hidden] rule — say it explicitly */
 .exp-opt small[hidden] { display: none; }
 
+/* Raid planner: the export chooser's shell around a 2x2 grid of time budgets */
+.raid-open { margin-left: auto; min-height: 34px; color: var(--gold-bright); border-color: var(--gold-soft); }
+.raid-open[hidden] { display: none; }
+.raid-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.raid-grid .exp-opt { margin: 0; text-align: center; min-height: 44px; }
+.raid-q { margin: 0.2rem 0 0.5rem; font-size: 0.85rem; color: var(--text); }
+.raid-pool { margin: 0 0 0.5rem; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+.raid-loop {
+  display: flex; align-items: center; gap: 0.45rem; margin: 0 0 0.7rem;
+  font-size: 0.82rem; color: var(--text); cursor: pointer;
+}
+.raid-loop input { accent-color: var(--gold); width: 1.05rem; height: 1.05rem; margin: 0; }
+.raid-rule { margin: 0.7rem 0 0; font-size: 0.7rem; color: var(--muted); line-height: 1.45; }
+.raid-msg { margin: 0.6rem 0 0; font-size: 0.78rem; color: var(--gold); line-height: 1.4; }
+.raid-msg[hidden] { display: none; }
+/* Round-trip switch in the tour panel, and the mark where the loop closes */
+.rb-jump.tour-loop.on {
+  border-color: var(--gold); color: var(--gold-bright);
+  background: linear-gradient(180deg, rgba(232, 182, 76, 0.16), rgba(232, 182, 76, 0.06));
+}
+.tour-home { pointer-events: none; }
+.tour-home span {
+  display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  background: var(--panel); border: 1px solid var(--gold); color: var(--gold-bright);
+  font-size: 15px; line-height: 1;
+}
+
 /* Dead-key dialog: the export chooser's shell in alarm colours */
 .kb-dlg { border-color: var(--enemy); }
 .kb-dlg .exp-head b { color: var(--enemy-hot); }

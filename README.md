@@ -24,7 +24,13 @@ https://warroom.mechanics-toolbox.org/about
   (each with its own routing profile), waypoints snapped to actual ways
   (OpenStreetMap) and the real route drawn in-app (OSRM), in-app guidance, or export: Google Maps hand-off (10 stops), or a
   GPX/KML file with every stop plus the routed road line, for OsmAnd, Locus,
-  Garmin, Komoot and Google Earth
+  Garmin, Komoot and Google Earth. Any tour can be a round trip that ends where
+  it was planned from
+- **Raid** — say how long you have (30 min to 2 h) and get the tour: the largest
+  set of cells that fall in passing — free, untouched, already led, or short by
+  at most 25 APs — that fits the time from where you are, there and back if you
+  want. Picked on the device from the planner's current filter, then checked
+  against the routed travel time and re-picked if the first guess was off
 - **Coverage brush** — opt-in GPS recording of the ground you actually covered
   while driving: every stamp carries your expected reception radius, the screen
   stays awake while recording, and an interrupted session resumes on its own

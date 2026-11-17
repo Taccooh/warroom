@@ -115,6 +115,9 @@
         {# Was a direct Google-Maps link; now opens the export chooser, because
            Maps is the one target that silently drops stops. #}
         <button type="button" class="rb-jump" id="tour-maps">{{ t('tour_export') }}</button>
+        {# Round trip: the tour ends where it was planned from. Set by the raid
+           planner, switchable here for any tour. #}
+        <button type="button" class="rb-jump tour-loop" id="tour-loop">{{ t('tour_loop') }}</button>
         <button type="button" class="rb-jump stop" id="tour-clear">{{ t('tour_clear') }}</button>
       </div>
     </div>
@@ -129,6 +132,9 @@
           <option value="foot" {% if travel_mode == 'foot' %}selected{% endif %}>{{ t('travel_foot') }}</option>
         </select>
       </label>
+      {# Raid planner: a time budget in, a finished tour out. Lives in this row
+         because the travel mode next to it decides how far the time reaches. #}
+      <button type="button" class="rb-jump raid-open" id="raid-open">⚔ {{ t('raid_btn') }}</button>
     </form>
     {# The planner/tour how-to used to sit here as two permanent paragraphs; it is
        now a one-time coach toast (warroom.js maybeCoach, gated by wr_hints_seen),
@@ -369,6 +375,36 @@
     <b>{{ t('exp_kml') }}</b>
     <small>{{ t('exp_kml_note') }}</small>
   </button>
+</dialog>
+
+{# Raid planner (warroom.js, "Raid"). Two faces: without a position it asks
+   where the raid starts, with one it offers the time budgets. Reuses the export
+   chooser's shell. #}
+<dialog class="exp-dlg raid-dlg" id="raid-dlg" aria-labelledby="raid-title">
+  <div class="exp-head">
+    <b id="raid-title">⚔ {{ t('raid_title') }}</b>
+    <button type="button" class="exp-x" id="raid-close" aria-label="{{ t('exp_close') }}">✕</button>
+  </div>
+  <p class="exp-sub">{{ t('raid_sub') }}</p>
+  <div id="raid-need" hidden>
+    <p class="raid-q">{{ t('raid_need_pos') }}</p>
+    <div class="raid-grid">
+      <button type="button" class="exp-opt" id="raid-gps"><b>◎ {{ t('raid_use_gps') }}</b></button>
+      <button type="button" class="exp-opt" id="raid-map"><b>⌖ {{ t('raid_use_map') }}</b></button>
+    </div>
+  </div>
+  <div id="raid-pick">
+    <p class="raid-pool" id="raid-pool"></p>
+    <label class="raid-loop"><input type="checkbox" id="raid-loop" checked> {{ t('raid_loop') }}</label>
+    <div class="raid-grid">
+      <button type="button" class="exp-opt raid-min" data-min="30"><b>30 min</b></button>
+      <button type="button" class="exp-opt raid-min" data-min="60"><b>1 h</b></button>
+      <button type="button" class="exp-opt raid-min" data-min="90"><b>1 h 30</b></button>
+      <button type="button" class="exp-opt raid-min" data-min="120"><b>2 h</b></button>
+    </div>
+    <p class="raid-rule" id="raid-rule"></p>
+  </div>
+  <p class="raid-msg" id="raid-msg" hidden></p>
 </dialog>
 
 {# Per-request data as a JSON island — inert (not executed), so it is exempt

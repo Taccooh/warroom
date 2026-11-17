@@ -9,6 +9,8 @@ What leaves the house, spelled out because it is easy to get wrong: the ordered
 STOP points (cell-derived road points, same class of data Overpass already
 receives) AND, whenever the user has a position set, that position as point 0 —
 routing a drive from where you actually stand is the point of the feature.
+A round trip (tour panel switch, or a raid) sends the spot it was planned from
+once more as the LAST point; that is a position the user set, the same class.
 During in-app guidance that is the live fix, resent on every reroute (off route,
 or every 10 s). This docstring used to promise the opposite while the client had
 long since been sending it; /about now says so too, in both languages.
@@ -85,8 +87,10 @@ def nearest(lat: float, lng: float, mode: str | None = None) -> list | None:
 
 def route(points: list, mode: str | None = None) -> dict | None:
     """points: [[lat, lng], ...] ordered stops (>= 2). Returns
-    {"geometry": [[lat, lng], ...], "km": float, "legs": [float, ...]} with the
-    full road polyline, or None when no instance answered / OSRM found no route."""
+    {"geometry": [[lat, lng], ...], "km": float, "min": float, "legs": [float, ...]}
+    with the full road polyline, or None when no instance answered / OSRM found
+    no route. "min" is OSRM's own travel time for the profile - moving time on
+    that line, with no allowance for stopping."""
     pts = []
     for p in points[:MAX_STOPS]:
         try:
@@ -116,6 +120,7 @@ def route(points: list, mode: str | None = None) -> dict | None:
                 # GeoJSON is lon,lat — flip to Leaflet's lat,lng
                 "geometry": [[c[1], c[0]] for c in rt["geometry"]["coordinates"]],
                 "km": round(rt["distance"] / 1000.0, 2),
+                "min": round(rt["duration"] / 60.0, 1) if rt.get("duration") is not None else None,
                 "legs": [round(l["distance"] / 1000.0, 2) for l in rt.get("legs", [])],
             }
         except Exception as ex:   # 429/5xx/timeout/DNS — try the next instance

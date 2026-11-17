@@ -2209,6 +2209,29 @@ document.addEventListener('DOMContentLoaded', function () {
   // user explicitly taps "auto order" (or clears the tour)
   var tourManual = false;
   try { tourManual = localStorage.getItem('wr_tour_manual') === '1'; } catch (e) {}
+  // Round trip: the point the tour has to END at - where it was planned from.
+  // Fixed coordinates, not "wherever I am": during guidance the own position
+  // moves, the way back does not. null = the tour ends at its last stop.
+  var raidJob = null;   // a raid still being tuned against the routed time, see raidTune
+  var tourHome = null;
+  try {
+    var th = JSON.parse(localStorage.getItem('wr_tour_home') || 'null');
+    if (th && isFinite(th.lat) && isFinite(th.lng)) tourHome = {lat: +th.lat, lng: +th.lng};
+  } catch (e) {}
+  function setHome(h) {
+    tourHome = h;
+    try {
+      if (h) localStorage.setItem('wr_tour_home', JSON.stringify(h));
+      else localStorage.removeItem('wr_tour_home');
+    } catch (e) {}
+  }
+  // "58 min" / "1 h 05" - every duration the tour shows goes through here
+  function fmtMin(m) {
+    m = Math.max(1, Math.round(m));
+    if (m < 60) return m + ' min';
+    var r = m % 60;
+    return Math.floor(m / 60) + ' h' + (r ? ' ' + (r < 10 ? '0' : '') + r : '');
+  }
   var tourLayer = L.layerGroup().addTo(map);
   var panel = document.getElementById('tour-panel');
   var tourList = document.getElementById('tour-list');
@@ -2323,6 +2346,7 @@ document.addEventListener('DOMContentLoaded', function () {
       toast('<b>' + esc(tf(T.maps_cap, {max: MAPS_MAX})) + '</b><br>' +
             esc(tf(T.maps_cap_toast, {max: MAPS_MAX, n: tour.length})), 6500, true);
     }
+    raidJob = null;   // a hand edit: the tour is the user's now, stop tuning it
     tourOrdered = null; stopGuidance(); tourLayer.clearLayers(); saveTour(); renderTour();
     // Auto-optimize on every change: the Optimize button is gone. Unordered
     // tours silently exported an insertion-order route to Google Maps.
@@ -2335,7 +2359,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // Hand order (drag & drop): list order = drive order, no 2-opt on top.
   function applyManualOrder() {
     tourOrdered = tour.slice();
-    routeGeo = null; routeKm = null;
+    routeGeo = null; routeKm = null; routeMin = null;
     drawRoute(); renderTour();
     fetchRoute();
   }
@@ -2361,6 +2385,9 @@ document.addEventListener('DOMContentLoaded', function () {
     function len(o) {
       var d = hav(start, stopPos(o[0]));
       for (var i = 1; i < o.length; i++) d += hav(stopPos(o[i - 1]), stopPos(o[i]));
+      // On a round trip the way home counts: the shortest open path likes to
+      // end at the far side of the turf, which is the worst place to be done.
+      if (tourHome) d += hav(stopPos(o[o.length - 1]), tourHome);
       return d;
     }
     var improved = true, guard = 0;
@@ -2373,7 +2400,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
     tour = order; tourOrdered = order; saveTour();
-    routeGeo = null; routeKm = null;   // stale geometry — refetch for the new order
+    routeGeo = null; routeKm = null; routeMin = null;   // stale geometry — refetch for the new order
     drawRoute(); renderTour();
     fetchRoute();
   }
@@ -2383,11 +2410,11 @@ document.addEventListener('DOMContentLoaded', function () {
   // route start, so the approach leg is real road too (disclosed on /about).
   // When no OSRM instance answers, everything falls back to the old dashed
   // straight lines and the total is marked approximate.
-  var routeGeo = null, routeKm = null, routeFromPos = false, routeSeq = 0, routeT = null;
+  var routeGeo = null, routeKm = null, routeMin = null, routeFromPos = false, routeSeq = 0, routeT = null;
   function fetchRoute(force) {
     if (routeT) clearTimeout(routeT);
     routeT = setTimeout(function () {
-      if (!tourOrdered || !tourOrdered.length) { routeGeo = null; routeKm = null; return; }
+      if (!tourOrdered || !tourOrdered.length) { routeGeo = null; routeKm = null; routeMin = null; return; }
       // road-snapping still pending → the post-snap optimize will refetch with
       // the real road points; routing cell centers now would just be wasted.
       // force=true overrides: when Overpass has given up entirely, OSRM's own
@@ -2396,7 +2423,8 @@ document.addEventListener('DOMContentLoaded', function () {
       var start = myPos();
       var pts = (start ? [[start.lat, start.lng]] : []).concat(
         tourOrdered.map(function (s) { var p = stopPos(s); return [p.lat, p.lng]; }));
-      if (pts.length < 2) { routeGeo = null; routeKm = null; return; }
+      if (tourHome) pts.push([tourHome.lat, tourHome.lng]);   // round trip: end where it began
+      if (pts.length < 2) { routeGeo = null; routeKm = null; routeMin = null; return; }
       var fromPos = !!start;
       var seq = ++routeSeq;
       fetch('/api/route', {method: 'POST', headers: {'Content-Type': 'application/json',
@@ -2406,8 +2434,10 @@ document.addEventListener('DOMContentLoaded', function () {
           if (seq !== routeSeq) return;   // a newer tour superseded this request
           routeGeo = (d && d.ok && d.route) ? d.route.geometry : null;
           routeKm = (d && d.ok && d.route) ? d.route.km : null;
+          routeMin = (d && d.ok && d.route && d.route.min != null) ? d.route.min : null;
           routeFromPos = fromPos && !!routeGeo;
           drawRoute(); renderTour();
+          raidTune();   // a raid in the making checks its guess against the real road
         }).catch(function () {});
     }, 600);
   }
@@ -2438,6 +2468,7 @@ document.addEventListener('DOMContentLoaded', function () {
       for (var i = navIdx; i < tourOrdered.length; i++) {
         var sp = stopPos(tourOrdered[i]); line.push([sp.lat, sp.lng]);
       }
+      if (tourHome) line.push([tourHome.lat, tourHome.lng]);
     }
     var best = Infinity;
     for (var j = 1; j < line.length; j++) {
@@ -2451,6 +2482,7 @@ document.addEventListener('DOMContentLoaded', function () {
     for (var i = navIdx; i < tourOrdered.length; i++) {
       var p = stopPos(tourOrdered[i]); pts.push([p.lat, p.lng]);
     }
+    if (tourHome) pts.push([tourHome.lat, tourHome.lng]);
     if (pts.length < 2) return;
     var seq = ++routeSeq;
     fetch('/api/route', {method: 'POST', headers: {'Content-Type': 'application/json',
@@ -2461,6 +2493,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (d && d.ok && d.route) {   // keep the old line on failure — never blank mid-drive
           rerouteFails = 0;
           routeGeo = d.route.geometry; routeKm = d.route.km; routeFromPos = true;
+          routeMin = d.route.min != null ? d.route.min : null;
           drawRoute(); renderTour();
         } else { rerouteFailSoft(); }
       }).catch(function () { rerouteFailSoft(); });
@@ -2493,6 +2526,7 @@ document.addEventListener('DOMContentLoaded', function () {
       d += hav(prev, p);
       prev = p;
     }
+    if (tourHome) d += hav(prev, tourHome);
     return d;
   }
 
@@ -2510,7 +2544,13 @@ document.addEventListener('DOMContentLoaded', function () {
     } else {
       var lls = (start ? [[start.lat, start.lng]] : []).concat(
         tourOrdered.map(function (s) { var p = stopPos(s); return [p.lat, p.lng]; }));
+      if (tourHome) lls.push([tourHome.lat, tourHome.lng]);
       L.polyline(lls, {color: '#e8b64c', weight: 3, opacity: 0.85, dashArray: '6 6', interactive: false}).addTo(tourLayer);
+    }
+    if (tourHome) {
+      L.marker([tourHome.lat, tourHome.lng], {interactive: false, keyboard: false, zIndexOffset: 650,
+        icon: L.divIcon({className: 'tour-home', iconSize: [22, 22], iconAnchor: [11, 11],
+                         html: '<span>⌂</span>'})}).addTo(tourLayer);
     }
     tourOrdered.forEach(function (s, i) {
       var p = stopPos(s);
@@ -2917,7 +2957,11 @@ document.addEventListener('DOMContentLoaded', function () {
     var km = totalKm();
     // routed = real road km; fallback air-line totals are marked approximate
     var kmTxt = km != null ? (routeKm != null ? fmtDist(km) : '≈ ' + fmtDist(km)) : null;
-    tourCount.textContent = kmTxt != null ? tf(T.tour_total, {n: n, d: kmTxt}) : tf(T.tour_one, {n: n});
+    tourCount.textContent = (kmTxt != null ? tf(T.tour_total, {n: n, d: kmTxt}) : tf(T.tour_one, {n: n})) +
+      // OSRM's travel time for the routed line; says nothing about stopping to scan
+      (routeMin != null ? ' · ' + fmtMin(routeMin) : '');
+    var lp = document.getElementById('tour-loop');
+    if (lp) lp.classList.toggle('on', !!tourHome);
     tourList.innerHTML = tour.map(function (s, i) {
       return '<li data-i="' + i + '"' + (tourOrdered && i >= MAPS_MAX ? ' class="over-cap"' : '') + '>' +
         '<span class="tour-drag" aria-hidden="true">≡</span>' +
@@ -2987,9 +3031,22 @@ document.addEventListener('DOMContentLoaded', function () {
     if (pin) { e.preventDefault(); toggleTour(pin.dataset.lat, pin.dataset.lng, pin.dataset.label); map.closePopup(); }
   });
   document.getElementById('tour-clear').addEventListener('click', function () {
-    tour = []; tourOrdered = null; routeGeo = null; routeKm = null;
-    setManual(false);
+    tour = []; tourOrdered = null; routeGeo = null; routeKm = null; routeMin = null;
+    setManual(false); setHome(null); raidJob = null;
     stopGuidance(); tourLayer.clearLayers(); saveTour(); renderTour();
+  });
+  // Round trip on/off for any tour, not only a raid: the way home is planned from
+  // the position you have NOW (follow or pin) - without one there is no "home".
+  document.getElementById('tour-loop').addEventListener('click', function () {
+    if (tourHome) setHome(null);
+    else {
+      var mp = myPos();
+      if (!mp) { toast(T.rings_need_pos, 4000); return; }
+      setHome({lat: mp.lat, lng: mp.lng});
+    }
+    raidJob = null;
+    if (!tour.length) { renderTour(); return; }
+    if (tourManual) applyManualOrder(); else optimize();
   });
   document.getElementById('tour-auto').addEventListener('click', function () {
     setManual(false);
@@ -3051,6 +3108,172 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('tour-go').addEventListener('click', function () {
     if (guidanceOn) stopGuidance(); else startGuidance();
   });
+
+  // ---- Raid: say how long you have, get the tour ----
+  // Picking cells one "+" at a time is fine for three stops. For an evening's
+  // drive the question runs the other way: "I have an hour - what is the most I
+  // can flip from here?" The raid answers that. It takes the planner's
+  // candidates exactly as they are filtered right now, keeps the ones that fall
+  // in passing, and builds the largest tour that fits the time - out and, if
+  // wanted, back again. The choice is made on the device from data already
+  // loaded; what comes out is an ordinary tour, snapped and routed like any.
+  //
+  // "In passing" means: free and untouched cells (one AP takes them), cells you
+  // already lead, and enemy cells you are short by at most RAID_GAP APs. A cell
+  // that needs 600 more is a siege, not a stop. Fogged cells are left out: a
+  // strength nobody knows cannot be called quick.
+  var RAID_GAP = 25;
+  // The route proxy takes 30 points: the start, the stops, the way home.
+  var RAID_MAX = 28, RAID_POOL = 500;
+  // First guess at travel time, before any road is known: straight-line km times
+  // a detour factor at a cruising speed per travel mode. It only has to be good
+  // enough for a sensible first pick - the routed duration then corrects it
+  // (raidTune), because an hour in the villages and an hour on the motorway
+  // cover very different ground.
+  var RAID_KMH = {car: 40, bike: 14, foot: 4.5}, RAID_DETOUR = 1.4;
+  var RAID_DWELL = 1;   // minutes per stop on top: slowing down, turning round
+  var raidDlg = document.getElementById('raid-dlg');
+
+  function raidPick(start, minutes, loop, factor) {
+    var kmh = RAID_KMH[TRAVEL] || RAID_KMH.car;
+    function legMin(a, b) { return hav(a, b) * RAID_DETOUR / kmh * 60 * factor; }
+    // Nothing beyond this can be reached and - on a round trip - left again in time.
+    var reach = minutes / 60 * kmh / (RAID_DETOUR * factor) * (loop ? 0.5 : 1);
+    var pool = plCandidates().filter(plMatch).filter(function (c) {
+      if (c.t === 'enemy' && (c.gap == null || c.gap > RAID_GAP)) return false;
+      c._r = hav(start, c);
+      return c._r <= reach;
+    }).sort(function (a, b) { return a._r - b._r; }).slice(0, RAID_POOL);
+    // Cheapest insertion: every stop is worth the same (one cell), so the most
+    // cells in the time is whatever adds the least time, again and again.
+    var end = loop ? start : null, route = [], used = 0, more = false;
+    while (pool.length && route.length < RAID_MAX) {
+      var bc = Infinity, bp = -1, bk = 0;
+      for (var q = 0; q < pool.length; q++) {
+        for (var k = 0; k <= route.length; k++) {
+          var prev = k === 0 ? start : route[k - 1], next = k < route.length ? route[k] : end;
+          var cost = legMin(prev, pool[q]) + RAID_DWELL +
+                     (next ? legMin(pool[q], next) - legMin(prev, next) : 0);
+          if (cost < bc) { bc = cost; bp = q; bk = k; }
+        }
+      }
+      if (bp < 0) break;
+      if (used + bc > minutes) { more = true; break; }   // the clock, not the map, ended it
+      route.splice(bk, 0, pool[bp]); pool.splice(bp, 1); used += bc;
+    }
+    return {stops: route, est: used, more: more};
+  }
+
+  function raidApply(j, r) {
+    // Road points already fetched for a cell survive a re-pick.
+    var known = {};
+    tour.forEach(function (s) { if (s.rlat !== undefined) known[tKey(s.lat, s.lng)] = s; });
+    j.est = r.est; j.more = r.more;
+    tour = r.stops.map(function (c) {
+      var s = {lat: c.lat, lng: c.lng,
+               label: c.t === 'enemy' ? c.g : c.t === 'free' ? T.free_tag : T.virgin_land};
+      var o = known[tKey(c.lat, c.lng)];
+      if (o) { s.rlat = o.rlat; s.rlng = o.rlng; s.noRoad = o.noRoad; }
+      return s;
+    });
+    setManual(false);
+    setHome(j.loop ? {lat: j.start.lat, lng: j.start.lng} : null);
+    tourOrdered = null; routeGeo = null; routeKm = null; routeMin = null;
+    stopGuidance(); tourLayer.clearLayers(); saveTour(); renderTour();
+    optimize();
+    snapTour();
+    // If no road route ever comes back (routing down), say what we have.
+    if (j.t) clearTimeout(j.t);
+    j.t = setTimeout(function () {
+      if (raidJob !== j) return;
+      raidJob = null;
+      toast(tf(T.raid_done_est, {n: tour.length, t: fmtMin(j.est)}), 7000, true);
+    }, 45000);
+  }
+
+  // Called with every routed tour. While a raid is being built, the routed time
+  // is the first hard number: if the guess was off - the pick runs well over the
+  // budget, or well under it although more cells were in reach - the speed
+  // assumption is corrected by exactly that ratio and the pick redone. Twice at
+  // most; after that the result stands and the tour line shows the real time.
+  function raidTune() {
+    var j = raidJob;
+    if (!j || routeMin == null || guidanceOn || !tour.length) return;
+    var actual = routeMin + tour.length * RAID_DWELL, off = actual / j.min;
+    if (j.tries < 2 && j.est > 0 && (off > 1.1 || (off < 0.8 && j.more))) {
+      j.tries++;
+      j.factor = Math.max(0.4, Math.min(3, j.factor * actual / j.est));
+      var r = raidPick(j.start, j.min, j.loop, j.factor);
+      if (r.stops.length) { raidApply(j, r); return; }
+    }
+    if (j.t) clearTimeout(j.t);
+    raidJob = null;
+    toast(tf(T.raid_done, {n: tour.length, d: fmtDist(routeKm), t: fmtMin(actual)}), 7000, true);
+  }
+
+  function raidMsg(s) {
+    var m = document.getElementById('raid-msg');
+    m.textContent = s || ''; m.hidden = !s;
+  }
+  // The dialog has two faces: without a position it asks where the raid starts,
+  // with one it offers the time budgets.
+  function raidPaint() {
+    var has = !!myPos();
+    document.getElementById('raid-need').hidden = has;
+    document.getElementById('raid-pick').hidden = !has;
+    var chip = document.querySelector('.pl-chip.on'), name = '';
+    if (chip) name = chip.dataset.gang || ((chip.firstChild && chip.firstChild.textContent) || '').trim();
+    document.getElementById('raid-pool').textContent = tf(T.raid_pool, {f: name});
+    document.getElementById('raid-rule').textContent = tf(T.raid_rule, {n: RAID_GAP});
+    raidMsg('');
+  }
+  if (raidDlg && raidDlg.showModal) {
+    document.getElementById('raid-open').addEventListener('click', function () {
+      raidPaint(); raidDlg.showModal();
+    });
+    document.getElementById('raid-close').addEventListener('click', function () { raidDlg.close(); });
+    raidDlg.addEventListener('click', function (e) { if (e.target === raidDlg) raidDlg.close(); });
+    // Both answers SET a position (a pin), the same act as the pin button on the
+    // map - which is what makes it a route start, as /about describes.
+    document.getElementById('raid-gps').addEventListener('click', function () {
+      if (!navigator.geolocation) { raidMsg(T.no_gps); return; }
+      raidMsg(T.raid_locating);
+      navigator.geolocation.getCurrentPosition(function (p) {
+        setManualPos(p.coords.latitude, p.coords.longitude);
+        raidPaint();
+      }, function () { raidMsg(T.no_gps); },
+      {enableHighAccuracy: true, maximumAge: 30000, timeout: 12000});
+    });
+    document.getElementById('raid-map').addEventListener('click', function () {
+      var c = map.getCenter();
+      setManualPos(c.lat, c.lng);
+      raidPaint();
+    });
+    raidDlg.addEventListener('click', function (e) {
+      var btn = e.target.closest ? e.target.closest('.raid-min') : null;
+      if (!btn) return;
+      var start = myPos();
+      if (!start) { raidPaint(); return; }
+      var j = {min: +btn.dataset.min, loop: document.getElementById('raid-loop').checked,
+               start: start, factor: 1, tries: 0, est: 0, more: false, t: null};
+      var r = raidPick(j.start, j.min, j.loop, j.factor);
+      if (!r.stops.length) { raidMsg(tf(T.raid_none, {t: fmtMin(j.min)})); return; }
+      if (tour.length && !confirm(tf(T.raid_replace, {n: tour.length}))) return;
+      raidJob = j;
+      raidApply(j, r);
+      raidDlg.close();
+      showContent('planer');
+      var pane = document.querySelector('.tabc[data-tabc="planer"]');
+      if (pane) pane.scrollTop = 0;   // the tour panel sits at the top
+      if (!follow) {
+        map.fitBounds(L.latLngBounds(tour.map(function (s) { return [s.lat, s.lng]; })
+          .concat([[start.lat, start.lng]])).pad(0.15));
+      }
+    });
+  } else {
+    var ro = document.getElementById('raid-open');
+    if (ro) ro.hidden = true;   // no <dialog> support: no half-working button
+  }
   // Skip the current stop without leaving the car: a closed bridge or private
   // lane must not brick the tour. The stop stays in the list — only guidance
   // moves past it (auto-advance still fires if the cell is entered later).
