@@ -159,6 +159,9 @@
       </div>
       <p class="hint">{{ t('push_hint') }}</p>
     </div>
+    {# White rabbits within reach (or the nearest one). Filled by warroom.js from
+       the rabbit list - it needs a reference point only the client has. #}
+    <div id="rabbit-box" class="rabbit-box" hidden></div>
     <div id="watcher-body">{% include "_watcher_body.html" %}</div>
   </div>
 
@@ -416,6 +419,8 @@
   "theatres": {{ theatres | tojson }},
   "grid": {{ grid | tojson }},
   "virginAll": {{ virgin_all | tojson }},
+  "rabbits": {{ rabbits | tojson }},
+  "bounties": {{ bounties | tojson }},
   "js": {{ js | tojson }},
   "sharing": {{ sharing.active | tojson }},
   "history": {{ history | tojson }},

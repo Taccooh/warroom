@@ -31,6 +31,11 @@ https://warroom.mechanics-toolbox.org/about
   at most 25 APs — that fits the time from where you are, there and back if you
   want. Picked on the device from the planner's current filter, then checked
   against the routed travel time and re-picked if the first guess was off
+- **White rabbits and bounties** — the game's two side hunts on the same map as
+  the turf: rabbits (a barely mapped cell, first to upload 10 new WiFi networks
+  wins) with the time left, bounty contracts with reward and progress. Both are
+  planner filters and tour stops; a raid picks up a rabbit in reach before
+  anything else, and a rabbit appearing near your cells is announced by push
 - **Coverage brush** — opt-in GPS recording of the ground you actually covered
   while driving: every stamp carries your expected reception radius, the screen
   stays awake while recording, and an interrupted session resumes on its own
@@ -206,6 +211,8 @@ toolchain.
 | `WARROOM_ARCHIVE_HOURS` | `1`   | Hours between history samples; `0` disables the archive ([HTTP API](#http-api)) |
 | `WARROOM_ARCHIVE_KEEP_DAYS` | `0` | Retention for the archive in days; `0` keeps everything |
 | `WARROOM_CELL_LOG`    | `1`     | Keep the [cell ownership log](#the-cell-ownership-log) (which gang held which cell, as changes); `0` disables it |
+| `WARROOM_GAME_EXTRAS` | `1`     | Fetch the white rabbits and the bounty list (two requests per cycle with the feed key); `0` removes both from map and planner |
+| `WARROOM_RABBIT_KM`   | `50`    | A new rabbit within this many km of a player's own cells is announced by push; `0` sends no rabbit alerts |
 | `WARROOM_AIR_SECONDS` | `960` (`120` with OpenSky account) | Seconds between worldwide OpenSky samples for the air traffic layer; `0` disables it |
 | `WARROOM_OPENSKY_ID` / `_SECRET` | *(none)* | Optional free OpenSky API client; lifts the quota from 400 to 4000 credits/day |
 | `WARROOM_AIR_DAILY_MAX` | `420` | Own cap on adsb.lol requests per UTC day (military list, and the 200 km queries when adsb.fi fails; their limit is 500/day per IP). adsb.fi, tried first for area queries, is paced at 1 request/s and has no daily cap |

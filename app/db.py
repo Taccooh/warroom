@@ -319,6 +319,43 @@ CREATE TABLE IF NOT EXISTS gang_names (
     color   TEXT,
     seen_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- White rabbits: a game mode in which a barely mapped cell is put up as a prize -
+-- the first player to upload `need` new WiFi networks from it wins. Mirrored
+-- from the game's own list once per cycle. Rows stay after a rabbit is over:
+-- where they appeared and who took them is a history nothing else keeps.
+-- The CURRENT list is the rows whose last_seen equals kv 'rabbits_at'.
+CREATE TABLE IF NOT EXISTS rabbits (
+    id         INTEGER PRIMARY KEY,           -- the game's rabbit id
+    i INTEGER NOT NULL, j INTEGER NOT NULL,
+    lat REAL NOT NULL, lng REAL NOT NULL,     -- cell centre, as the game gives it
+    need       INTEGER,                       -- new WiFi networks that win it
+    ends_at    INTEGER,                       -- unix: the hunt ends
+    closes_at  INTEGER,                       -- unix: uploads still count until here
+    state      TEXT,                          -- open | caught
+    winner     TEXT,
+    first_seen INTEGER NOT NULL,
+    last_seen  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rabbits_seen ON rabbits(last_seen);
+-- Bounty contracts: a gang puts credits on an area full of another gang's APs.
+-- Same mirroring as the rabbits; current = last_seen equals kv 'bounties_at'.
+CREATE TABLE IF NOT EXISTS bounties (
+    id         INTEGER PRIMARY KEY,
+    i INTEGER NOT NULL, j INTEGER NOT NULL,
+    lat REAL, lng REAL, radius_m INTEGER,
+    title      TEXT,
+    creator_gang_id INTEGER, creator_gang TEXT,
+    target_gang_id  INTEGER, target_gang  TEXT,
+    required   INTEGER,                       -- captures the contract asks for
+    so_far     INTEGER,                       -- captures counted so far
+    reward     INTEGER,                       -- credits
+    status     TEXT,
+    hunter     TEXT,                          -- who claimed it, if anyone
+    expires_at INTEGER,                       -- unix
+    first_seen INTEGER NOT NULL,
+    last_seen  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bounties_seen ON bounties(last_seen);
 -- Web push: one row per device (endpoint). lang = language of the device at subscribe time.
 CREATE TABLE IF NOT EXISTS push_subs (
     endpoint   TEXT PRIMARY KEY,

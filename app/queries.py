@@ -2,6 +2,7 @@
 import json
 import logging
 import sqlite3
+import time
 
 from . import config, db, grid
 
@@ -130,6 +131,48 @@ def targets(conn, uid: int) -> list[dict]:
                     "lat": p["lat"], "lng": p["lng"]})
     for f in free_cells(conn, uid):
         out.append({"t": "free", "my": f["my_aps"], "lat": f["lat"], "lng": f["lng"]})
+    return out
+
+
+def rabbits_now(conn) -> list[dict]:
+    """The white rabbits on the game's current list, for the map and the planner.
+    Open ones and the ones just caught (the game keeps those listed for a day).
+    The same for every user - nothing here depends on who asks."""
+    at = db.kv_get(conn, "rabbits_at")
+    if not at:
+        return []
+    return [{"id": r["id"], "i": r["i"], "j": r["j"], "lat": r["lat"], "lng": r["lng"],
+             "need": r["need"], "ends": r["ends_at"], "closes": r["closes_at"],
+             "state": r["state"], "winner": r["winner"]}
+            for r in conn.execute(
+                "SELECT * FROM rabbits WHERE last_seen = ? "
+                "AND (closes_at IS NULL OR closes_at > ?) ORDER BY id",
+                (int(float(at)), int(time.time())))]
+
+
+def bounties_now(conn, uid: int) -> list[dict]:
+    """The open bounty contracts. `on_us` marks a contract placed on the caller's
+    own gang, `ours` one the caller's gang placed - the two a player will want to
+    tell apart from the rest at a glance."""
+    at = db.kv_get(conn, "bounties_at")
+    if not at:
+        return []
+    gid = _gang(conn, uid)
+    glat, glng = _grid(conn)
+    out = []
+    for r in conn.execute(
+            "SELECT * FROM bounties WHERE last_seen = ? AND status = 'open' "
+            "AND (expires_at IS NULL OR expires_at > ?) ORDER BY id",
+            (int(float(at)), int(time.time()))):
+        lat, lng = r["lat"], r["lng"]
+        if lat is None or lng is None:
+            lat, lng = grid.center(r["i"], r["j"], glat, glng)
+        out.append({"id": r["id"], "i": r["i"], "j": r["j"], "lat": lat, "lng": lng,
+                    "r": r["radius_m"], "title": r["title"], "cg": r["creator_gang"],
+                    "tg": r["target_gang"], "need": r["required"], "got": r["so_far"],
+                    "reward": r["reward"], "exp": r["expires_at"], "hunter": r["hunter"],
+                    "on_us": bool(gid is not None and r["target_gang_id"] == gid),
+                    "ours": bool(gid is not None and r["creator_gang_id"] == gid)})
     return out
 
 

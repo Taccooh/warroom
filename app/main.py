@@ -686,12 +686,16 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db), user=Dep
     _cells = queries.revier_cells(conn, uid)
     _vg = queries.virgin_cells(conn, uid, mode=tmode)
     _tg = queries.targets(conn, uid)
+    _rb = queries.rabbits_now(conn)
+    _bo = queries.bounties_now(conn, uid)
     ctx = {
         "meta": queries.meta(conn, user), "stats": st,
         "grid": {"lat": float(db.kv_get(conn, "grid_lat", 0.02) or 0.02),
                  "lng": float(db.kv_get(conn, "grid_lng", 0.02) or 0.02)},
         "counts": queries.counts(conn, uid), "cells": _cells,
         "gangs": queries.planer_gangs(_pl), "targets": _tg, "virgin_all": _vg,
+        "rabbits": _rb, "bounties": _bo,
+        "n_rabbit": sum(1 for r in _rb if r["state"] == "open"), "n_bounty": len(_bo),
         "n_all": len(_tg) + len(_vg) // 2,
         "n_ahead": sum(1 for p in _pl if p["gap"] == 0),
         "n_free": sum(1 for t in _tg if t["t"] == "free"),
@@ -799,7 +803,10 @@ def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
     _virgin = queries.virgin_cells(
         conn, uid, mode=user["travel_mode"] if "travel_mode" in user.keys() else "car")
     _targets = queries.targets(conn, uid)
+    _rb = queries.rabbits_now(conn)
+    _bo = queries.bounties_now(conn, uid)
     ctx = {
+        "n_rabbit": sum(1 for r in _rb if r["state"] == "open"), "n_bounty": len(_bo),
         "t": lambda key, **kw: i18n.t(lang, key, **kw),
         "lang": lang,
         "events": queries.recent_events(conn, uid),
@@ -826,6 +833,8 @@ def live(request: Request, conn: sqlite3.Connection = Depends(get_db),
             conn, [c["owner"] for c in _live_cells] + [p["owner"] for p in pl]),
         "virgin": _virgin,
         "targets": _targets,
+        "rabbits": _rb,
+        "bounties": _bo,
         "events_n": queries.unseen_events(conn, uid),   # badge = UNSEEN, not the capped feed length
         "watcher_html": env.get_template("_watcher_body.html").render(**ctx),
         "planner_html": env.get_template("_planner_body.html").render(**ctx),

@@ -7,6 +7,9 @@
     {% if n_ahead %}<button type="button" class="pl-chip" data-filter="ahead">{{ t('flt_ahead') }} <b data-count="ahead">{{ n_ahead }}</b></button>{% endif %}
     {% if n_free %}<button type="button" class="pl-chip" data-filter="free">{{ t('free_tag') }} <b data-count="free">{{ n_free }}</b></button>{% endif %}
     {% if n_virgin %}<button type="button" class="pl-chip" data-filter="virgin">{{ t('flt_virgin') }} <b data-count="virgin">{{ n_virgin }}</b></button>{% endif %}
+    {# The game's two lists: white rabbits and open bounty contracts #}
+    {% if n_rabbit %}<button type="button" class="pl-chip" data-filter="rabbit">🐇 {{ t('flt_rabbit') }} <b data-count="rabbit">{{ n_rabbit }}</b></button>{% endif %}
+    {% if n_bounty %}<button type="button" class="pl-chip" data-filter="bounty"><span class="bo-ic">◈</span> {{ t('flt_bounty') }} <b data-count="bounty">{{ n_bounty }}</b></button>{% endif %}
     {% for g in gangs %}
     <button type="button" class="pl-chip" data-filter="gang" data-gang="{{ g.name | e }}">
       <span class="pl-dot"{% if g.color %} style="background:{{ g.color | e }}"{% endif %}></span><span class="pl-chip-name">{{ g.name }}</span> <b>{{ g.n }}</b>

@@ -22,6 +22,11 @@ services:
       # Cell ownership log (which gang held which cell, for the map time-lapse).
       # On by default and not backfillable; 0 switches it off.
       # - WARROOM_CELL_LOG=1
+      # White rabbits and bounties on the map and in the planner (two extra
+      # requests per cycle); a new rabbit within this many km of a player's
+      # cells is announced by push. 0 switches either off.
+      # - WARROOM_GAME_EXTRAS=1
+      # - WARROOM_RABBIT_KM=50
       # Free OpenSky API client (opensky-network.org, account page, "API client"): the
       # worldwide air traffic picture then refreshes every 2 minutes instead of every 16.
       # - WARROOM_OPENSKY_ID=...

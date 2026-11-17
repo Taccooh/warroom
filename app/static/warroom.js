@@ -29,6 +29,9 @@ document.addEventListener('DOMContentLoaded', function () {
     return out;
   }
   var virginCells = expandVirgin(DATA.virginAll);
+  // The game's two public lists (same for every player): white rabbits and open
+  // bounty contracts. Refreshed by applyLive like the cells.
+  var rabbits = DATA.rabbits || [], bounties = DATA.bounties || [];
   var T = DATA.js;
   var SHARING = DATA.sharing;
   var HISTORY = DATA.history;
@@ -50,6 +53,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function tf(s, o) { return s.replace(/\{(\w+)\}/g, function (_, k) { return o[k]; }); }
   function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+  // For text that goes INTO an attribute: esc() leaves quotes alone, and a
+  // bounty title or a gang name is free text somebody else typed.
+  function attr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
   var cellByKey = {};
   cells.forEach(function (c) { cellByKey[c.i + '_' + c.j] = c; });
@@ -275,6 +281,125 @@ document.addEventListener('DOMContentLoaded', function () {
     rects.forEach(function (r) { r.setStyle(cellStyle(r._cell, own, near)); });
   });
   renderCells();
+
+  // ---- White rabbits and bounties on the map ----
+  // Two things the game runs on top of the territory war, both tied to a cell:
+  //   white rabbit  a barely mapped cell put up as a prize - the first player to
+  //                 upload `need` new WiFi networks from it wins. Lives two days.
+  //   bounty        a gang's contract on an area full of another gang's APs.
+  // Until now they lived on other screens of the game; here they sit on the same
+  // map as the turf, so "is one of them on my way" needs no second app.
+  // Their shapes go into a pane of their own ABOVE the cells: the cell layer is
+  // redrawn on every live update and would otherwise end up on top and swallow
+  // the tap. (Like every extra pane, it hangs under rotatePane.)
+  map.createPane('game', map.getPane('rotatePane') || undefined);
+  map.getPane('game').style.zIndex = 440;
+  var RABBIT_NEAR_KM = 150;
+  var rabbitLayer = L.layerGroup(), bountyLayer = L.layerGroup();
+  var rabbitsOn = true, bountiesOn = true, rabbitByKey = {};
+  try { rabbitsOn = localStorage.getItem('wr_lyr_rabbits') !== '0'; } catch (e) {}
+  try { bountiesOn = localStorage.getItem('wr_lyr_bounties') !== '0'; } catch (e) {}
+  // "31 h" / "40 min" / "13 d" until a unix time; '' once it has passed
+  function leftTxt(unix) {
+    var s = unix - Date.now() / 1000;
+    if (!(s > 0)) return '';
+    return s >= 172800 ? Math.round(s / 86400) + ' d'
+         : s >= 5400 ? Math.round(s / 3600) + ' h' : Math.max(1, Math.round(s / 60)) + ' min';
+  }
+  function rabbitOpen(r) { return r.state === 'open' && (!r.ends || r.ends > Date.now() / 1000); }
+  function tourBtn(lat, lng, label) {
+    return '<br><button type="button" class="cell-tour" data-lat="' + lat + '" data-lng="' + lng +
+      '" data-label="' + attr(label) + '">' + T.tour_add_pin + '</button>';
+  }
+  function renderRabbits() {
+    rabbitLayer.clearLayers();
+    rabbitByKey = {};
+    rabbits.forEach(function (r) {
+      var open = rabbitOpen(r);
+      if (open) rabbitByKey[r.i + '_' + r.j] = r;
+      var html = '<b>🐇 ' + esc(T.rabbit_name) + '</b><br>' + (open
+        ? tf(T.rabbit_pop, {n: r.need || 10}) + '<br>' + tf(T.time_left, {t: leftTxt(r.ends)}) +
+          tourBtn(r.lat, r.lng, T.rabbit_name)
+        : (r.winner ? tf(T.rabbit_caught, {p: esc(r.winner)}) : esc(T.rabbit_over)));
+      L.rectangle([[r.i * grid.lat, r.j * grid.lng], [(r.i + 1) * grid.lat, (r.j + 1) * grid.lng]],
+        {pane: 'game', color: open ? '#ffffff' : '#8a94a0', weight: open ? 2 : 1,
+         opacity: open ? 0.95 : 0.6, dashArray: open ? null : '4',
+         fillColor: '#ffffff', fillOpacity: open ? 0.2 : 0.04}).bindPopup(html).addTo(rabbitLayer);
+      // The pin keeps a rabbit findable when the cell itself is three pixels wide.
+      L.marker([r.lat, r.lng], {interactive: false, keyboard: false, zIndexOffset: 300,
+        icon: L.divIcon({className: 'game-pin rabbit' + (open ? '' : ' over'), iconSize: [0, 0],
+                         html: '<span>🐇</span>'})}).addTo(rabbitLayer);
+    });
+    if (rabbitsOn) rabbitLayer.addTo(map); else map.removeLayer(rabbitLayer);
+  }
+  function renderBounties() {
+    bountyLayer.clearLayers();
+    bounties.forEach(function (o) {
+      var title = o.title || T.bounty_name, left = o.exp ? leftTxt(o.exp) : '';
+      var html = '<b>◈ ' + esc(title) + '</b><br>' + esc(o.cg || '?') + ' → ' + esc(o.tg || '?') +
+        '<br>' + tf(T.bounty_pop, {r: o.reward != null ? o.reward : '?', got: o.got || 0,
+                                   need: o.need != null ? o.need : '?'}) +
+        (left ? '<br>' + tf(T.time_left, {t: left}) : '') +
+        (o.hunter ? '<br>' + tf(T.bounty_hunter, {p: esc(o.hunter)}) : '') +
+        (o.on_us ? '<br><b class="bo-warn">' + esc(T.bounty_on_us) + '</b>'
+          : o.ours ? '<br><b class="bo-ours">' + esc(T.bounty_ours) + '</b>' : '') +
+        tourBtn(o.lat, o.lng, title);
+      var col = o.on_us ? '#ff5d66' : '#e8b64c';
+      L.circle([o.lat, o.lng], {pane: 'game', radius: Math.max(150, o.r || 500), color: col, weight: 2,
+        dashArray: '5 4', fillColor: col, fillOpacity: 0.12}).bindPopup(html).addTo(bountyLayer);
+      L.marker([o.lat, o.lng], {interactive: false, keyboard: false, zIndexOffset: 280,
+        icon: L.divIcon({className: 'game-pin bounty' + (o.on_us ? ' on-us' : ''), iconSize: [0, 0],
+                         html: '<span>◈</span>'})}).addTo(bountyLayer);
+    });
+    if (bountiesOn) bountyLayer.addTo(map); else map.removeLayer(bountyLayer);
+  }
+  function toggleGame(which) {
+    if (which === 'rabbits') {
+      rabbitsOn = !rabbitsOn;
+      try { localStorage.setItem('wr_lyr_rabbits', rabbitsOn ? '1' : '0'); } catch (e) {}
+      renderRabbits();
+    } else {
+      bountiesOn = !bountiesOn;
+      try { localStorage.setItem('wr_lyr_bounties', bountiesOn ? '1' : '0'); } catch (e) {}
+      renderBounties();
+    }
+    reflectLayers();
+  }
+  renderRabbits();
+  renderBounties();
+  // Where "near me" is measured from when it is about the whole turf rather than
+  // the next turn: the live position, else the start fix, else home.
+  function gameRef() {
+    var h = myPos() || approxRef();
+    if (h) return h;
+    var c = homeCentre();
+    return c ? {lat: c[0], lng: c[1]} : null;
+  }
+  function dir8(a, c) { return (T.dir8 || '').split(',')[Math.round(bearing(a, c) / 45) % 8] || ''; }
+  // Watcher tab: the rabbits within reach, or - if none is - the nearest one, so
+  // the answer to "is there a rabbit for me" is always on the page.
+  function renderRabbitBox() {
+    var box = document.getElementById('rabbit-box');
+    if (!box) return;
+    var ref = gameRef(), open = rabbits.filter(rabbitOpen);
+    if (!ref || !open.length) { box.hidden = true; return; }
+    open.forEach(function (r) { r._d = hav(ref, r); });
+    open.sort(function (x, y) { return x._d - y._d; });
+    var near = open.filter(function (r) { return r._d <= RABBIT_NEAR_KM; }).slice(0, 3);
+    box.innerHTML = '<div class="rb-head">' + esc(near.length ? T.rabbit_box_near : T.rabbit_box_far) +
+      '</div><ul>' + (near.length ? near : open.slice(0, 1)).map(function (r) {
+        return '<li class="rb-row" data-lat="' + r.lat + '" data-lng="' + r.lng + '">🐇 <b>' +
+          fmtDist(r._d) + '</b> ' + esc(dir8(ref, r)) + ' · ' +
+          tf(T.time_left, {t: leftTxt(r.ends)}) + '</li>';
+      }).join('') + '</ul>';
+    box.hidden = false;
+  }
+  document.addEventListener('click', function (e) {
+    var row = e.target.closest ? e.target.closest('.rb-row[data-lat]') : null;
+    if (!row) return;
+    if (!rabbitsOn) toggleGame('rabbits');
+    map.flyTo([parseFloat(row.dataset.lat), parseFloat(row.dataset.lng)], 13, {duration: 0.7});
+  });
 
   // ---- Virgin land: never-scanned cells. Separate layer, toggled via chip —
   // there are quickly thousands of them, they must not plaster the map permanently.
@@ -1088,7 +1213,19 @@ document.addEventListener('DOMContentLoaded', function () {
     virginCells.forEach(function (v) {
       out.push({t: 'virgin', lat: v.lat, lng: v.lng, my: 0, gap: 0});
     });
+    rabbits.forEach(function (r) {
+      if (rabbitOpen(r)) out.push({t: 'rabbit', lat: r.lat, lng: r.lng, my: 0, gap: 0, rb: r});
+    });
+    bounties.forEach(function (o) {
+      out.push({t: 'bounty', lat: o.lat, lng: o.lng, my: 0, gap: null, bo: o});
+    });
     return out;
+  }
+  // What a target is called in the tour list
+  function candLabel(c) {
+    return c.t === 'enemy' ? c.g : c.t === 'free' ? T.free_tag
+         : c.t === 'rabbit' ? T.rabbit_name
+         : c.t === 'bounty' ? (c.bo.title || T.bounty_name) : T.virgin_land;
   }
 
   function plMatch(c) {
@@ -1097,6 +1234,8 @@ document.addEventListener('DOMContentLoaded', function () {
       || (m === 'ahead' && c.t === 'enemy' && c.gap === 0)
       || (m === 'free' && c.t === 'free')
       || (m === 'virgin' && c.t === 'virgin')
+      || (m === 'rabbit' && c.t === 'rabbit')
+      || (m === 'bounty' && c.t === 'bounty')
       || (m === 'gang' && c.t === 'enemy' && c.g === plFilter.gang);
   }
 
@@ -1104,7 +1243,8 @@ document.addEventListener('DOMContentLoaded', function () {
     // Fogged enemy cells (gap unknown) sort last under "easiest first" — we can't
     // rank an unknown deficit, so don't pretend it's 0.
     if (c.t === 'free') return 0;
-    if (c.t === 'virgin') return 1;
+    if (c.t === 'virgin' || c.t === 'rabbit') return 1;
+    // A bounty asks for captures by the hundred: never an "easy" target.
     return c.gap == null ? 9e9 : c.gap + 1;
   }
 
@@ -1134,6 +1274,17 @@ document.addEventListener('DOMContentLoaded', function () {
       tag = '<span class="pl-gap free">' + esc(T.free_grab) + '</span>';
       // second line only when it carries information (own APs already there)
       line = c.my ? '<div class="pl-row2">' + tf(T.free_line, {my: c.my}) + '</div>' : '';
+    } else if (c.t === 'rabbit') {
+      label = '<span class="rabbit-name">🐇 ' + esc(T.rabbit_name) + '</span>';
+      dot = '<span class="pl-dot rabbit"></span>';
+      tag = '<span class="pl-gap rabbit">' + esc(leftTxt(c.rb.ends) || T.rabbit_over) + '</span>';
+      line = '';
+    } else if (c.t === 'bounty') {
+      label = '<span class="bounty-name">' + esc(c.bo.title || T.bounty_name) + '</span>';
+      dot = '<span class="pl-dot bounty' + (c.bo.on_us ? ' on-us' : '') + '"></span>';
+      tag = '<span class="pl-gap bounty">◈ ' + (c.bo.reward != null ? c.bo.reward : '?') + '</span>';
+      line = '<div class="pl-row2">' + esc(c.bo.cg || '?') + ' → ' + esc(c.bo.tg || '?') +
+             ' · ' + (c.bo.got || 0) + '/' + (c.bo.need != null ? c.bo.need : '?') + '</div>';
     } else {
       // "Virgin land" + "untouched" tag say it all — the explainer row repeated it
       label = '<span class="virgin-name">' + esc(T.virgin_land) + '</span>';
@@ -1147,7 +1298,7 @@ document.addEventListener('DOMContentLoaded', function () {
         '<span class="pl-dist">' + dist + '</span>' + tag +
       '</div>' + line + '</div>' +
       '<button type="button" class="tour-add" data-lat="' + c.lat + '" data-lng="' + c.lng +
-        '" data-label="' + esc(c.t === 'enemy' ? c.g : c.t === 'free' ? T.free_tag : T.virgin_land) +
+        '" data-label="' + attr(candLabel(c)) +
         '">+</button>';
     return li;
   }
@@ -1198,6 +1349,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (chip && plFilter.mode !== 'gang') chip.textContent = cand.length;
     plLastSortAt = Date.now();
     renderTour();   // set the "+" states of the fresh rows
+    renderRabbitBox();   // same triggers: a position arrived, fresh data landed
   }
 
   function plRefresh() { plShown = PL_PAGE; plRender(); }
@@ -1432,6 +1584,14 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   function updateHere(lat, lng) {
     if (guidanceOn || (nextmoveOn && nmCard && !nmCard.hidden)) { here.hidden = true; return; }   // nav strip / next-move card own the bottom slot
+    // Standing in a white rabbit's cell beats everything else there is to say.
+    var rb = rabbitByKey[Math.floor(lat / grid.lat + 1e-9) + '_' + Math.floor(lng / grid.lng + 1e-9)];
+    if (rb && rabbitOpen(rb)) {
+      here.hidden = false;
+      here.className = 'here-banner rabbit';
+      here.innerHTML = tf(T.here_rabbit, {n: rb.need || 10, t: leftTxt(rb.ends)}) + freshTag();
+      return;
+    }
     var c = cellAt(lat, lng);
     here.hidden = false;
     var cls, html;
@@ -1941,6 +2101,10 @@ document.addEventListener('DOMContentLoaded', function () {
       '<span class="lyr-ic">⊚</span>' + esc(T.lyr_rings) + '</button>';
     rows += '<button type="button" class="lyr-row" data-layer="masts">' +
       '<span class="lyr-ic">📡</span>' + esc(T.lyr_masts) + '</button>';
+    rows += '<button type="button" class="lyr-row" data-layer="rabbits">' +
+      '<span class="lyr-ic">🐇</span>' + esc(T.lyr_rabbits) + '</button>';
+    rows += '<button type="button" class="lyr-row" data-layer="bounties">' +
+      '<span class="lyr-ic">◈</span>' + esc(T.lyr_bounties) + '</button>';
     rows += '<button type="button" class="lyr-row" data-layer="live">' +
       '<span class="lyr-ic">◉</span>' + esc(T.lyr_live) + ' <span id="live-count" class="lyr-count"></span></button>' +
       '<div class="cov-ctrls"><div class="cov-line"><span>' + esc(T.air_scope) + '</span>' +
@@ -1968,7 +2132,8 @@ document.addEventListener('DOMContentLoaded', function () {
   function reflectLayers() {
     var box = document.getElementById('layers-box');
     if (!box) return;
-    var st = {virgin: virginOn, rings: ringsOn, masts: mastsOn, live: liveOn, cov: covOn};
+    var st = {virgin: virginOn, rings: ringsOn, masts: mastsOn, live: liveOn, cov: covOn,
+              rabbits: rabbitsOn, bounties: bountiesOn};
     box.querySelectorAll('.lyr-row').forEach(function (row) {
       row.classList.toggle('on', !!st[row.dataset.layer]);
     });
@@ -1993,6 +2158,7 @@ document.addEventListener('DOMContentLoaded', function () {
       else if (l === 'masts') toggleMasts();
       else if (l === 'live') toggleLive();
       else if (l === 'cov') toggleCoverage();
+      else if (l === 'rabbits' || l === 'bounties') toggleGame(l);
     });
   });
   document.getElementById('air-scope').addEventListener('click', function () {
@@ -2095,6 +2261,8 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!d) return;
         POLL_EPOCH = d.poll;
         dataAt = Date.now();   // fresh poll data landed → reset the freshness clock
+        if (d.rabbits) { rabbits = d.rabbits; renderRabbits(); }
+        if (d.bounties) { bounties = d.bounties; renderBounties(); }
         if (d.names) OWNERS = d.names;   // holders change when cells flip
 
         var ig = document.getElementById('info-grid');
@@ -3139,21 +3307,42 @@ document.addEventListener('DOMContentLoaded', function () {
     function legMin(a, b) { return hav(a, b) * RAID_DETOUR / kmh * 60 * factor; }
     // Nothing beyond this can be reached and - on a round trip - left again in time.
     var reach = minutes / 60 * kmh / (RAID_DETOUR * factor) * (loop ? 0.5 : 1);
+    var nowS = Date.now() / 1000;
     var pool = plCandidates().filter(plMatch).filter(function (c) {
+      if (c.t === 'bounty') return false;   // hundreds of captures are no drive-by
       if (c.t === 'enemy' && (c.gap == null || c.gap > RAID_GAP)) return false;
+      // A rabbit whose hunt ends before you can get there is not a target.
+      if (c.t === 'rabbit' && c.rb.ends && legMin(start, c) + 10 > (c.rb.ends - nowS) / 60) return false;
       c._r = hav(start, c);
       return c._r <= reach;
     }).sort(function (a, b) { return a._r - b._r; }).slice(0, RAID_POOL);
-    // Cheapest insertion: every stop is worth the same (one cell), so the most
-    // cells in the time is whatever adds the least time, again and again.
     var end = loop ? start : null, route = [], used = 0, more = false;
+    // What it costs to put c between stop k-1 and stop k of the route so far.
+    function insCost(c, k) {
+      var prev = k === 0 ? start : route[k - 1], next = k < route.length ? route[k] : end;
+      return legMin(prev, c) + RAID_DWELL + (next ? legMin(c, next) - legMin(prev, next) : 0);
+    }
+    // White rabbits first. Every other stop is one cell among thousands; a rabbit
+    // is the one target that is gone in two days and that somebody else is
+    // driving towards right now. So a rabbit in reach goes onto the route before
+    // anything else - unless it would eat the evening (more than 60 % of the
+    // budget on its own).
+    pool.filter(function (c) { return c.t === 'rabbit'; }).forEach(function (c) {
+      var rc = Infinity, rk = 0;
+      for (var k = 0; k <= route.length; k++) {
+        var cost = insCost(c, k);
+        if (cost < rc) { rc = cost; rk = k; }
+      }
+      if (rc > minutes * 0.6 || used + rc > minutes) return;
+      route.splice(rk, 0, c); pool.splice(pool.indexOf(c), 1); used += rc;
+    });
+    // Then cheapest insertion: every other stop is worth the same (one cell), so
+    // the most cells in the time is whatever adds the least time, again and again.
     while (pool.length && route.length < RAID_MAX) {
       var bc = Infinity, bp = -1, bk = 0;
       for (var q = 0; q < pool.length; q++) {
         for (var k = 0; k <= route.length; k++) {
-          var prev = k === 0 ? start : route[k - 1], next = k < route.length ? route[k] : end;
-          var cost = legMin(prev, pool[q]) + RAID_DWELL +
-                     (next ? legMin(pool[q], next) - legMin(prev, next) : 0);
+          var cost = insCost(pool[q], k);
           if (cost < bc) { bc = cost; bp = q; bk = k; }
         }
       }
@@ -3170,8 +3359,7 @@ document.addEventListener('DOMContentLoaded', function () {
     tour.forEach(function (s) { if (s.rlat !== undefined) known[tKey(s.lat, s.lng)] = s; });
     j.est = r.est; j.more = r.more;
     tour = r.stops.map(function (c) {
-      var s = {lat: c.lat, lng: c.lng,
-               label: c.t === 'enemy' ? c.g : c.t === 'free' ? T.free_tag : T.virgin_land};
+      var s = {lat: c.lat, lng: c.lng, label: candLabel(c)};
       var o = known[tKey(c.lat, c.lng)];
       if (o) { s.rlat = o.rlat; s.rlng = o.rlng; s.noRoad = o.noRoad; }
       return s;
@@ -3222,7 +3410,8 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('raid-need').hidden = has;
     document.getElementById('raid-pick').hidden = !has;
     var chip = document.querySelector('.pl-chip.on'), name = '';
-    if (chip) name = chip.dataset.gang || ((chip.firstChild && chip.firstChild.textContent) || '').trim();
+    // the chip's own words without its count ("All 18413" -> "All")
+    if (chip) name = chip.dataset.gang || chip.textContent.replace(/\s*[\d.,]+\s*$/, '').trim();
     document.getElementById('raid-pool').textContent = tf(T.raid_pool, {f: name});
     document.getElementById('raid-rule').textContent = tf(T.raid_rule, {n: RAID_GAP});
     raidMsg('');

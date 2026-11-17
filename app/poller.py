@@ -7,8 +7,12 @@ import contextlib
 import hashlib
 import json
 import logging
+import math
+import re
 import threading
 import time
+
+from datetime import datetime, timezone
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -553,9 +557,11 @@ def run_user(conn, user_row, lookup, glat, glng, gctx, team_cache,
     return {"user": user_row["wdg_username"], "events": n_events, "skipped": skipped}
 
 
-def _fetch_global(conn, users) -> tuple[list, float, float, dict]:
+def _fetch_global(conn, users, extras: bool = True) -> tuple[list, float, float, dict]:
     """Fetch globally identical data ONCE per cycle (member-territories,
-    leaderboard, territories) — with the first working key we find."""
+    leaderboard, territories) — with the first working key we find. `extras`
+    adds the white rabbits and the bounty list; the first poll of a new user
+    leaves them out, the regular cycle has them anyway."""
     for u in users:
         try:
             client = Wdg(auth.user_key(u))
@@ -584,6 +590,16 @@ def _fetch_global(conn, users) -> tuple[list, float, float, dict]:
                 log.warning("Territories via %s fehlgeschlagen, Gang-Rang und -Punkte "
                             "bleiben in diesem Sample leer: %s", u["wdg_username"], e)
                 gctx["territories"] = []
+            if extras and config.GAME_EXTRAS:
+                # An extra must never take the cycle down with it - not on a 5xx
+                # and not on a timeout, which urllib raises as its own type. And
+                # a failed fetch stays None: it is not "no rabbits".
+                for name, fetch in (("rabbits", client.rabbits), ("bounties", client.bounties)):
+                    try:
+                        gctx[name] = fetch()
+                    except Exception as e:
+                        log.warning("%s via %s nicht abrufbar: %s", name, u["wdg_username"], e)
+                        gctx[name] = None
             return mt.get("cells", []), glat, glng, gctx
         except WdgError as e:
             log.warning("member-territories via %s fehlgeschlagen: %s", u["wdg_username"], e)
@@ -868,6 +884,152 @@ def log_cells(conn, lookup: dict, glat: float, glng: float) -> dict:
     return {"cells": len(new), "changes": len(rows), "baseline": baseline}
 
 
+def _unix(s) -> int | None:
+    """wdgwars timestamps like '2026-11-30 09:28:29+00' (Postgres text, hour-only
+    offset, sometimes fractional seconds) as unix seconds. None if unreadable."""
+    if s is None:
+        return None
+    if isinstance(s, (int, float)):
+        return int(s)
+    try:
+        t = re.sub(r"([+-]\d\d)$", r"\1:00", str(s).strip().replace("T", " "))
+        t = re.sub(r"\.\d+", "", t)
+        d = datetime.fromisoformat(t)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return int(d.timestamp())
+    except ValueError:
+        return None
+
+
+def _stamp(conn, key: str) -> int:
+    """The timestamp for a fresh mirror of one of the game's lists: now, but never
+    a value the previous mirror already used. "Current" means last_seen equals
+    this stamp, so two fetches must not share one - not even inside one second."""
+    try:
+        prev = int(float(db.kv_get(conn, key) or 0))
+    except (TypeError, ValueError):
+        prev = 0
+    return max(int(time.time()), prev + 1)
+
+
+def _write_rabbits(conn, payload, glat: float, glng: float) -> list[dict]:
+    """Mirror the game's white-rabbit list. Returns the rabbits that are new and
+    still open - the ones worth telling somebody about.
+
+    A payload that is missing or not shaped as expected writes nothing: the list
+    on screen then simply ages instead of emptying, and a rabbit that is still
+    out does not vanish because one request failed."""
+    lst = payload.get("rabbits") if isinstance(payload, dict) else None
+    if not isinstance(lst, list):
+        return []
+    now = _stamp(conn, "rabbits_at")
+    known = {r[0] for r in conn.execute("SELECT id FROM rabbits")}
+    rows, fresh = [], []
+    for r in lst:
+        rid = _num(r.get("id"))
+        try:
+            la, lo = float(r.get("lat")), float(r.get("lng"))
+        except (TypeError, ValueError):
+            continue
+        if rid is None:
+            continue
+        i, j = grid.cell_index(la, lo, glat, glng)
+        row = {"id": rid, "i": i, "j": j, "lat": la, "lng": lo, "need": _num(r.get("need")),
+               "ends_at": _num(r.get("ends_at")), "closes_at": _num(r.get("closes_at")),
+               "state": r.get("state"), "winner": r.get("winner")}
+        rows.append(row)
+        if rid not in known and row["state"] == "open":
+            fresh.append(row)
+    with _write_txn(conn):
+        conn.executemany(
+            "INSERT INTO rabbits (id, i, j, lat, lng, need, ends_at, closes_at, state, winner, "
+            "first_seen, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET need = excluded.need, ends_at = excluded.ends_at, "
+            "closes_at = excluded.closes_at, state = excluded.state, winner = excluded.winner, "
+            "last_seen = excluded.last_seen",
+            [(r["id"], r["i"], r["j"], r["lat"], r["lng"], r["need"], r["ends_at"],
+              r["closes_at"], r["state"], r["winner"], now, now) for r in rows])
+        db.kv_set(conn, "rabbits_at", now)
+    # The very first list is not news: every rabbit in it has been out for up to
+    # two days, and announcing all of them at once would be a burst of old alerts.
+    return fresh if known else []
+
+
+def _write_bounties(conn, payload, glat: float, glng: float) -> int:
+    """Mirror the open bounty contracts. Same rule as the rabbits: a reply that
+    cannot be read writes nothing."""
+    lst = payload.get("bounties") if isinstance(payload, dict) else None
+    if not isinstance(lst, list):
+        return 0
+    now = _stamp(conn, "bounties_at")
+    rows = []
+    for b in lst:
+        bid = _num(b.get("id"))
+        if bid is None:
+            continue
+        try:
+            la, lo = float(b.get("latitude")), float(b.get("longitude"))
+            i, j = grid.cell_index(la, lo, glat, glng)
+        except (TypeError, ValueError):
+            # no coordinates: fall back on the game's own cell indices
+            la = lo = None
+            i, j = _num(b.get("cell_lat")), _num(b.get("cell_lng"))
+            if i is None or j is None:
+                continue
+        rows.append((bid, i, j, la, lo, _num(b.get("radius_m")), (b.get("title") or "")[:200],
+                     _num(b.get("creator_gang_id")), b.get("creator_gang_name"),
+                     _num(b.get("target_gang_id")), b.get("target_gang_name"),
+                     _num(b.get("required_captures")), _num(b.get("captures_so_far")),
+                     _num(b.get("reward_credits")), b.get("status"), b.get("hunter_username"),
+                     _unix(b.get("expires_at")), now, now))
+    with _write_txn(conn):
+        conn.executemany(
+            "INSERT INTO bounties (id, i, j, lat, lng, radius_m, title, creator_gang_id, "
+            "creator_gang, target_gang_id, target_gang, required, so_far, reward, status, "
+            "hunter, expires_at, first_seen, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET title = excluded.title, required = excluded.required, "
+            "so_far = excluded.so_far, reward = excluded.reward, status = excluded.status, "
+            "hunter = excluded.hunter, expires_at = excluded.expires_at, "
+            "last_seen = excluded.last_seen", rows)
+        db.kv_set(conn, "bounties_at", now)
+    return len(rows)
+
+
+def _announce_rabbits(conn, fresh: list[dict], glat: float, glng: float) -> int:
+    """Tell the players whose ground lies near a newly appeared rabbit.
+
+    "Near" is measured from the player's own cells, not from a position: warroom
+    has no position unless someone is sharing one, and the cells say where a
+    player actually operates. The nearest own cell gives distance and direction."""
+    if not fresh or config.RABBIT_KM <= 0:
+        return 0
+    sent = 0
+    for rb in fresh:
+        # index box that surely contains everything within RABBIT_KM, then exact
+        di = int(math.ceil(config.RABBIT_KM / (111.32 * glat))) + 1
+        dj = int(math.ceil(config.RABBIT_KM / (111.32 * glng
+                                               * max(0.2, math.cos(math.radians(rb["lat"])))))) + 1
+        near: dict = {}
+        for r in conn.execute(
+                "SELECT user_id, i, j FROM footprint_cells "
+                "WHERE i BETWEEN ? AND ? AND j BETWEEN ? AND ?",
+                (rb["i"] - di, rb["i"] + di, rb["j"] - dj, rb["j"] + dj)):
+            la, lo = grid.center(r["i"], r["j"], glat, glng)
+            d = grid.km(la, lo, rb["lat"], rb["lng"])
+            if d <= config.RABBIT_KM and (r["user_id"] not in near or d < near[r["user_id"]][0]):
+                near[r["user_id"]] = (d, la, lo)
+        for uid, (d, la, lo) in near.items():
+            try:
+                sent += push.notify_rabbit(conn, uid, rb, d,
+                                           grid.compass(la, lo, rb["lat"], rb["lng"]))
+            except Exception:
+                log.exception("Hasen-Meldung an user %s fehlgeschlagen", uid)
+        if near:
+            log.info("Hase %s: %d Spieler in Reichweite", rb["id"], len(near))
+    return sent
+
+
 def poll_all(conn, only_user_id: int | None = None) -> dict:
     """only_user_id: first poll of a freshly registered user. Restricting the run
     to that one user keeps registration from racing the 5-minute cycle across
@@ -880,7 +1042,7 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
     if not users:
         return {"users": 0}
     t0 = time.monotonic()
-    cells, glat, glng, gctx = _fetch_global(conn, users)
+    cells, glat, glng, gctx = _fetch_global(conn, users, extras=only_user_id is None)
     if not cells:
         return {"users": len(users), "error": "no global data"}
     # Fingerprint of everything diff_territory can react to, folded into the pass
@@ -921,6 +1083,16 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
             log_cells(conn, lookup, glat, glng)
         except Exception:
             log.exception("Zell-Log nicht geschrieben")
+    # Rabbits and bounties: mirrored for the map and the planner, and a rabbit
+    # that just appeared near someone's cells is worth a message. Regular cycles
+    # only, like the cell log.
+    if config.GAME_EXTRAS and only_user_id is None:
+        try:
+            fresh = _write_rabbits(conn, gctx.get("rabbits"), glat, glng)
+            _write_bounties(conn, gctx.get("bounties"), glat, glng)
+            _announce_rabbits(conn, fresh, glat, glng)
+        except Exception:
+            log.exception("Hasen/Kopfgelder nicht verarbeitet")
     total_events = 0
     total_skipped = 0
     team_cache: dict = {}

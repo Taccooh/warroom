@@ -687,6 +687,41 @@ body.wr-setloc .stage { grid-column: 1 / -1; }
 /* Desktop fold (warroom.js foldChips): two rows of chips, the rest behind a
    "N more" toggle. The height comes from the script, which measures the rows. */
 .pl-chips.fold { overflow: hidden; padding-bottom: 0; }
+/* White rabbits and bounties: pins on the map (zero-size marker, glyph centred
+   on it; taps go through to the shape underneath), planner rows, watcher box. */
+.game-pin { pointer-events: none; }
+.game-pin span {
+  position: absolute; transform: translate(-50%, -50%); line-height: 1; font-size: 20px;
+  filter: drop-shadow(0 0 3px #000) drop-shadow(0 1px 2px #000);
+}
+.game-pin.rabbit.over span { opacity: 0.45; filter: grayscale(1) drop-shadow(0 0 2px #000); }
+.game-pin.bounty span { color: var(--gold-bright); font-size: 22px; font-weight: 700; }
+.game-pin.bounty.on-us span { color: #ff5d66; }
+.bo-warn { color: var(--enemy-hot); }
+.bo-ours { color: var(--gold-bright); }
+.pl-dot.rabbit { background: #fff; }
+.pl-dot.bounty { background: var(--gold); }
+.pl-dot.bounty.on-us { background: var(--enemy-hot); }
+.pl-gang .rabbit-name { color: #f2f6fa; font-weight: 600; }
+.pl-gang .bounty-name { color: var(--gold-bright); font-weight: 600; }
+.pl-gap.rabbit { background: rgba(255, 255, 255, 0.12); color: #f2f6fa; border-color: rgba(255, 255, 255, 0.45); }
+.pl-gap.bounty { background: rgba(232, 182, 76, 0.14); color: var(--gold-bright); border-color: var(--gold-soft); }
+.bo-ic { color: var(--gold); }
+.here-banner.rabbit { border-color: #fff; color: #f2f6fa; }
+.here-banner.rabbit b { color: #fff; font-family: var(--sans); }
+.rabbit-box {
+  border: 1px solid rgba(255, 255, 255, 0.35); border-left: 3px solid #fff;
+  padding: 0.45rem 0.6rem; margin: 0.2rem 0 0.7rem;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.07), transparent 65%);
+}
+.rabbit-box .rb-head {
+  font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 0.25rem;
+}
+.rabbit-box ul { list-style: none; margin: 0; padding: 0; }
+.rabbit-box .rb-row { padding: 0.18rem 0; font-size: 0.86rem; cursor: pointer; }
+.rabbit-box .rb-row b { font-family: var(--mono); }
+.rabbit-box .rb-row:hover { color: var(--gold-bright); }
 /* Numbers in the map cells (warroom.js labelCells). A zero-size marker with the
    text centred on it; no pointer events, so a tap still reaches the cell below. */
 .cell-lbl { pointer-events: none; }
@@ -748,6 +783,9 @@ body.wr-setloc .stage { grid-column: 1 / -1; }
   display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
   padding: 0.7rem 0.2rem 0.3rem;
 }
+/* display:flex above beats [hidden] - without this a list that fits its window
+   still said "4 of 4 shown" with a button that did nothing */
+.pl-more[hidden] { display: none; }
 .pl-more-txt { font-size: 0.76rem; color: var(--muted); font-family: var(--mono); }
 
 /* Map layer chip (virgin land) */

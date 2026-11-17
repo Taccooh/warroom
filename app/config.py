@@ -85,6 +85,17 @@ CELL_LOG = os.environ.get("WARROOM_CELL_LOG", "1") != "0"
 CELL_LOG_SHRINK = 0.8
 CELL_LOG_SHRINK_SAMPLES = 3
 
+# --- White rabbits and bounties ------------------------------------------------
+# Two small lists the game publishes to every player: the white rabbits (a barely
+# mapped cell, first to upload 10 new WiFi networks from it wins) and the open
+# bounty contracts. They are the same for every key, so one request each per
+# cycle with the feed key covers all users. 0 switches both off, and with them
+# the map layers, the planner entries and the rabbit alerts.
+GAME_EXTRAS = os.environ.get("WARROOM_GAME_EXTRAS", "1") != "0"
+# A rabbit that appears within this many km of a player's own cells is announced
+# to that player's devices (those that take the watcher's push). 0 = no alerts.
+RABBIT_KM = float(os.environ.get("WARROOM_RABBIT_KM", "50"))
+
 # Watcher events kept per user. The log is a rolling window, not an archive:
 # noisier scopes produce more events, and nothing here is meant to grow without
 # bound. queries.event_activity needs the same number to tell a quiet day from a

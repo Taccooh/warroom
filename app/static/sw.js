@@ -1,7 +1,7 @@
 // Minimal service worker — makes the app installable. Network-first, app shell
 // only as an offline fallback. Deliberately lean; data comes live from the server.
 // On asset changes bump the SHELL version → the old cache is deleted on activate.
-const SHELL = "warroom-v7";
+const SHELL = "warroom-v8";
 const ASSETS = ["/", "/static/style.css", "/static/fonts/germania-one.woff2",
   "/static/vendor/leaflet/leaflet.css", "/static/vendor/leaflet/leaflet.js"];
 

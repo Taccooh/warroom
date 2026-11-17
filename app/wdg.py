@@ -80,7 +80,15 @@ class Wdg:
         return self._get("/api/leaderboard")
 
     def bounties(self) -> dict:
+        """Open bounty contracts. Cell-addressable: cell_lat/cell_lng are grid
+        indices, latitude/longitude the centre of the contract area."""
         return self._get("/api/bounties")
+
+    def rabbits(self) -> dict:
+        """The white rabbits currently out (and the ones just caught). The list is
+        the same for every key; only distance/compass and the `mine*` fields are
+        about the caller."""
+        return self._get("/api/rabbits")
 
     def me_cells(self) -> dict:
         """Per-cell AP counts for the key owner — server-aggregated, uncapped, and

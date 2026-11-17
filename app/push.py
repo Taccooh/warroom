@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import socket
+import time
 
 from urllib.parse import urlparse
 
@@ -138,6 +139,53 @@ def _detail(lang: str, ev) -> str:
 _SEVERITY = {"mine": 0, "gang": 1, "near": 2}
 
 
+def _deliver(conn, s, payload: str, ttl: int) -> int:
+    """One payload to one device. A dead endpoint (404/410) is removed."""
+    try:
+        webpush(
+            subscription_info={"endpoint": s["endpoint"],
+                               "keys": {"p256dh": s["p256dh"], "auth": s["auth"]}},
+            data=payload,
+            vapid_private_key=str(VAPID_PATH),
+            vapid_claims={"sub": VAPID_SUB},
+            ttl=ttl,
+        )
+        return 1
+    except WebPushException as e:
+        code = getattr(e.response, "status_code", None)
+        if code in (404, 410):
+            conn.execute("DELETE FROM push_subs WHERE endpoint = ?", (s["endpoint"],))
+            log.info("Push-Endpoint tot (%s) — ausgetragen", code)
+        else:
+            log.warning("Push fehlgeschlagen (%s): %s", code, e)
+    except Exception:
+        log.exception("Push-Versand unerwartet fehlgeschlagen")
+    return 0
+
+
+def notify_rabbit(conn, user_id: int, rb: dict, km: float, direction: str) -> int:
+    """A white rabbit appeared within reach of this player's cells. One message
+    per device, in the device's language; tapping it opens the map on the cell."""
+    subs = conn.execute("SELECT * FROM push_subs WHERE user_id = ?", (user_id,)).fetchall()
+    if not subs:
+        return 0
+    left = (rb.get("ends_at") or 0) - time.time()
+    hours = max(1, round(left / 3600)) if left > 0 else 0
+    sent = 0
+    for s in subs:
+        lang = i18n.norm(s["lang"])
+        payload = json.dumps({
+            "title": i18n.t(lang, "push_rabbit_title"),
+            "body": i18n.t(lang, "push_rabbit_body", km=max(1, round(km)),
+                           dir=i18n.t(lang, "dir_" + direction),
+                           n=rb.get("need") or 10, h=hours),
+            "tag": f"warroom-rabbit-{rb['id']}",
+            "url": f"/?lat={rb['lat']}&lng={rb['lng']}",
+        })
+        sent += _deliver(conn, s, payload, 3600)
+    return sent
+
+
 def notify_user(conn, user_id: int, events: list) -> int:
     """Bundles the events of ONE poll cycle into one message per device.
     Dead endpoints (404/410) are removed along the way."""
@@ -159,23 +207,5 @@ def notify_user(conn, user_id: int, events: list) -> int:
             "tag": "warroom-watch",
             "url": "/?tab=waechter",
         })
-        try:
-            webpush(
-                subscription_info={"endpoint": s["endpoint"],
-                                   "keys": {"p256dh": s["p256dh"], "auth": s["auth"]}},
-                data=payload,
-                vapid_private_key=str(VAPID_PATH),
-                vapid_claims={"sub": VAPID_SUB},
-                ttl=1800,
-            )
-            sent += 1
-        except WebPushException as e:
-            code = getattr(e.response, "status_code", None)
-            if code in (404, 410):
-                conn.execute("DELETE FROM push_subs WHERE endpoint = ?", (s["endpoint"],))
-                log.info("Push-Endpoint tot (%s) — ausgetragen", code)
-            else:
-                log.warning("Push fehlgeschlagen (%s): %s", code, e)
-        except Exception:
-            log.exception("Push-Versand unerwartet fehlgeschlagen")
+        sent += _deliver(conn, s, payload, 1800)
     return sent
