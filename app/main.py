@@ -959,9 +959,13 @@ def api_virgin(bbox: str | None = None, roads_only: bool = True, limit: int = 50
 def api_boards(board: str = "all_time", id: int | None = None,
                since: str | None = None, limit: int = 50,
                conn: sqlite3.Connection = Depends(get_db), user=Depends(read_user)):
-    """The game's own top-50 lists, sampled over time: `today`, `week`, `all_time`,
-    `cells`, `hunters`, `flock`, `arcade`. With `id`, one player's movement on that
-    board — a gap means they left the top 50 at that sample, not that they stopped.
+    """The game's own top lists, sampled over time: `today`, `week`, `last_24h`,
+    `all_time`, `cells`, `hunters`, `rabbits`, `flock`, `arcade`, `arcade_signals`.
+    With `id`, one player's movement on that board — a gap means they left the
+    list at that sample, not that they stopped.
+
+    `value` is the figure the board ranks by (`ranks_by` names it); `more` holds
+    the other numbers the entry carried, e.g. aircraft and mesh on `all_time`.
 
     These carry names, and unlike /api/players they include players with no gang.
 

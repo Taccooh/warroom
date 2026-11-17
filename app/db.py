@@ -254,14 +254,19 @@ CREATE TABLE IF NOT EXISTS player_names (
 -- from player_snap for two reasons: they rank by measures the feed does not carry
 -- (raw AP totals, hunts, arcade), and they include players with NO GANG — who are
 -- absent from member-territories entirely. For those, this is the only trace.
--- `value` is whatever the board ranks by; wifi/ble only exist on the all_time board.
+-- `value` is whatever the board ranks by (poller.BOARD_VALUE says which field
+-- that is); wifi/ble only exist on the all_time board. `more` is every other
+-- number the entry carried, as a small JSON object - the boards keep growing
+-- fields (aircraft and mesh arrived unannounced), and a figure that has no
+-- column of its own must not be thrown away for that. NULL when there was none.
 CREATE TABLE IF NOT EXISTS board_snap (
     ts        TEXT NOT NULL,
-    board     TEXT NOT NULL,      -- today | week | all_time | cells | hunters | flock | arcade
+    board     TEXT NOT NULL,      -- a key of poller.BOARD_VALUE
     rank      INTEGER NOT NULL,   -- position within that board
     player_id INTEGER NOT NULL,
     value     INTEGER,
     wifi      INTEGER, ble INTEGER,
+    more      TEXT,
     PRIMARY KEY (ts, board, rank)
 );
 CREATE INDEX IF NOT EXISTS idx_board_snap ON board_snap(board, player_id, ts DESC);
@@ -370,7 +375,29 @@ def init_db(conn: sqlite3.Connection) -> None:
     _add_col(conn, "cell_roads", "path_kind", "TEXT")
     _add_col(conn, "users", "travel_mode", "TEXT NOT NULL DEFAULT 'car'")
     _add_col(conn, "player_names", "joined_at", "TEXT")
+    _add_col(conn, "board_snap", "more", "TEXT")
     _backfill_snap_log(conn)
+    _fix_board_values(conn)
+
+
+def _fix_board_values(conn: sqlite3.Connection) -> None:
+    """Two boards stored a figure they do not rank by.
+
+    `arcade` kept total_signals while the board ranks by best_distance, and
+    `hunters` kept earned while it ranks by completed - from the very first
+    sample, so `value` was never what the schema says it is. The real ranking
+    figure of those samples was not recorded and cannot be recovered. What can be
+    done is to stop the column from lying: those rows get value NULL, and the
+    figure they did hold moves into `more` under its true name, where the new
+    samples keep it as well. Runs once, before the first sample under the
+    corrected mapping is written."""
+    if kv_get(conn, "board_value_fix"):
+        return
+    for board, field in (("arcade", "total_signals"), ("hunters", "earned")):
+        conn.execute(
+            "UPDATE board_snap SET more = '{\"' || ? || '\":' || value || '}', value = NULL "
+            "WHERE board = ? AND value IS NOT NULL AND more IS NULL", (field, board))
+    kv_set(conn, "board_value_fix", 1)
 
 
 def _backfill_snap_log(conn: sqlite3.Connection) -> None:

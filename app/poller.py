@@ -5,6 +5,7 @@
 The key is only briefly decrypted here and never persisted."""
 import contextlib
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -642,11 +643,20 @@ def _tally(cell: dict, players: dict, gangs: dict) -> None:
 
 
 # Which figure each leaderboard ranks by. The lists carry different measures, so
-# one generic `value` column plus this map beats seven near-empty columns.
+# one generic `value` column plus this map beats a column per measure.
+# Checked against the live reply, not assumed: `arcade` and `hunters` were listed
+# here with a figure the board carries but does not sort by (see
+# db._fix_board_values). When wdgwars adds a board, add it here - a list that is
+# not named is not archived, and what is not archived cannot be had later.
 BOARD_VALUE = {
-    "today": "total", "week": "total", "all_time": "total", "cells": "cells",
-    "hunters": "earned", "flock": "spotted", "arcade": "total_signals",
+    "today": "total", "week": "total", "last_24h": "total", "all_time": "total",
+    "cells": "cells", "hunters": "completed", "flock": "spotted", "rabbits": "caught",
+    "arcade": "best_distance", "arcade_signals": "best_signals",
 }
+# Entry fields that do not go into `more`: identity, the two that have columns,
+# and the supporter flag - who pays for the game is not a figure to keep a
+# history of.
+_BOARD_SKIP = {"user_id", "username", "wifi", "ble", "is_patron"}
 
 
 def _write_boards(conn, ts: str, lb: dict) -> int:
@@ -665,8 +675,14 @@ def _write_boards(conn, ts: str, lb: dict) -> int:
             pid = _num(e.get("user_id"))
             if pid is None:
                 continue
+            # Every other number the entry carries rides along, so a field
+            # wdgwars adds tomorrow is kept from the first sample on.
+            more = {k: v for k, v in e.items()
+                    if k != field and k not in _BOARD_SKIP
+                    and isinstance(v, (int, float)) and not isinstance(v, bool)}
             rows.append((ts, board, rank, pid, _num(e.get(field)),
-                         _num(e.get("wifi")), _num(e.get("ble"))))
+                         _num(e.get("wifi")), _num(e.get("ble")),
+                         json.dumps(more, separators=(",", ":"), sort_keys=True) if more else None))
             if e.get("username"):
                 names[pid] = e["username"]
     if empty:
@@ -677,8 +693,8 @@ def _write_boards(conn, ts: str, lb: dict) -> int:
         log.info("Board(s) im Feed leer, nicht archiviert: %s", ", ".join(empty))
     if rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO board_snap (ts, board, rank, player_id, value, wifi, ble) "
-            "VALUES (?,?,?,?,?,?,?)", rows)
+            "INSERT OR REPLACE INTO board_snap (ts, board, rank, player_id, value, wifi, ble, more) "
+            "VALUES (?,?,?,?,?,?,?,?)", rows)
     if names:
         # A rename should win, so overwrite — but only touch the row when the name
         # actually changed, to keep pointless writes out of the WAL every hour.

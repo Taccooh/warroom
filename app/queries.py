@@ -1,4 +1,5 @@
 """Read helpers for the frontend — everything per user_id. Grid is global (kv)."""
+import json
 import logging
 import sqlite3
 
@@ -500,13 +501,24 @@ def board_latest_ts(conn, board: str) -> str | None:
     return r["t"] if r and r["t"] else None
 
 
+def _more(row: dict) -> dict:
+    """board_snap.more is stored as JSON text; hand it out as an object (or null)."""
+    m = row.get("more")
+    if m:
+        try:
+            row["more"] = json.loads(m)
+        except ValueError:
+            row["more"] = None
+    return row
+
+
 def boards_now(conn, board: str, limit: int) -> list[dict]:
-    """One of the game's top-50 lists as of the latest sample, names resolved."""
+    """One of the game's top lists as of the latest sample, names resolved."""
     ts = board_latest_ts(conn, board)
     if not ts:
         return []
-    return [dict(r) for r in conn.execute(
-        "SELECT b.rank, b.player_id, n.username, b.value, b.wifi, b.ble "
+    return [_more(dict(r)) for r in conn.execute(
+        "SELECT b.rank, b.player_id, n.username, b.value, b.wifi, b.ble, b.more "
         "FROM board_snap b LEFT JOIN player_names n ON n.player_id = b.player_id "
         "WHERE b.board = ? AND b.ts = ? ORDER BY b.rank LIMIT ?", (board, ts, limit))]
 
@@ -515,7 +527,7 @@ def board_history(conn, board: str, player_id: int, since: str | None,
                   limit: int) -> list[dict]:
     """How one player moved on one board. Gaps mean they dropped out of the top 50
     at that sample — not that they stopped playing."""
-    sql = ("SELECT ts, rank, value, wifi, ble FROM board_snap "
+    sql = ("SELECT ts, rank, value, wifi, ble, more FROM board_snap "
            "WHERE board = ? AND player_id = ?")
     args: list = [board, player_id]
     if since:
@@ -523,7 +535,7 @@ def board_history(conn, board: str, player_id: int, since: str | None,
         args.append(since)
     sql += " ORDER BY ts DESC LIMIT ?"
     args.append(limit)
-    return [dict(r) for r in conn.execute(sql, args)]
+    return [_more(dict(r)) for r in conn.execute(sql, args)]
 
 
 def gangs_now(conn, limit: int) -> list[dict]:
@@ -1142,7 +1154,8 @@ def exposed(conn, uid: int, hours: int = 24, limit: int = 8) -> dict:
     return {"rows": out, "hours": hours, "gid": gid}
 
 
-BOARDS = ("cells", "today", "week", "all_time", "hunters", "flock", "arcade")
+BOARDS = ("cells", "today", "last_24h", "week", "all_time", "hunters", "rabbits",
+          "flock", "arcade", "arcade_signals")
 
 
 def board_wall(conn, uid: int, board: str = "cells", limit: int = 12) -> dict:
@@ -1160,6 +1173,15 @@ def board_wall(conn, uid: int, board: str = "cells", limit: int = 12) -> dict:
     now = conn.execute("SELECT MAX(ts) t FROM board_snap").fetchone()["t"]
     if not now:
         return {"board": board, "rows": [], "ts": None, "mine": None, "boards": BOARDS}
+    # Offer only boards that were sampled within the last day. A board the game
+    # added is in BOARDS before its first sample exists (and on an instance that
+    # has not been upgraded long, a board may simply not be there yet) - a chip
+    # for it would open an empty section and take the chips with it.
+    live = {r["board"] for r in conn.execute(
+        "SELECT DISTINCT board FROM board_snap WHERE ts >= datetime(?, '-24 hours')", (now,))}
+    boards = tuple(b for b in BOARDS if b in live) or BOARDS
+    if board not in boards:
+        board = boards[0]
     then = conn.execute("SELECT MAX(ts) t FROM board_snap WHERE ts <= datetime(?, ?)",
                         (now, "-24 hours")).fetchone()["t"]
     prev = {}
@@ -1186,7 +1208,7 @@ def board_wall(conn, uid: int, board: str = "cells", limit: int = 12) -> dict:
             "SELECT board, rank, value FROM board_snap WHERE ts = ? AND player_id = ?",
             (now, me))}
     return {"board": board, "rows": rows, "ts": now, "since": then,
-            "mine": mine, "boards": BOARDS}
+            "mine": mine, "boards": boards}
 
 
 def cell_replay(conn, i0: int, i1: int, j0: int, j1: int,

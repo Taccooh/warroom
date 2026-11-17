@@ -492,10 +492,35 @@ Names then appear in `/api/players` and `/api/boards`; they are `null` for anyon
 neither source has named.
 
 Sampling the boards also covers the blind spot above: **they are the only place a
-gang-less player appears at all.** Seven boards are kept — `today`, `week`,
-`all_time`, `cells`, `hunters`, `flock`, `arcade` — each with the position and the
-figure it ranks by (`ranks_by` in the response says which). `all_time` additionally
-carries `wifi` and `ble` split out.
+gang-less player appears at all.** Every list the game's leaderboard endpoint
+returns is kept, each with the position and the figure it ranks by:
+
+| `board=`         | `ranks_by`      | What it is                                      |
+|------------------|-----------------|-------------------------------------------------|
+| `today`          | `total`         | New signals today (UTC day)                     |
+| `last_24h`       | `total`         | The same over a rolling 24 hours                |
+| `week`           | `total`         | This week                                       |
+| `all_time`       | `total`         | Everything; `wifi` and `ble` split out          |
+| `cells`          | `cells`         | Cells a player has APs in                       |
+| `hunters`        | `completed`     | Bounty contracts completed                      |
+| `rabbits`        | `caught`        | White rabbits caught                            |
+| `flock`          | `spotted`       | Flock cameras spotted                           |
+| `arcade`         | `best_distance` | Signal Run, best distance                       |
+| `arcade_signals` | `best_signals`  | Signal Run, most signals in one run             |
+
+`value` is that ranking figure. `more` carries every other number the entry had
+— `aircraft` and `mesh` on `all_time`, `earned` on `hunters`, `total_signals` on
+`arcade`, and whatever wdgwars adds next — so a new field is kept from the first
+sample it appears in. The lists differ in length (50, 25, 20, 10).
+
+Two things about older samples:
+
+- `last_24h`, `rabbits` and `arcade_signals` are only sampled from the version
+  that knows them; they have no history before it.
+- Until then `arcade` and `hunters` stored a figure the board does not rank by
+  (`total_signals` and `earned`). Those samples now have `value: null` and the
+  old figure under its real name in `more` — the true ranking figure of that
+  time was never recorded.
 
 The response carries `sampled_at` (and `board_sampled_at` on the `?id=` form): when
 that board was last written. A board that drops out of the upstream feed — the
