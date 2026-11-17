@@ -670,15 +670,15 @@ def own_series(conn, uid: int, days: int = 30, points: int = 120) -> list[dict]:
 
 
 def own_daily(conn, uid: int, days: int = 14) -> list[dict]:
-    """Access points gained per calendar day - the caller's own data.
+    """Net change in access points per calendar day - the caller's own data.
 
     The cumulative curve shows a good day only as a taller step. This is the same
     series cut at midnight: the total at the end of each day minus the total at
     the end of the day before. Days are days in the display timezone (a drive
     that ends at 00:30 local belongs to the evening it started for nobody, but a
     UTC cut would split every German evening in two). A day can come out
-    negative - the game removes networks now and then; `shown` clamps that to 0
-    for drawing while `gain` keeps the real figure."""
+    negative - the total wdgwars reports shrinks a little now and then; `shown`
+    clamps that to 0 for drawing while `gain` keeps the real figure."""
     try:
         tz = ZoneInfo(config.TZ)
     except ZoneInfoNotFoundError:

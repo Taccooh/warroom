@@ -347,6 +347,7 @@
     {% endif %}
     <ul>
       <li>{{ t('an_about_holders') }}</li>
+      {% if daily | length > 1 %}<li>{{ t('an_daily_note') }}</li>{% endif %}
       <li>{{ t('an_gang_note') }}</li>
       <li>{{ t('an_front_scope_' ~ front.level) }}
         {% if front.capped %}{{ t('an_front_capped', k=front.keep, a=front.oldest|localtime) }}{% endif %}</li>

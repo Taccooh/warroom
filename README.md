@@ -41,7 +41,7 @@ https://warroom.mechanics-toolbox.org/about
   stays awake while recording, and an interrupted session resumes on its own
 - **Trends** — the one thing the game itself cannot show, because its feed only
   ever reports the present. Four sections: **You** (your access points over 30
-  days, what you brought home each day, and both of your gang's ranks side by
+  days, the net change per day, and both of your gang's ranks side by
   side — the team rank by access points and the territory rank by points),
   **Gangs** (who gained and lost in the last 24 h / 48 h / 7 days, with the gang
   table), **Pressure on your turf** (which direction it comes from, how busy

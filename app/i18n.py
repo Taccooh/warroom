@@ -292,7 +292,11 @@ STRINGS = {
     "an_more_pressure": {"en": "Where the pressure comes from → Trends",
                          "de": "Woher der Druck kommt → Trends"},
     "an_window": {"en": "Window", "de": "Zeitraum"},
-    "an_daily": {"en": "New per day", "de": "Neu pro Tag"},
+    # "Net", not "new": the figure is a difference of totals and does go below
+    # zero - on the day this shipped it did so for 22 of 52 accounts.
+    "an_daily": {"en": "Net per day", "de": "Netto pro Tag"},
+    "an_daily_note": {"en": "Net per day is your total at the end of a day minus the day before. The total wdgwars reports also shrinks a little now and then, so a day without a drive can end below zero.",
+                      "de": "Netto pro Tag ist dein Stand am Tagesende minus dem des Vortags. Die Summe, die wdgwars meldet, schrumpft ab und zu auch ein wenig — ein Tag ohne Fahrt kann deshalb unter null enden."},
     "an_today": {"en": "today", "de": "heute"},
     "an_best_day": {"en": "best day {v} ({d})", "de": "bester Tag {v} ({d})"},
     "an_rank_team": {"en": "Team rank", "de": "Team-Rang"},
