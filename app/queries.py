@@ -4,6 +4,9 @@ import logging
 import sqlite3
 import time
 
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from . import config, db, grid
 
 log = logging.getLogger("warroom")
@@ -664,6 +667,52 @@ def own_series(conn, uid: int, days: int = 30, points: int = 120) -> list[dict]:
             thin.append(out[-1])
         out = thin
     return out
+
+
+def own_daily(conn, uid: int, days: int = 14) -> list[dict]:
+    """Access points gained per calendar day - the caller's own data.
+
+    The cumulative curve shows a good day only as a taller step. This is the same
+    series cut at midnight: the total at the end of each day minus the total at
+    the end of the day before. Days are days in the display timezone (a drive
+    that ends at 00:30 local belongs to the evening it started for nobody, but a
+    UTC cut would split every German evening in two). A day can come out
+    negative - the game removes networks now and then; `shown` clamps that to 0
+    for drawing while `gain` keeps the real figure."""
+    try:
+        tz = ZoneInfo(config.TZ)
+    except ZoneInfoNotFoundError:
+        tz = timezone.utc
+    last: dict[str, int] = {}
+    for r in conn.execute(
+            """SELECT substr(ts, 1, 13) AS bucket, MAX(ts) AS ts, total FROM stats
+               WHERE user_id = ? AND ts >= datetime('now', ?) AND total IS NOT NULL
+               GROUP BY bucket ORDER BY bucket""", (uid, "-%d days" % (days + 2))):
+        try:
+            dt = datetime.strptime(r["bucket"], "%Y-%m-%d %H").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        # rows arrive in time order, so the last one written for a day is its close
+        last[dt.astimezone(tz).strftime("%Y-%m-%d")] = r["total"]
+    names = sorted(last)
+    out = []
+    for prev, day in zip(names, names[1:]):
+        gain = last[day] - last[prev]
+        out.append({"day": day, "gain": gain, "shown": max(0, gain), "total": last[day]})
+    return out[-days:]
+
+
+def gang_mine(conn, uid: int) -> dict | None:
+    """The caller's own gang in the latest sample: territory rank, points, cells.
+    The gang table only lists the top of the ranking, so a gang further down
+    would otherwise have no rank on the page at all."""
+    gid = _gang(conn, uid)
+    if gid is None:
+        return None
+    r = conn.execute(
+        """SELECT gang, rank, points, cells FROM gang_snap
+           WHERE ts = (SELECT MAX(ts) FROM gang_snap) AND gang_id = ?""", (gid,)).fetchone()
+    return dict(r) if r else None
 
 
 def _snap_edges(conn, hours: int):

@@ -40,11 +40,17 @@ https://warroom.mechanics-toolbox.org/about
   while driving: every stamp carries your expected reception radius, the screen
   stays awake while recording, and an interrupted session resumes on its own
 - **Trends** — the one thing the game itself cannot show, because its feed only
-  ever reports the present: your own history over weeks, who gained and lost
-  ground in the last 24 h / 48 h / 7 days, the gang table with movement, and who
-  actually holds cells inside your turf. Charts are server-rendered SVG, so the
-  page draws with JavaScript off. The per-player parts need wdgwars to name cell
-  holders, which it stopped doing on 2026-10-28 — see [Reading a cell](#reading-a-cell)
+  ever reports the present. Four sections: **You** (your access points over 30
+  days, what you brought home each day, and both of your gang's ranks side by
+  side — the team rank by access points and the territory rank by points),
+  **Gangs** (who gained and lost in the last 24 h / 48 h / 7 days, with the gang
+  table), **Pressure on your turf** (which direction it comes from, how busy
+  your watcher was, which of your cells are at risk) and the **Leaderboards**
+  with rank movement. Charts are server-rendered SVG, so the page draws with
+  JavaScript off. It is reachable from the header chips, the top of the Info tab
+  and the watcher. There are no per-player ground comparisons: they need wdgwars
+  to name cell holders, which it stopped doing on 2026-10-28 — see
+  [Reading a cell](#reading-a-cell)
 - **Crew** — friends and opt-in live position sharing (auto-expires, no history)
 - EN/DE, installable as PWA, works on phone and desktop
 
@@ -79,12 +85,12 @@ or Street View export hands those stop coordinates to Google. No analytics, no
 trackers, no update check, no phone-home of any kind.
 
 Between users of one instance the line runs like this: everything the **Trends**
-page shows about other players comes from the public game feed and the
-leaderboards — the same numbers wdgwars shows every player anyway. Anything
+page shows about other players and gangs comes from the public game feed and
+the leaderboards — the same numbers wdgwars shows every player anyway. Anything
 derived from a key (your series, your events, your footprint, your position) is
 shown to whoever owns that key and to nobody else. And nothing marks who has an
-account here: the movement tables cover every player in the feed, so signing up
-never lifts anyone into a list that others are missing from.
+account here: the gang table and the leaderboards list whoever the game lists,
+so signing up never lifts anyone into a list that others are missing from.
 
 Raw AP data (exact positions, BSSIDs, names) is aggregated into map cells on
 arrival and never stored. The coverage brush is the one deliberate exception:

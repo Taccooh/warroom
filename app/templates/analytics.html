@@ -11,110 +11,180 @@
 
   <header class="an-head">
     <div class="brand"><svg class="sigil" viewBox="0 0 24 28" aria-hidden="true"><path d="M12 1 22 5v9c0 7-4.6 11.4-10 13C6.6 25.4 2 21 2 14V5Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 6.5 16.5 14 12 21.5 7.5 14Z" fill="currentColor"/></svg><span class="brand-name">{{ t('an_title') }}</span></div>
-    {# Back to the tab the link into this page lives on, not to the map's default
-       tab — otherwise leaving costs two taps. #}
-    <a class="an-back" href="/?tab=info">{{ t('an_back') }}</a>
+    <a class="an-back" href="/">{{ t('an_back') }}</a>
   </header>
 
-  {# The rail: what is measured, and against whom. Plain links, so it works with
-     JavaScript off, survives a reload and can be bookmarked. It scrolls sideways
-     rather than wrapping — German reads ALLE / MEINE GANG / MEINE KARTE, and a
-     wrapping control group would make the page's chrome height depend on how
-     long the strings happen to be in the current language. #}
-  <div class="an-rail">
-    <span class="an-glabel">{{ t('an_scope') }}</span>
-    <div class="an-group">
-      {% for s, lbl in [('all', t('an_scope_all')), ('gang', t('an_scope_gang')), ('turf', t('an_scope_turf'))] %}
-      <a href="/analytics?hours={{ hours }}&amp;scope={{ s }}"
-         class="an-chip{% if field.scope == s %} on{% endif %}">{{ lbl }}</a>
-      {% endfor %}
-    </div>
-    <div class="an-group">
-      {% for h, lbl in [(24, t('an_24h')), (48, t('an_48h')), (168, t('an_7d'))] %}
-      {# A window the archive cannot fill still works — it just returns everything
-         there is. Dimming it says so instead of pretending it was measured. #}
-      <a href="/analytics?hours={{ h }}&amp;scope={{ field.scope }}"
-         class="an-chip{% if hours == h %} on{% endif %}{% if h > span.span_hours %} short{% endif %}"
-         {% if h > span.span_hours %}title="{{ t('an_chip_short') }}"{% endif %}>{{ lbl }}</a>
-      {% endfor %}
-    </div>
-  </div>
-  {# What was ACTUALLY measured: both ends are real samples, and on a young
-     archive they are not the ends the chip names. #}
-  <p class="an-measured">{% if field['from'] and field['to'] %}<span>{{ t('an_measured', a=field['from']|localtime, b=field['to']|localtime) }}</span>{% endif %}<span>{{ t('an_scope_n_' ~ field.scope, n=field.population) }}</span></p>
+  {# The page answers four questions, in the order people ask them: how am I
+     doing, how is my gang doing, who is coming for my ground, where do I stand
+     in the game's own lists. The bar names them and stays in reach - on a phone
+     the page is several screens long. Plain anchors: works with JavaScript off. #}
+  <nav class="an-jump" aria-label="{{ t('an_title') }}">
+    <a href="#you">{{ t('an_you') }}</a>
+    <a href="#gangs">{{ t('an_gangs') }}</a>
+    <a href="#pressure">{{ t('an_pressure_short') }}</a>
+    {% if wall.rows %}<a href="#boards">{{ t('an_boards') }}</a>{% endif %}
+  </nav>
 
-  {# The archive's own record of when it looked. One tick per sample, hatched
-     bands where the poller missed — so 61 hours of history LOOKS like 61
-     readings instead of an unbroken line. #}
-  {% set sp = spine(stamps) %}
-  {% if sp.n > 1 %}
-  <div class="an-tape" data-readout>
-    <svg viewBox="0 0 {{ sp.w }} 22" preserveAspectRatio="none" role="img"
-         aria-label="{{ t('an_tape_alt') }}">
-      <defs><pattern id="pGap" width="6" height="6" patternUnits="userSpaceOnUse"
-                     patternTransform="rotate(45)">
-        <line class="tp-hatch" x1="0" y1="0" x2="0" y2="6"/></pattern></defs>
-      {% for g in sp.gaps %}<rect class="tp-gap" x="{{ g.x }}" y="0" width="{{ g.w }}" height="22"/>
-      <rect class="tp-hatchfill" x="{{ g.x }}" y="0" width="{{ g.w }}" height="22" fill="url(#pGap)"/>{% endfor %}
-      {% for r in sp.runs %}<rect class="tp-run" x="{{ (r[0] * sp.step) | round(1) }}" y="8"
-        width="{{ ((r[1] - r[0]) * sp.step) | round(1) or 2 }}" height="6"/>{% endfor %}
-      {% for tk in sp.ticks %}<line class="tp-tick" x1="{{ tk.x }}" y1="0" x2="{{ tk.x }}" y2="22"/>{% endfor %}
-      <line class="tp-now" x1="{{ sp.w - 1 }}" y1="0" x2="{{ sp.w - 1 }}" y2="22"/>
-    </svg>
-    <p class="an-src an-readout">{% if sp.gaps %}{{ t('an_tape', a=stamps[0]|localtime, b=stamps[-1]|localtime, n=sp.n, g=sp.gaps|length, h=sp.missing) }}{% else %}{{ t('an_tape_nogap', a=stamps[0]|localtime, b=stamps[-1]|localtime, n=sp.n) }}{% endif %}</p>
-  </div>
-  {% endif %}
-
-  {# ---------- the tide: one number at real size, inside the shape of the field ---------- #}
-  <section class="an-sec">
-    <h2>{{ t('an_tide') }}</h2>
-    {% if field.stand %}
-    {% set rg = ridge(field.shape) %}
-    <div class="an-plate an-hero {{ 'sub-gain' if field.stand.delta > 0 else ('sub-loss' if field.stand.delta < 0 else 'sub-flat') }}"
-         data-readout>
-      <div class="an-lattice" aria-hidden="true"></div>
-      {# Every compared player's change as a mountain range: losses to the left,
-         gains to the right, and the tall pillar in the middle is everyone who did
-         not move — which on a normal day is most of the field. Your own position
-         is the gold hairline. #}
-      <svg class="an-ridge" viewBox="0 0 {{ rg.w }} {{ rg.h }}" preserveAspectRatio="none"
-           aria-hidden="true">
-        {% for c in rg.cols %}{% if c.h %}<rect class="rg-{{ c.side }}" x="{{ c.x }}" y="{{ c.y }}" width="{{ c.w }}" height="{{ c.h }}"/>{% endif %}{% endfor %}
-        <polyline class="rg-line" points="{{ rg.ridge }}"/>
-        {% if rg.me_x is not none %}<line class="rg-me" x1="{{ rg.me_x }}" y1="0" x2="{{ rg.me_x }}" y2="{{ rg.h }}"/>
-        <circle class="rg-medot" cx="{{ rg.me_x }}" cy="8" r="5"/>{% endif %}
-        {# Full-height hit areas: a column holding one player is 6px tall and
-           would otherwise be unpointable exactly where the detail is wanted. #}
-        <g class="an-hits">
-          {% for c in rg.cols %}{% if c.n %}<rect class="an-hit" x="{{ c.hx }}" y="0" width="{{ c.hw }}" height="{{ rg.h }}" tabindex="0"
-            data-tip="{% if c.side == 'zero' %}{{ t('an_tip_bin_still_one') if c.n == 1 else t('an_tip_bin_still', n=c.n) }}{% elif c.lo != c.hi %}{{ t('an_tip_bin', n=c.n, a=c.lo|delta, b=c.hi|delta) }}{% elif c.n == 1 %}{{ t('an_tip_bin_one', a=c.lo|delta) }}{% else %}{{ t('an_tip_bin1', n=c.n, a=c.lo|delta) }}{% endif %}"/>{% endif %}{% endfor %}
-        </g>
-      </svg>
-      <div class="an-hero-body">
-        <div class="an-face {{ 'gain' if field.stand.delta > 0 else ('loss' if field.stand.delta < 0 else '') }}">{{ field.stand.delta | delta }}<span class="an-unit">{{ t('an_tide_cells') }}</span></div>
-        {# The still count is never omitted: with most of the field stationary, a
-           single lost cell puts you behind hundreds of people who did nothing, and
-           the rank alone would read as a collapse. #}
-        <p>{{ t('an_tide_pop', n=field.stand.of_players, s=field.stand.still, r=field.stand.ahead) }}</p>
-        {% if field.moved == 0 %}<p>{{ t('an_tide_quiet') }}</p>{% endif %}
+  {# ---------- you: private, from your key ---------- #}
+  <section class="an-sec" id="you">
+    <h2>{{ t('an_you') }}</h2>
+    {% if series|length > 1 %}
+      {% set ctot = chart(series | map(attribute='total') | list) %}
+      <div class="an-card" data-readout>
+        <div class="an-cardhead">
+          <span>{{ t('an_aps') }} <em class="an-win">{{ t('an_win_days', n=series_days) }}</em></span>
+          <b>{{ ctot.last | n }}</b>
+          <span class="an-sub {{ (ctot.last - ctot.first) | dclass }}">{{ (ctot.last - ctot.first) | delta }}</span>
+        </div>
+        <svg class="an-chart" viewBox="0 0 {{ ctot.w }} {{ ctot.h }}" preserveAspectRatio="none" role="img"
+             aria-label="{{ t('an_aps') }}: {{ ctot.first | n }} → {{ ctot.last | n }}">
+          <polygon class="an-fill" points="{{ ctot.area }}"/>
+          <polyline class="an-line" points="{{ ctot.line }}"/>
+          {% if ctot.dot %}<circle class="an-dot" cx="{{ ctot.dot[0] }}" cy="{{ ctot.dot[1] }}" r="3"/>{% endif %}
+          <g class="an-hits">
+            {% for hp in ctot.hits %}<rect class="an-hit" x="{{ hp.x }}" y="0" width="{{ hp.w }}" height="{{ ctot.h }}" tabindex="0"
+              data-tip="{{ series[hp.i].ts | localtime }} · {{ hp.v | n }} {{ t('an_aps') }}"/>{% endfor %}
+          </g>
+        </svg>
+        {# A flat series would print the same number twice — say nothing instead. #}
+        {% if ctot.min != ctot.max %}
+        <div class="an-scale"><span>{{ ctot.min | n }}</span><span>{{ ctot.max | n }}</span></div>
+        {% endif %}
+        <p class="an-src an-readout">{{ t('an_tip_hint') }}</p>
       </div>
-      <p class="an-fine">{{ t('an_tide_shape') }}</p>
-      {# Doubles as the readout: pointing at a column replaces the source line
-         with what that column holds, and letting go puts the source back. #}
-      <p class="an-src an-readout">{{ t('an_src', w=t('an_win_hours', n=hours), n=field.population, src=t('an_src_feed')) }}</p>
-    </div>
     {% else %}
-    <div class="an-plate sub-flat">
-      <p class="an-empty">{% if field.population %}{{ t('an_tide_nome') }}{% else %}{{ t('an_nomove') }}{% endif %}</p>
-      {% if field.population %}
-      <p class="an-mine">{{ t('an_tide_churn', n=field.population, m=field.moved, c=field.churn|n) }}</p>
+      <p class="an-empty">{{ t('an_nodata') }}</p>
+    {% endif %}
+
+    {# What a wardriver actually asks: how much did I bring home each day. The
+       curve above only shows it as steps of different height. #}
+    {% if daily | length > 1 %}
+      {% set db = bars(daily | map(attribute='shown') | list) %}
+      {% set best = daily | sort(attribute='gain') | last %}
+      <div class="an-card" data-readout>
+        <div class="an-cardhead">
+          <span>{{ t('an_daily') }} <em class="an-win">{{ t('an_win_days', n=daily|length) }}</em></span>
+          <b>{{ daily[-1].gain | delta }}</b>
+          <span class="an-sub">{{ t('an_today') }}</span>
+        </div>
+        <svg class="an-chart" viewBox="0 0 {{ db.w }} {{ db.h }}" preserveAspectRatio="none" role="img"
+             aria-label="{{ t('an_daily') }}">
+          {% for bar in db.bars %}<rect class="an-bar{{ ' gold' if daily[bar.i].day == best.day and best.gain > 0 }}" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}"/>{% endfor %}
+          <g class="an-hits">
+            {% for bar in db.bars %}<rect class="an-hit" x="{{ bar.hx }}" y="0" width="{{ bar.hw }}" height="{{ db.h }}" tabindex="0"
+              data-tip="{{ daily[bar.i].day }} · {{ daily[bar.i].gain | delta }}"/>{% endfor %}
+          </g>
+        </svg>
+        <div class="an-scale"><span>{{ daily[0].day[5:] }}</span>{% if best.gain > 0 %}<span>{{ t('an_best_day', v=best.gain|delta, d=best.day[5:]) }}</span>{% endif %}<span>{{ daily[-1].day[5:] }}</span></div>
+        <p class="an-src an-readout">{{ t('an_tip_hint') }}</p>
+      </div>
+    {% endif %}
+
+    {# Two ranks, because the game keeps two: the team list sorts by access
+       points, the territory list by points. Shown side by side and named - one
+       bare "#3" here and a "1" in the table below read as a contradiction. #}
+    {% set ranks = series | map(attribute='gang_rank') | select('!=', None) | list %}
+    {% if ranks or my_gang %}
+    <div class="an-card flat an-ranks">
+      {% if ranks %}
+      <div class="an-rank"><span>{{ t('an_rank_team') }}</span><b>#{{ ranks | last }}</b>
+        {% if ranks | first != ranks | last %}<span class="an-sub {{ (ranks|first - ranks|last) | dclass }}">{{ (ranks|first - ranks|last) | delta }}</span>{% endif %}
+        <em>{{ t('an_rank_team_by') }}</em></div>
+      {% endif %}
+      {% if my_gang and my_gang.rank %}
+      <div class="an-rank"><span>{{ t('an_rank_terr') }}</span><b>#{{ my_gang.rank }}</b>
+        <em>{{ t('an_rank_terr_by', p=my_gang.points|n) }}</em></div>
       {% endif %}
     </div>
     {% endif %}
   </section>
 
-  {# ---------- the front: where the pressure comes from ---------- #}
-  <section class="an-sec">
+  {# ---------- gangs: who is gaining, and the table it happens in ---------- #}
+  <section class="an-sec" id="gangs">
+    <h2>{{ t('an_gangs') }}</h2>
+    {# The window governs this section and the cells at risk further down; the
+       cards under "You" run on their own fixed spans and say so. #}
+    <div class="an-rail">
+      <span class="an-glabel">{{ t('an_window') }}</span>
+      <div class="an-group">
+        {% for h, lbl in [(24, t('an_24h')), (48, t('an_48h')), (168, t('an_7d'))] %}
+        {# A window the archive cannot fill still works — it just returns everything
+           there is. Dimming it says so instead of pretending it was measured. #}
+        <a href="/analytics?hours={{ h }}#gangs"
+           class="an-chip{% if hours == h %} on{% endif %}{% if h > span.span_hours %} short{% endif %}"
+           {% if h > span.span_hours %}title="{{ t('an_chip_short') }}"{% endif %}>{{ lbl }}</a>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if race.series | length > 1 %}
+    {% set rc = races(race.series) %}
+    <div class="an-plate sub-field" data-readout>
+      <h3>{{ t('an_race') }}</h3>
+      {# Points gained since the window opened, not absolute points — the table
+         below already ranks those, and plotting them again would restate it. #}
+      <svg class="an-race" viewBox="0 0 {{ rc.w }} {{ rc.h }}" preserveAspectRatio="none" role="img"
+           aria-label="{{ t('an_race_axis', a=race['from']|localtime) }}">
+        <line class="rc-zero" x1="0" y1="{{ rc.zero_y }}" x2="{{ rc.w }}" y2="{{ rc.zero_y }}"/>
+        {% for l in rc.lines %}
+        <polyline class="rc-line{{ ' mine' if l.mine }}" points="{{ l.line }}"/>
+        {% endfor %}
+        <g class="an-hits">
+          {% for l in rc.lines %}{% if l.end %}<circle class="an-hit" cx="{{ l.end[0] }}" cy="{{ l.end[1] }}" r="9" tabindex="0"
+            data-tip="{{ l.gang }} · {{ l.last | delta }} {{ t('an_points') }}"/>{% endif %}{% endfor %}
+        </g>
+      </svg>
+      <div class="an-scale"><span>{{ t('an_race_axis', a=race['from']|localtime) }}</span><span>{{ rc.hi | delta }}</span></div>
+      {# The lines carry no names - eight grey lines and a gold one. The list says
+         who gained what, and it is the only way to read the chart on a phone,
+         where there is nothing to hover with. #}
+      <ul class="an-legend">
+        {% for l in rc.lines | sort(attribute='last', reverse=true) %}
+        <li{% if l.mine %} class="mine"{% endif %}><span>{{ l.gang }}</span><b class="{{ l.last | dclass }}">{{ l.last | delta }}</b></li>
+        {% endfor %}
+      </ul>
+      {% if race.gap %}
+      <p class="an-gap">{{ t('an_race_gap', n=race.gap.points|n, g=race.gap.gang) }}
+        {% if race.gap.moved < 0 %}{{ t('an_race_gap_move', n=(-race.gap.moved)|n, w=t('an_win_hours', n=hours)) }}
+        {% elif race.gap.moved > 0 %}{{ t('an_race_gap_grew', n=race.gap.moved|n, w=t('an_win_hours', n=hours)) }}
+        {% else %}{{ t('an_race_gap_flat', w=t('an_win_hours', n=hours)) }}{% endif %}</p>
+      {% endif %}
+      <p class="an-src an-readout">{{ t('an_src', w=t('an_win_hours', n=hours), n=rc.lines|length, src=t('an_src_gangs')) }}</p>
+    </div>
+    {% endif %}
+
+    {% if gangs %}
+    {# Own scroll container: five columns plus long gang names outgrow a 360px
+       phone, and without this the whole document slides sideways. #}
+    <div class="an-scroll">
+    <table class="an-tab an-tab-gangs">
+      <thead><tr><th>#</th><th>{{ t('an_gang') }}</th><th class="r">{{ t('an_points') }}</th>
+        <th class="r">{{ t('an_cells') }}</th><th class="r">{{ t('an_change') }}</th></tr></thead>
+      <tbody>
+      {% for g in gangs %}
+      <tr{% if g.is_mine %} class="an-me"{% endif %}>
+        <td>{{ g.rank or '—' }}{% if g.d_rank %}<span class="an-rd {{ g.d_rank | dclass }}">{{ g.d_rank | delta }}</span>{% endif %}</td>
+        <td>{{ g.gang }}{% if g.member_count %}
+          <span class="an-gang" title="{{ t('an_members', n=g.member_count) }}">{{ g.member_count }}</span>{% endif %}</td>
+        {# Points are what the rank is made of, so points carry the movement. #}
+        <td class="r">{{ g.points | n }}{% if g.d_points %}
+          <span class="an-rd {{ g.d_points | dclass }}">{{ g.d_points | delta }}</span>{% endif %}</td>
+        <td class="r">{{ g.cells | n }}</td>
+        <td class="r {{ g.d_cells | dclass }}">{{ g.d_cells | delta }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if gap and race.series | length <= 1 %}<p class="an-gap">{{ t('an_gap', n=gap.points|n, g=gap.gang) }}</p>{% endif %}
+    <p class="an-note">{{ t('an_gang_rank_note') }}</p>
+    {% else %}
+      <p class="an-empty">{{ t('an_nogangs') }}</p>
+    {% endif %}
+  </section>
+
+  {# ---------- pressure: where it comes from, how busy it is, what is thin ---------- #}
+  <section class="an-sec" id="pressure">
     <h2>{{ t('an_front') }}</h2>
     <div class="an-band">
       <div class="an-plate sub-front" data-readout>
@@ -142,9 +212,6 @@
             <circle class="ro-inside an-hit" cx="{{ ro.c }}" cy="{{ ro.c }}" r="28"
                     tabindex="0" data-tip="{{ tip }}"/>
             {% else %}
-            {# No gang label inside the rose: five names around a 320px circle
-               collide with each other and get clipped by the viewBox. The roster
-               beside it carries the names, and pointing at a wedge says the rest. #}
             <path class="ro-wedge an-hit" fill="url(#gInward)" d="{{ w.d }}"
                   tabindex="0" data-tip="{{ tip }}"/>
             {% endif %}
@@ -168,88 +235,15 @@
         {% else %}
         <p class="an-empty">{{ t('an_front_none') }}</p>
         {% endif %}
-        {# Three things the rose cannot be read without: whose watcher drew it,
-           how far the event log actually reaches, and over what window. #}
-        <p class="an-fine">{{ t('an_front_scope_' ~ front.level) }}
-          {% if front.capped %}{{ t('an_front_capped', k=front.keep, a=front.oldest|localtime) }}{% endif %}</p>
         <p class="an-src">{{ t('an_src', w=t('an_win_days', n=front.days), n=front.rows|length, src=t('an_src_events')) }}</p>
       </div>
     </div>
-  </section>
-
-  {# ---------- your own series: private, from your key ---------- #}
-  <section class="an-sec">
-    <h2>{{ t('an_you') }}</h2>
-    {% if series|length > 1 %}
-      {% set ctot = chart(series | map(attribute='total') | list) %}
-      <div class="an-card" data-readout>
-        <div class="an-cardhead">
-          {# This card runs on 30 days regardless of the chip above — say so, or
-             switching the chip looks like it did nothing. #}
-          <span>{{ t('an_aps') }} <em class="an-win">{{ t('an_win_days', n=series_days) }}</em></span>
-          <b>{{ ctot.last | n }}</b>
-          <span class="an-sub {{ (ctot.last - ctot.first) | dclass }}">{{ (ctot.last - ctot.first) | delta }}</span>
-        </div>
-        <svg class="an-chart" viewBox="0 0 {{ ctot.w }} {{ ctot.h }}" preserveAspectRatio="none" role="img"
-             aria-label="{{ t('an_aps') }}: {{ ctot.first | n }} → {{ ctot.last | n }}">
-          <polygon class="an-fill" points="{{ ctot.area }}"/>
-          <polyline class="an-line" points="{{ ctot.line }}"/>
-          {% if ctot.dot %}<circle class="an-dot" cx="{{ ctot.dot[0] }}" cy="{{ ctot.dot[1] }}" r="3"/>{% endif %}
-          <g class="an-hits">
-            {% for hp in ctot.hits %}<rect class="an-hit" x="{{ hp.x }}" y="0" width="{{ hp.w }}" height="{{ ctot.h }}" tabindex="0"
-              data-tip="{{ series[hp.i].ts | localtime }} · {{ hp.v | n }} {{ t('an_aps') }}"/>{% endfor %}
-          </g>
-        </svg>
-        {# A flat series would print the same number twice — say nothing instead. #}
-        {% if ctot.min != ctot.max %}
-        <div class="an-scale"><span>{{ ctot.min | n }}</span><span>{{ ctot.max | n }}</span></div>
-        {% endif %}
-        <p class="an-src an-readout">{{ t('an_tip_hint') }}</p>
-      </div>
-
-      {% set ranks = series | map(attribute='gang_rank') | select('!=', None) | list %}
-      {% if ranks | length > 1 %}
-      {% set crank = chart(series | map(attribute='gang_rank') | list, h=90, invert=true) %}
-      {# A flat rank draws no chart, so there is nothing to point at — and no
-         readout region either, rather than one listening for events that cannot
-         come. #}
-      {% set drawn = crank.min != crank.max %}
-      <div class="an-card{{ ' flat' if not drawn }}"{% if drawn %} data-readout{% endif %}>
-        <div class="an-cardhead">
-          <span>{{ t('an_rank') }}</span>
-          <b>#{{ crank.last }}</b>
-          {# Rank delta is inverted: 5 -> 3 is an improvement of two. #}
-          <span class="an-sub {{ (crank.first - crank.last) | dclass }}">{{ (crank.first - crank.last) | delta }}</span>
-        </div>
-        {# A rank that never moved draws a straight line across 110px to say what
-           one sentence says better. Most gangs are stable; don't spend the first
-           screen on it. #}
-        {% if drawn %}
-        <svg class="an-chart" viewBox="0 0 {{ crank.w }} {{ crank.h }}" preserveAspectRatio="none" role="img"
-             aria-label="{{ t('an_rank') }}: {{ crank.first }} → {{ crank.last }}">
-          <polyline class="an-line gold" points="{{ crank.line }}"/>
-          {% if crank.dot %}<circle class="an-dot gold" cx="{{ crank.dot[0] }}" cy="{{ crank.dot[1] }}" r="3"/>{% endif %}
-          <g class="an-hits">
-            {% for hp in crank.hits %}<rect class="an-hit" x="{{ hp.x }}" y="0" width="{{ hp.w }}" height="{{ crank.h }}" tabindex="0"
-              data-tip="{{ series[hp.i].ts | localtime }} · {{ t('an_rank') }} #{{ hp.v }}"/>{% endfor %}
-          </g>
-        </svg>
-        <div class="an-scale"><span>#{{ crank.min }}</span><span>#{{ crank.max }}</span></div>
-        <p class="an-src an-readout">{{ t('an_tip_hint') }}</p>
-        {% else %}
-        <div class="an-scale"><span>{{ t('an_rank_flat') }}</span></div>
-        {% endif %}
-      </div>
-      {% endif %}
-    {% else %}
-      <p class="an-empty">{{ t('an_nodata') }}</p>
-    {% endif %}
 
     {% if activity %}
       {% set b = bars(activity | map(attribute='n') | list) %}
       <div class="an-card" data-readout>
         <div class="an-cardhead">
-          <span>{{ t('an_events') }} <em class="an-win">{{ t('an_win_days', n=activity_days) }}</em></span>
+          <span>{{ t('an_events') }} <em class="an-win">{{ t('an_win_days', n=activity|length) }}</em></span>
           <b>{{ activity | sum(attribute='n') }}</b>
           {# Month-day only: the year is the same on both ends and the full ISO
              pair wraps the card header onto three lines at 390px. #}
@@ -265,149 +259,11 @@
         <p class="an-src an-readout">{{ t('an_tip_hint') }}</p>
       </div>
     {% endif %}
-  </section>
 
-  {# ---------- the field: public feed data, everyone alike ---------- #}
-  <section class="an-sec">
-    <h2>{{ t('an_field') }}</h2>
-    {% if field.up or field.down %}
-    <div class="an-plate sub-field">
-      <div class="an-cols">
-        <div class="an-col">
-          <h3>{{ t('an_gainers') }}</h3>
-          <ol class="an-list">
-            {# Own gangmates marked: a quarter of these rows can be your own side,
-               and an unmarked list reads as twenty rivals. #}
-            {% for m in field.up %}
-            <li{% if m.mine %} class="an-me"{% endif %}><span class="an-nm">{{ m.username or '#' ~ m.player_id }}</span>
-                <span class="an-gang">{{ m.gang or '—' }}</span>
-                <span class="an-d d-up">{{ m.delta | delta }}</span></li>
-            {% endfor %}
-          </ol>
-        </div>
-        <div class="an-col">
-          <h3>{{ t('an_losers') }}</h3>
-          <ol class="an-list">
-            {% for m in field.down %}
-            <li{% if m.mine %} class="an-me"{% endif %}><span class="an-nm">{{ m.username or '#' ~ m.player_id }}</span>
-                <span class="an-gang">{{ m.gang or '—' }}</span>
-                <span class="an-d d-down">{{ m.delta | delta }}</span></li>
-            {% endfor %}
-          </ol>
-        </div>
-      </div>
-      {% if field.scope != 'all' and field.population < 60 %}
-      <p class="an-fine">{{ t('an_scope_small') }}</p>
-      {% endif %}
-      <p class="an-src">{{ t('an_src', w=t('an_win_hours', n=hours), n=field.population, src=t('an_src_feed')) }}</p>
-    </div>
-    {% else %}
-      <p class="an-empty">{{ t('an_scope_empty') if field.scope != 'all' else t('an_nomove') }}</p>
-    {% endif %}
-  </section>
-
-  {# ---------- the race: who is GAINING, which the table below cannot say ---------- #}
-  {% if race.series | length > 1 %}
-  <section class="an-sec">
-    <h2>{{ t('an_race') }}</h2>
-    {% set rc = races(race.series) %}
-    <div class="an-plate sub-field" data-readout>
-      {# Points gained since the window opened, not absolute points — the table
-         below already ranks those, and plotting them again would restate it. #}
-      <svg class="an-race" viewBox="0 0 {{ rc.w }} {{ rc.h }}" role="img"
-           aria-label="{{ t('an_race_axis', a=race['from']|localtime) }}">
-        <line class="rc-zero" x1="0" y1="{{ rc.zero_y }}" x2="{{ rc.w }}" y2="{{ rc.zero_y }}"/>
-        {% for l in rc.lines %}
-        <polyline class="rc-line{{ ' mine' if l.mine }}" points="{{ l.line }}"/>
-        {% endfor %}
-        <g class="an-hits">
-          {% for l in rc.lines %}{% if l.end %}<circle class="an-hit" cx="{{ l.end[0] }}" cy="{{ l.end[1] }}" r="9" tabindex="0"
-            data-tip="{{ l.gang }} · {{ l.last | delta }} {{ t('an_points') }}"/>{% endif %}{% endfor %}
-        </g>
-      </svg>
-      <div class="an-scale"><span>{{ t('an_race_axis', a=race['from']|localtime) }}</span><span>{{ rc.hi | delta }}</span></div>
-      {% if race.gap %}
-      <p class="an-gap">{{ t('an_race_gap', n=race.gap.points|n, g=race.gap.gang) }}
-        {% if race.gap.moved < 0 %}{{ t('an_race_gap_move', n=(-race.gap.moved)|n, w=t('an_win_hours', n=hours)) }}
-        {% elif race.gap.moved > 0 %}{{ t('an_race_gap_grew', n=race.gap.moved|n, w=t('an_win_hours', n=hours)) }}
-        {% else %}{{ t('an_race_gap_flat', w=t('an_win_hours', n=hours)) }}{% endif %}</p>
-      {% endif %}
-      <p class="an-fine">{{ t('an_race_mine') }}
-        {% if race.skipped %}{{ t('an_race_skip', n=race.skipped) }}{% endif %}</p>
-      <p class="an-src an-readout">{{ t('an_src', w=t('an_win_hours', n=hours), n=rc.lines|length, src=t('an_src_gangs')) }}</p>
-    </div>
-  </section>
-  {% endif %}
-
-  {# ---------- gangs: ranks/points from wdgwars, cells counted from the feed ---------- #}
-  <section class="an-sec">
-    <h2>{{ t('an_gangs') }}</h2>
-    {% if gangs %}
-    {# Own scroll container: five columns plus long gang names outgrow a 360px
-       phone, and without this the whole document slides sideways. #}
-    <div class="an-scroll">
-    <table class="an-tab an-tab-gangs">
-      <thead><tr><th>#</th><th>{{ t('an_gang') }}</th><th class="r">{{ t('an_points') }}</th>
-        <th class="r">{{ t('an_cells') }}</th><th class="r">{{ t('an_change') }}</th></tr></thead>
-      <tbody>
-      {% for g in gangs %}
-      <tr{% if g.is_mine %} class="an-me"{% endif %}>
-        <td>{{ g.rank or '—' }}{% if g.d_rank %}<span class="an-rd {{ g.d_rank | dclass }}">{{ g.d_rank | delta }}</span>{% endif %}</td>
-        <td>{{ g.gang }}{% if g.member_count %}
-          <span class="an-gang" title="{{ t('an_members', n=g.member_count) }}">{{ g.member_count }}</span>{% endif %}</td>
-        {# Points are what the rank is made of, so points carry the movement. #}
-        <td class="r">{{ g.points | n }}{% if g.d_points %}
-          <span class="an-rd {{ g.d_points | dclass }}">{{ g.d_points | delta }}</span>{% endif %}</td>
-        <td class="r">{{ g.cells | n }}</td>
-        <td class="r {{ g.d_cells | dclass }}">{{ g.d_cells | delta }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    {# The gap lives in The Race above, where it comes with the movement that
-       makes it mean something. Printing it twice would be the same fact wearing
-       two hats. #}
-    {% if gap and race.series | length <= 1 %}<p class="an-gap">{{ t('an_gap', n=gap.points|n, g=gap.gang) }}</p>{% endif %}
-    <p class="an-note">{{ t('an_gang_note') }}</p>
-    {% else %}
-      <p class="an-empty">{{ t('an_nogangs') }}</p>
-    {% endif %}
-  </section>
-
-  {# ---------- neighbours: who holds ground inside your turf ---------- #}
-  <section class="an-sec">
-    <h2>{{ t('an_neighbours') }}</h2>
-    {% if neighbours %}
-    <div class="an-scroll">
-    <table class="an-tab">
-      <thead><tr><th>{{ t('an_holder') }}</th><th>{{ t('an_gang') }}</th>
-        {# NOT "Change" — this column is that player's change across the WHOLE map,
-           beside a count that is local to your turf. Two different questions. #}
-        <th class="r">{{ t('an_here') }}</th><th class="r">{{ t('an_change_all') }}</th></tr></thead>
-      <tbody>
-      {% for p in neighbours %}
-      <tr{% if p.is_me %} class="an-me"{% endif %}>
-        <td>{{ p.username or '#' ~ p.player_id }}{% if p.is_me %} <span class="an-gang">{{ t('an_thats_you') }}</span>{% endif %}</td>
-        <td>{{ p.gang or '—' }}</td>
-        <td class="r">{{ p.cells_here }}</td>
-        <td class="r {{ p.delta_all | dclass }}">{{ p.delta_all | delta }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    <p class="an-note">{{ t('an_neigh_note') }}</p>
-    {% else %}
-      <p class="an-empty">{{ t('an_noneigh') }}</p>
-    {% endif %}
-  </section>
-
-  {# ---------- exposed: what you are about to lose ---------- #}
-  {% if exposed.rows %}
-  <section class="an-sec">
-    <h2>{{ t('an_exposed') }}</h2>
+    {# What you are about to lose: your cells with the most hostile neighbours #}
+    {% if exposed.rows %}
     <div class="an-plate sub-loss">
+      <h3>{{ t('an_exposed') }}</h3>
       {% for e in exposed.rows %}
       <div class="an-exp">
         {# Three by three: your cell in the middle, its neighbours around it. The
@@ -426,13 +282,10 @@
         <a class="rb-jump" href="/?tab=map&amp;lat={{ e.lat }}&amp;lng={{ e.lng }}">{{ t('an_exp_show') }}</a>
       </div>
       {% endfor %}
-      {# Both blind spots said out loud: without them the ordering is quietly
-         wrong at exactly the edge where the fighting is. #}
-      <p class="an-fine">{{ t('an_exp_note') }}</p>
       <p class="an-src">{{ t('an_src', w=t('an_win_hours', n=hours), n=exposed.rows|length, src=t('an_src_feed')) }}</p>
     </div>
+    {% endif %}
   </section>
-  {% endif %}
 
   {# ---------- the boards: the game's leaderboards, collected hourly ---------- #}
   {% if wall.rows %}
@@ -443,7 +296,7 @@
     <h2>{{ t('an_boards') }}</h2>
     <div class="an-group an-boards">
       {% for bd in wall.boards %}
-      <a href="/analytics?hours={{ hours }}&amp;scope={{ field.scope }}&amp;board={{ bd }}#boards"
+      <a href="/analytics?hours={{ hours }}&amp;board={{ bd }}#boards"
          class="an-chip{% if wall.board == bd %} on{% endif %}">{{ t('an_board_' ~ bd) }}</a>
       {% endfor %}
     </div>
@@ -461,18 +314,49 @@
       {% if wall.mine and wall.mine.get(wall.board) %}
       <p class="an-standing">{{ t('an_board_you', r=wall.mine[wall.board].rank, v=wall.mine[wall.board].value|n) }}</p>
       {% endif %}
-      {# board figures and feed figures measure different things and run 2-4x
-         apart, so they never share a row. This section is the only place a board
-         value appears at all. #}
-      <p class="an-fine">{{ t('an_board_note') }}</p>
       <p class="an-src">{{ t('an_src', w=t('an_win_hours', n=24), n=wall.rows|length, src=t('an_src_boards')) }}</p>
     </div>
   </section>
   {% endif %}
 
-  <p class="an-privacy">{{ t('an_privacy') }}</p>
+  {# Everything that qualifies a number, in one place and folded away. Spread
+     over the page it was nearly half of all the words on it - a reader looking
+     for "how am I doing" had to wade through what the figures do NOT mean
+     before reaching any. Still all here, one tap away. #}
+  <details class="an-about">
+    <summary>{{ t('an_about') }}</summary>
+    {# The archive's own record of when it looked. One tick per sample, hatched
+       bands where the poller missed. #}
+    {% set sp = spine(stamps) %}
+    {% if sp.n > 1 %}
+    <div class="an-tape">
+      <svg viewBox="0 0 {{ sp.w }} 22" preserveAspectRatio="none" role="img"
+           aria-label="{{ t('an_tape_alt') }}">
+        <defs><pattern id="pGap" width="6" height="6" patternUnits="userSpaceOnUse"
+                       patternTransform="rotate(45)">
+          <line class="tp-hatch" x1="0" y1="0" x2="0" y2="6"/></pattern></defs>
+        {% for g in sp.gaps %}<rect class="tp-gap" x="{{ g.x }}" y="0" width="{{ g.w }}" height="22"/>
+        <rect class="tp-hatchfill" x="{{ g.x }}" y="0" width="{{ g.w }}" height="22" fill="url(#pGap)"/>{% endfor %}
+        {% for r in sp.runs %}<rect class="tp-run" x="{{ (r[0] * sp.step) | round(1) }}" y="8"
+          width="{{ ((r[1] - r[0]) * sp.step) | round(1) or 2 }}" height="6"/>{% endfor %}
+        {% for tk in sp.ticks %}<line class="tp-tick" x1="{{ tk.x }}" y1="0" x2="{{ tk.x }}" y2="22"/>{% endfor %}
+        <line class="tp-now" x1="{{ sp.w - 1 }}" y1="0" x2="{{ sp.w - 1 }}" y2="22"/>
+      </svg>
+      <p class="an-src">{% if sp.gaps %}{{ t('an_tape', a=stamps[0]|localtime, b=stamps[-1]|localtime, n=sp.n, g=sp.gaps|length, h=sp.missing) }}{% else %}{{ t('an_tape_nogap', a=stamps[0]|localtime, b=stamps[-1]|localtime, n=sp.n) }}{% endif %}</p>
+    </div>
+    {% endif %}
+    <ul>
+      <li>{{ t('an_about_holders') }}</li>
+      <li>{{ t('an_gang_note') }}</li>
+      <li>{{ t('an_front_scope_' ~ front.level) }}
+        {% if front.capped %}{{ t('an_front_capped', k=front.keep, a=front.oldest|localtime) }}{% endif %}</li>
+      <li>{{ t('an_exp_note') }}</li>
+      <li>{{ t('an_board_note') }}</li>
+      <li>{{ t('an_privacy') }}</li>
+    </ul>
+  </details>
   {# Second way out: the page is several screens long on a phone and the only
      other exit is back at the very top. #}
-  <a class="an-back an-foot" href="/?tab=info">{{ t('an_back') }}</a>
+  <a class="an-back an-foot" href="/">{{ t('an_back') }}</a>
 </div>
 {% endblock %}

@@ -1370,7 +1370,10 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
   --t-meta: 0.72rem; --t-src: 0.64rem;
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 20px; --s5: 32px; --s6: 46px;
   max-width: 860px; margin: 0 auto; padding: var(--s4) var(--s4) var(--s6);
-  overflow-x: hidden;
+  /* clip, not hidden: `hidden` turns the wrapper into a scroll container and the
+     sticky jump bar would then stick to a box that never scrolls. Browsers
+     without `clip` keep `hidden` and lose only the stickiness. */
+  overflow-x: hidden; overflow-x: clip;
 }
 @media (min-width: 1000px) { .an-wrap { max-width: 1060px; } }
 
@@ -1509,6 +1512,9 @@ body.doc { display: block; height: auto; min-height: 100dvh; overflow: auto; }
    colour is close to gold or enemy red would silently break the whole page's
    hue-equals-side reading. */
 .an-gcolor { width: 3px; align-self: stretch; flex: 0 0 auto; }
+/* The bearing is two letters: next to a long gang name it must not be the part
+   that gives way, or "NE" breaks into one letter per line. */
+.an-front-row .an-gang { flex: 0 0 auto; white-space: nowrap; overflow-wrap: normal; }
 .an-front-n { margin-left: auto; font-family: var(--mono); color: var(--enemy-hot); }
 .an-band { display: grid; grid-template-columns: 1fr; gap: var(--s3); }
 @media (min-width: 760px) { .an-band { grid-template-columns: minmax(0, 330px) minmax(0, 1fr); } }
@@ -1606,13 +1612,17 @@ circle.ro-inside.an-hit.on, circle.ro-inside.an-hit:focus-visible {
 .tp-now { stroke: var(--gold-bright); stroke-width: 1; }
 
 /* --- the race: who is gaining, on one shared scale ------------------------ */
+/* Stretched to the plate like the other charts (preserveAspectRatio="none"):
+   letterboxed, it left a third of a desktop plate and half of a phone plate
+   empty. Strokes are non-scaling, so the lines stay hairlines either way. */
 .an-race { width: 100%; height: 180px; display: block; }
+@media (max-width: 560px) { .an-race { height: 130px; } }
 /* Anonymous hairlines are the shape of the pack; one gold line is you */
 .rc-line { fill: none; stroke: var(--edge); stroke-width: 1;
            vector-effect: non-scaling-stroke; }
 .rc-line.mine { stroke: var(--gold); stroke-width: 1.8; }
 .rc-zero { stroke: var(--free); stroke-width: 1; stroke-opacity: 0.5;
-           stroke-dasharray: 3 3; }
+           stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
 
 /* --- exposed -------------------------------------------------------------- */
 .an-exp { display: flex; align-items: center; gap: var(--s3); min-height: 46px;
@@ -1644,6 +1654,80 @@ body.doc { scroll-behavior: smooth; }
 
 /* The way in, from the Info tab's chart section */
 .an-open { margin-top: 0.5rem; }
+/* The way in: first thing in the Info tab (was a small button three screens down
+   that tab), plus the gang chip in the header and a line under the watcher's
+   front report. A page nobody finds is a page nobody reads. */
+.an-entry {
+  display: flex; align-items: center; gap: 0.7rem; margin: 0 0 0.7rem;
+  padding: 0.6rem 0.75rem; text-decoration: none; color: var(--text);
+  background: linear-gradient(90deg, rgba(232, 182, 76, 0.15), rgba(232, 182, 76, 0.03)), var(--panel2);
+  border: 1px solid var(--gold-soft); border-left: 3px solid var(--gold);
+}
+.an-entry:hover { border-color: var(--gold); }
+.an-entry b {
+  flex: 0 0 auto; font-family: var(--display, var(--sans)); font-weight: 400; font-size: 1.05rem;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-bright);
+}
+.an-entry span { flex: 1 1 auto; min-width: 0; font-size: 0.74rem; line-height: 1.35; color: var(--muted); }
+.an-entry i { flex: 0 0 auto; font-style: normal; font-size: 1.2rem; color: var(--gold-bright); }
+a.chip { text-decoration: none; }
+a.chip:hover { border-color: var(--gold-soft); color: var(--text); }
+.an-more {
+  display: block; margin: -0.3rem 0 0.7rem; font-size: 0.76rem; color: var(--muted);
+  text-decoration: none;
+}
+.an-more:hover { color: var(--gold-bright); }
+/* Trends page: the jump bar stays in reach while the page scrolls */
+.an-jump {
+  position: sticky; top: 0; z-index: 5; display: flex; gap: 0.3rem;
+  overflow-x: auto; scrollbar-width: none;
+  margin: 0 0 1.1rem; padding: 0.45rem 0;
+  background: rgba(7, 9, 13, 0.95); border-bottom: 1px solid var(--line);
+}
+.an-jump::-webkit-scrollbar { display: none; }
+.an-jump a {
+  flex: 0 0 auto; min-height: 36px; display: inline-flex; align-items: center;
+  padding: 0 0.7rem; border: 1px solid var(--line); color: var(--muted);
+  text-decoration: none; font-family: var(--mono); font-size: 0.72rem;
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+.an-jump a:hover { color: var(--gold-bright); border-color: var(--gold-soft); }
+.an-sec { scroll-margin-top: 62px; }
+/* who is which line in the race: names and gains, readable without a pointer */
+.an-legend {
+  list-style: none; margin: 0.7rem 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; font-size: 0.8rem;
+}
+.an-legend li { display: flex; gap: 0.4rem; align-items: baseline; color: var(--muted); }
+.an-legend li.mine span { color: var(--gold-bright); font-weight: 600; }
+.an-legend b { font-family: var(--mono); font-weight: 600; }
+.an-bar.gold { fill: var(--gold); }
+/* the two ranks side by side */
+.an-ranks { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.an-rank > span:first-child {
+  display: block; font-family: var(--mono); font-size: 0.72rem; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--muted);
+}
+.an-rank b { font-family: var(--mono); font-size: 1.5rem; color: var(--text); margin-right: 0.4rem; }
+.an-rank em { display: block; font-style: normal; font-size: 0.7rem; color: var(--muted); font-family: var(--mono); }
+/* the notes, folded */
+.an-about {
+  margin: 0 0 1.4rem; padding-top: 0.6rem; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 0.8rem; line-height: 1.55;
+}
+.an-about summary {
+  cursor: pointer; min-height: 40px; display: flex; align-items: center; gap: 0.5rem;
+  font-family: var(--mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.11em;
+  list-style: none;
+}
+.an-about summary::-webkit-details-marker { display: none; }
+.an-about summary::before { content: "+"; color: var(--gold); font-size: 1rem; width: 0.8rem; }
+.an-about[open] summary::before { content: "\2212"; }
+.an-about summary:hover { color: var(--gold-bright); }
+.an-about ul { margin: 0.5rem 0 0; padding-left: 1.1rem; }
+.an-about li { margin-bottom: 0.55rem; max-width: 72ch; }
+.an-about .an-tape { margin: 0.6rem 0 0.8rem; }
+.an-about .an-tape .an-src { padding: 0; border-top: 0; }
 
 /* Air traffic: one canvas in its own pane (below popups and markers); taps are hit-tested in JS */
 .air-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }

@@ -15,8 +15,10 @@
   {# Header carries identity + status only; language and logout moved into the Info
      tab's Settings section (step 9) so the top bar stays slim. #}
   <div class="chips">
-    <span class="chip"><b>{{ (stats.total if stats else meta.my_aps_total) | n }}</b> APs</span>
-    <span class="chip">{{ meta.gang or '—' }}{% if stats and stats.gang_rank %} <b>#{{ stats.gang_rank }}</b>{% endif %}</span>
+    {# The two figures people ask "and how is that developing?" about are the way
+       into the trends page that answers it. #}
+    <a class="chip" href="/analytics#you" title="{{ t('an_title') }}"><b>{{ (stats.total if stats else meta.my_aps_total) | n }}</b> APs</a>
+    <a class="chip" href="/analytics#gangs" title="{{ t('an_title') }}">{{ meta.gang or '—' }}{% if stats and stats.gang_rank %} <b>#{{ stats.gang_rank }}</b>{% endif %}</a>
     <span class="chip gold">◈ {{ (stats.credits if stats else 0) | n }}</span>
   </div>
 </header>
@@ -230,6 +232,11 @@
   </div>
 
   <div class="tabc" data-tabc="info" hidden>
+    {# Trends first: it is the part of this tab people come back for, and it used
+       to be a small button three screens down. #}
+    <a class="an-entry" href="/analytics">
+      <b>{{ t('an_title') }}</b><span>{{ t('an_entry_hint') }}</span><i aria-hidden="true">→</i>
+    </a>
     <div class="info-grid" id="info-grid">{% include "_info_grid.html" %}</div>
 
     {# Settings section (step 9): language + units, promoted above the charts. #}
@@ -254,9 +261,9 @@
     <h3 class="pl-sub">{{ t('chart_head') }}</h3>
     <div id="charts" class="charts"><p class="hint">{{ t('chart_none') }}</p></div>
     {# The charts above are the last few days; the trends page is the archive
-       behind them. Its own page, because it scrolls — the app body cannot. #}
+       behind them (entry card at the top of this tab, and again here where the
+       charts end). Its own page, because it scrolls — the app body cannot. #}
     <a class="rb-jump an-open" href="/analytics">{{ t('an_open') }} →</a>
-    <p class="hint">{{ t('an_open_hint') }}</p>
 
     {# Key renewal lives here permanently, so the dialog has somewhere to point
        to after it is dismissed — and so a key can be swapped before it dies. #}

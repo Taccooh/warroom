@@ -246,8 +246,10 @@ def analytics_page(request: Request, hours: int = 24, scope: str | None = None,
         return RedirectResponse("/login", status_code=303)
     uid = user["id"]
     hours = 24 if hours not in (24, 48, 168) else hours
-    if scope not in queries.SCOPES:
-        scope = queries.default_scope(conn, uid)
+    # `scope` is still accepted so old links keep working, and ignored: it chose
+    # the players to compare against, and since wdgwars stopped naming who holds
+    # a cell (2026-10-28) there is nobody left to compare. The player sections
+    # went with it - see the template.
     gangs = queries.gang_standings(conn, uid, hours=hours)
     front = queries.bearings(conn, uid)
     front["keep"] = config.EVENT_KEEP
@@ -261,13 +263,11 @@ def analytics_page(request: Request, hours: int = 24, scope: str | None = None,
         "series_days": 30,
         "activity": queries.event_activity(conn, uid),
         "activity_days": 14,
-        # ONE population feeds the standing, the movers and the field shape, so
-        # all three are counted over the same set of players.
-        "field": queries.field(conn, uid, hours, scope),
+        "daily": queries.own_daily(conn, uid),
+        "my_gang": queries.gang_mine(conn, uid),
         "front": front,
         "gangs": gangs,
         "gap": queries.points_gap(gangs),
-        "neighbours": queries.neighbours(conn, uid, hours=hours),
         # The archive's own record of when it looked — so a missed poll draws as
         # a hole rather than a confident straight line across it.
         "stamps": queries.sample_stamps(conn),
