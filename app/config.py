@@ -71,7 +71,11 @@ ARCHIVE_KEEP_DAYS = int(os.environ.get("WARROOM_ARCHIVE_KEEP_DAYS", "0"))
 # Cell ownership log (db.py: cell_log) - which gang held which cell, written as
 # changes whenever the feed moved. It is what a map time-lapse replays, and like
 # the archive it only exists from the day it is switched on. Costs no upstream
-# request and a few MB a month; 0 turns it off.
+# request. Size: the baseline is one row per cell (about 15 MB for 277k cells),
+# after that the first half hour on the full feed wrote changes at a rate of
+# roughly 9,000 a day - on the order of 10-15 MB a month. A good third of those
+# were cells dropping out of the feed and coming back, which a replay will want
+# to smooth rather than show. 0 turns the log off.
 CELL_LOG = os.environ.get("WARROOM_CELL_LOG", "1") != "0"
 # A feed that suddenly lists far fewer cells than the last one is treated as a
 # broken reply, not as a mass loss of territory: logging it would write every
