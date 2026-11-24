@@ -21,9 +21,25 @@ from .wdg import Wdg, WdgError
 
 log = logging.getLogger("warroom.poller")
 
-# Serializes team/me fetches across poll workers: without it, two users of the
-# same gang polled concurrently would each fetch team/me (wasted upstream calls).
-_team_lock = threading.Lock()
+# team/me is fetched once per gang per cycle, so two workers polling members of the
+# same gang must not both fetch it - but that only concerns THAT gang. One lock for
+# all gangs made every worker queue behind whichever fetch was in flight. With 36
+# gangs and team/me answering in 0.9 s instead of 0.1 s (it does both, cycle by
+# cycle), the four workers spent about half their time waiting for this lock in
+# the two slow cycles that were profiled (2026-11-24), and the user phase ran at
+# the speed of one request at a time: 33 s and 49 s instead of 16 s.
+_team_locks: dict = {}
+_team_guard = threading.Lock()
+
+
+def _team_lock(gang_id) -> threading.Lock:
+    """The lock for one gang's team/me fetch. The guard only covers the lookup."""
+    with _team_guard:
+        lock = _team_locks.get(gang_id)
+        if lock is None:
+            lock = _team_locks[gang_id] = threading.Lock()
+        return lock
+
 
 # Only one background road-snap drip at a time — a slow Overpass run (mirrors can
 # take 40 s+ per batch when they time out) must never stack up across cycles.
@@ -424,22 +440,46 @@ def _learn_names(conn, team: dict) -> int:
         rows = [r for r in rows if r[0] is not None and r[1]]
         if not rows:
             return 0
+        # Read first and hand the database only the rows the statement below would
+        # change. Gangs are fetched in parallel now, and a member list in autocommit
+        # is one write transaction PER ROW - several hundred lock acquisitions that
+        # change nothing, queueing against every other worker's writes. The filter
+        # mirrors the WHERE of the upsert; the upsert keeps its own, so a row that
+        # slips through here still writes nothing it should not.
+        known: dict = {}
+        ids = [r[0] for r in rows]
+        for x in range(0, len(ids), 500):
+            chunk = ids[x:x + 500]
+            for k in conn.execute(
+                    "SELECT player_id, username, joined_at FROM player_names "
+                    f"WHERE player_id IN ({','.join('?' * len(chunk))})", chunk):
+                known[k[0]] = (k[1], k[2])
+
+        def _differs(r) -> bool:
+            k = known.get(r[0])
+            return (k is None or k[0] != r[1] or k[1] is None
+                    or (r[2] is not None and r[2] < k[1]))
+
+        todo = [r for r in rows if _differs(r)]
+        if not todo:
+            return len(rows)
         # Keep the EARLIEST join ever seen: someone switching gangs later would
         # otherwise push their date forward and ruin them as a dating anchor.
-        conn.executemany(
-            "INSERT INTO player_names (player_id, username, seen_at, joined_at) "
-            "VALUES (?,?,datetime('now'),?) "
-            "ON CONFLICT(player_id) DO UPDATE SET "
-            "  username  = excluded.username, "
-            "  seen_at   = excluded.seen_at, "
-            "  joined_at = CASE WHEN joined_at IS NULL "
-            "                     OR (excluded.joined_at IS NOT NULL "
-            "                         AND excluded.joined_at < joined_at) "
-            "                   THEN excluded.joined_at ELSE joined_at END "
-            "WHERE username != excluded.username "
-            "   OR joined_at IS NULL "
-            "   OR (excluded.joined_at IS NOT NULL AND excluded.joined_at < joined_at)",
-            rows)
+        with _write_txn(conn):
+            conn.executemany(
+                "INSERT INTO player_names (player_id, username, seen_at, joined_at) "
+                "VALUES (?,?,datetime('now'),?) "
+                "ON CONFLICT(player_id) DO UPDATE SET "
+                "  username  = excluded.username, "
+                "  seen_at   = excluded.seen_at, "
+                "  joined_at = CASE WHEN joined_at IS NULL "
+                "                     OR (excluded.joined_at IS NOT NULL "
+                "                         AND excluded.joined_at < joined_at) "
+                "                   THEN excluded.joined_at ELSE joined_at END "
+                "WHERE username != excluded.username "
+                "   OR joined_at IS NULL "
+                "   OR (excluded.joined_at IS NOT NULL AND excluded.joined_at < joined_at)",
+                todo)
         return len(rows)
     except Exception:
         log.exception("Mitgliedsnamen nicht lesbar")
@@ -453,9 +493,11 @@ def snapshot_stats(conn, client: Wdg, user_id: int, me: dict,
     cycle duration flat when many users are registered."""
     my_gang = me.get("gang")
     my_gid = _num(me.get("gang_id"))
-    # Held across the fetch on purpose: a cache miss briefly blocks the other
-    # workers' stats phase, but each gang is fetched exactly once per cycle.
-    with _team_lock:
+    # Held across the fetch on purpose, but per gang: a second member of the same
+    # gang waits for the answer instead of fetching it again, and members of other
+    # gangs are not held up at all. Each gang is fetched exactly once per cycle.
+    fetched = False
+    with _team_lock(my_gid):
         if my_gid in team_cache:
             team = team_cache[my_gid]
         else:
@@ -464,11 +506,14 @@ def snapshot_stats(conn, client: Wdg, user_id: int, me: dict,
             except Exception:
                 team = {}
             team_cache[my_gid] = team
-            # Only on a real fetch, so this runs once per gang per cycle: the member
-            # list names every player in it. The territory feed hands out bare ids
-            # and the leaderboards only ever name their top 50, so this is by far
-            # the biggest source of names we have — and it was being thrown away.
-            _learn_names(conn, team)
+            fetched = True
+    if fetched:
+        # Only on a real fetch, so this runs once per gang per cycle: the member
+        # list names every player in it. The territory feed hands out bare ids
+        # and the leaderboards only ever name their top 50, so this is by far
+        # the biggest source of names we have — and it was being thrown away.
+        # Outside the gang lock: nobody waiting for the answer needs the names.
+        _learn_names(conn, team)
     rank = points = None
     try:
         for idx, g in enumerate(gctx.get("leaderboard", {}).get("gangs", []), 1):
@@ -486,25 +531,33 @@ def snapshot_stats(conn, client: Wdg, user_id: int, me: dict,
         pass
     tot = team.get("totals", {}) if isinstance(team, dict) else {}
     cr = me.get("credits", {}) or {}
-    conn.execute(
-        """INSERT OR REPLACE INTO stats (user_id, ts, wifi, ble, total, recent_today,
-               recent_7d, credits, gang_rank, gang_points, team_total, team_captured,
-               team_lost, team_reinforced)
-           VALUES (?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (user_id, _num(me.get("wifi")), _num(me.get("ble")), _num(me.get("total")),
-         _num(me.get("recent_today")), _num(me.get("recent_7d")), _num(cr.get("balance")),
-         rank, points, _num(tot.get("total")), _num(tot.get("captured")),
-         _num(tot.get("lost")), _num(tot.get("reinforced"))),
-    )
-    conn.execute(
-        "UPDATE users SET gang = ?, gang_id = ?, last_poll = datetime('now') WHERE id = ?",
-        (my_gang, _num(me.get("gang_id")), user_id),
-    )
+    # Both rows in one transaction: one sync to disk per user instead of two, and
+    # the sample and its last_poll stamp can no longer come apart.
+    with _write_txn(conn):
+        conn.execute(
+            """INSERT OR REPLACE INTO stats (user_id, ts, wifi, ble, total, recent_today,
+                   recent_7d, credits, gang_rank, gang_points, team_total, team_captured,
+                   team_lost, team_reinforced)
+               VALUES (?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (user_id, _num(me.get("wifi")), _num(me.get("ble")), _num(me.get("total")),
+             _num(me.get("recent_today")), _num(me.get("recent_7d")), _num(cr.get("balance")),
+             rank, points, _num(tot.get("total")), _num(tot.get("captured")),
+             _num(tot.get("lost")), _num(tot.get("reinforced"))),
+        )
+        conn.execute(
+            "UPDATE users SET gang = ?, gang_id = ?, last_poll = datetime('now') WHERE id = ?",
+            (my_gang, _num(me.get("gang_id")), user_id),
+        )
 
 
 def run_user(conn, user_row, lookup, glat, glng, gctx, team_cache,
              feed_changed: bool = True) -> dict:
-    client = Wdg(auth.user_key(user_row))
+    # No minimum gap between this client's requests. A key sees two or three
+    # requests per cycle here, nowhere near the 30/min window the gap was meant
+    # to respect - but with answers arriving in ~0.15 s it made every user wait
+    # out 0.4 s twice, a quarter of all worker time. What limits the load on
+    # wdgwars is the size of the worker pool, as before.
+    client = Wdg(auth.user_key(user_row), min_gap=0)
     uid = user_row["id"]
     me = client.me()
     my_gid = _num(me.get("gang_id"))
@@ -564,7 +617,9 @@ def _fetch_global(conn, users, extras: bool = True) -> tuple[list, float, float,
     leaves them out, the regular cycle has them anyway."""
     for u in users:
         try:
-            client = Wdg(auth.user_key(u))
+            # min_gap=0 as in run_user: five requests in a row on this key, then
+            # its owner's own three - still far below the 30/min window.
+            client = Wdg(auth.user_key(u), min_gap=0)
             mt = client.member_territories()
             glat = float(mt.get("grid_lat") or 0.02)
             glng = float(mt.get("grid_lng") or 0.02)
@@ -1043,6 +1098,7 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
         return {"users": 0}
     t0 = time.monotonic()
     cells, glat, glng, gctx = _fetch_global(conn, users, extras=only_user_id is None)
+    t_fetch = time.monotonic()
     if not cells:
         return {"users": len(users), "error": "no global data"}
     # Fingerprint of everything diff_territory can react to, folded into the pass
@@ -1110,6 +1166,7 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
     # Parallel user phase. POLL_WORKERS caps concurrent requests towards wdgwars —
     # the pool replaces the old 0.15 s trickle as the politeness mechanism.
     workers = max(1, min(config.POLL_WORKERS, len(users)))
+    t_users = time.monotonic()
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_one, u): u for u in users}
         for fut, u in futures.items():
@@ -1131,6 +1188,7 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
                     _set_key_bad(conn, u["id"], 1)
             except Exception:
                 log.exception("poll für %s fehlgeschlagen", u["wdg_username"])
+    t_done = time.monotonic()
     db.kv_set(conn, "last_poll", time.time())
     db.kv_set(conn, "feed_sig", feed_sig)
     # Kick the background road classification AFTER the cycle's data is in —
@@ -1138,6 +1196,11 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
     drip_snap_async()
     # feed/skipped are in the log on purpose: they make it visible how often the
     # upstream feed actually moves, so a silent change in that rhythm is noticed.
+    # fetch_s/users_s split the total: the global requests (one key, in sequence)
+    # and the per-user phase (the worker pool). What is left of secs is our own
+    # work in between - lookup, archive, cell log. A cycle that turns slow then
+    # says which part did, instead of leaving it to a profiler.
     return {"users": len(users), "global_cells": len(cells), "events": total_events,
             "feed": "neu" if feed_changed else "unveraendert", "diff_skipped": total_skipped,
-            "workers": workers, "secs": round(time.monotonic() - t0, 1)}
+            "workers": workers, "fetch_s": round(t_fetch - t0, 1),
+            "users_s": round(t_done - t_users, 1), "secs": round(time.monotonic() - t0, 1)}
