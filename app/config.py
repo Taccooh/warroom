@@ -24,6 +24,16 @@ POLL_SECONDS = 300
 # Concurrent per-user poll workers. Deliberately small: this caps how many
 # simultaneous requests we send to the wdgwars API (be a good citizen).
 POLL_WORKERS = int(os.environ.get("WARROOM_POLL_WORKERS", "4"))
+# Minutes a gang's team/me answer (team totals, member list) is reused before it
+# is fetched again. It is the one slow call of a cycle, and slow on the far side:
+# measured 2026-11-24, wdgwars answers it in 0.1 s when it still has the result at
+# hand and in one to four seconds when it does not, cycle by cycle - and eight
+# requests in flight made each of them slower instead of the round faster. Fetched
+# every cycle, a slow round of 36 gangs alone held the cycle up by 10 to 25 s.
+# The gangs are spread over the interval, so every cycle refreshes a share of
+# them. What this delays is the team captured/lost figures and the names of newly
+# joined members - nothing the watcher reads. 0 = fetch every cycle, as before.
+TEAM_MINUTES = float(os.environ.get("WARROOM_TEAM_MINUTES", "30"))
 REINFORCE_BUFFER = 3
 # How many enemy cells the planner may hand the client. It was 2000, and the cut
 # ran by DIFFICULTY — so "nearest first" only ever sorted the 2000 easiest, and a

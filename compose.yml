@@ -18,6 +18,9 @@ services:
       # because the cut runs by difficulty and drops the HARDEST cells first.
       # - WARROOM_PLANNER_LIMIT=25000
       # - WARROOM_MAX_USERS=30
+      # Minutes a gang's team totals and member list are reused before they are
+      # fetched again (the slowest call of a poll cycle). 0 = every cycle.
+      # - WARROOM_TEAM_MINUTES=30
       # - WARROOM_TZ=Europe/Berlin
       # Cell ownership log (which gang held which cell, for the map time-lapse).
       # On by default and not backfillable; 0 switches it off.

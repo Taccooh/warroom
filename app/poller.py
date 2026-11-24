@@ -41,6 +41,41 @@ def _team_lock(gang_id) -> threading.Lock:
         return lock
 
 
+# The last team/me answer per gang and when it is due again (config.TEAM_MINUTES).
+# In memory only: after a restart every gang is fetched once, as it always was.
+_team_keep: dict = {}           # gang_id -> (due at, on _clock; team)
+_clock = time.monotonic         # a seam for the tests
+
+
+def _team_fetch(client: Wdg, gang_id) -> tuple[dict, bool]:
+    """A gang's team/me: the kept answer while it is fresh, a new one once it is
+    due. Returns (team, fetched). Call with that gang's lock held.
+
+    A failed fetch is not an answer. The cycle gets {} for this gang, exactly as
+    before; the kept entry is left as it is, so the next cycle asks again."""
+    now = _clock()
+    kept = _team_keep.get(gang_id)
+    if kept is not None and now < kept[0]:
+        return kept[1], False
+    try:
+        team = client.team_me()
+    except Exception:
+        return {}, False
+    ttl = config.TEAM_MINUTES * 60
+    if ttl > config.POLL_SECONDS:
+        if kept is None:
+            # First sight of this gang - after a start that is all of them, in one
+            # cycle. Give each a different first interval, by gang id, so they do
+            # not all come due together for ever after: one cycle for some, the
+            # full interval for others.
+            slots = max(1, round(ttl / config.POLL_SECONDS))
+            ttl = ttl * (1 + (_num(gang_id) or 0) % slots) / slots
+        # Half a cycle early: within a cycle the fetch lands a few seconds sooner
+        # or later each time, and "due in six cycles" must not turn into seven.
+        _team_keep[gang_id] = (now + ttl - config.POLL_SECONDS / 2, team)
+    return team, True
+
+
 # Only one background road-snap drip at a time — a slow Overpass run (mirrors can
 # take 40 s+ per batch when they time out) must never stack up across cycles.
 _drip_lock = threading.Lock()
@@ -488,26 +523,24 @@ def _learn_names(conn, team: dict) -> int:
 
 def snapshot_stats(conn, client: Wdg, user_id: int, me: dict,
                    gctx: dict, team_cache: dict) -> None:
-    """Leaderboard/territories arrive ONCE per cycle (gctx), team/me ONCE per
-    gang (team_cache) — only /me necessarily stays per user. Keeps upstream load and
-    cycle duration flat when many users are registered."""
+    """Leaderboard/territories arrive ONCE per cycle (gctx), team/me at most once
+    per gang (team_cache) and only when its kept answer is due (_team_fetch) — only
+    /me necessarily stays per user. Keeps upstream load and cycle duration flat
+    when many users are registered."""
     my_gang = me.get("gang")
     my_gid = _num(me.get("gang_id"))
     # Held across the fetch on purpose, but per gang: a second member of the same
     # gang waits for the answer instead of fetching it again, and members of other
-    # gangs are not held up at all. Each gang is fetched exactly once per cycle.
+    # gangs are not held up at all. A gang is fetched at most once per cycle.
     fetched = False
     with _team_lock(my_gid):
         if my_gid in team_cache:
             team = team_cache[my_gid]
         else:
-            try:
-                team = client.team_me()
-            except Exception:
-                team = {}
+            team, fetched = _team_fetch(client, my_gid)
             team_cache[my_gid] = team
-            fetched = True
     if fetched:
+        gctx.setdefault("team_fetched", []).append(my_gid)   # for the poll log line
         # Only on a real fetch, so this runs once per gang per cycle: the member
         # list names every player in it. The territory feed hands out bare ids
         # and the leaderboards only ever name their top 50, so this is by far
@@ -1199,8 +1232,10 @@ def poll_all(conn, only_user_id: int | None = None) -> dict:
     # fetch_s/users_s split the total: the global requests (one key, in sequence)
     # and the per-user phase (the worker pool). What is left of secs is our own
     # work in between - lookup, archive, cell log. A cycle that turns slow then
-    # says which part did, instead of leaving it to a profiler.
+    # says which part did, instead of leaving it to a profiler. team = how many
+    # gangs' team/me were fetched this cycle (config.TEAM_MINUTES spreads them).
     return {"users": len(users), "global_cells": len(cells), "events": total_events,
             "feed": "neu" if feed_changed else "unveraendert", "diff_skipped": total_skipped,
-            "workers": workers, "fetch_s": round(t_fetch - t0, 1),
+            "workers": workers, "team": len(gctx.get("team_fetched", [])),
+            "fetch_s": round(t_fetch - t0, 1),
             "users_s": round(t_done - t_users, 1), "secs": round(time.monotonic() - t0, 1)}

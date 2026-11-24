@@ -210,6 +210,7 @@ toolchain.
 | `WARROOM_MAX_USERS`   | `30`    | Sign-up cap; registration closes above this count   |
 | `WARROOM_TZ`          | `Europe/Berlin` | IANA timezone for displayed timestamps (DB stores UTC) |
 | `WARROOM_POLL_WORKERS`| `4`     | Concurrent per-user poll workers (caps simultaneous wdgwars API requests) |
+| `WARROOM_TEAM_MINUTES`| `30`    | Minutes a gang's `team/me` answer (team captured/lost, member names) is reused before it is fetched again; the gangs are spread over the interval. `0` fetches every cycle |
 | `WARROOM_VAPID_SUB`   | *(contact)* | `mailto:` contact sent to push services (set your own when self-hosting) |
 | `WARROOM_PLANNER_LIMIT` | `25000` | Max enemy cells handed to the planner (raise if the log says the cap fired) |
 | `WARROOM_ROAD_DRIP`   | `600`   | Cells per cycle checked against Overpass for a drivable road point |
